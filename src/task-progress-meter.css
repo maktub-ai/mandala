@@ -1,0 +1,6 @@
+.task-progress-meter { display:inline-flex; align-items:center; gap:3px; flex:none; font-size:var(--type-meta); color:var(--muted); }
+.task-progress-meter > i { display:block; width:12px; height:4px; border-radius:2px; background:var(--border); }
+.task-progress-meter > i[data-state=running] { background:var(--status-running); }
+.task-progress-meter > i[data-state=completed] { background:var(--success); }
+.task-progress-meter > i:is([data-state=waiting],[data-state=review]) { background:var(--warning); }
+.task-progress-meter > span { margin-left:4px; font-variant-numeric:tabular-nums; white-space:nowrap; }

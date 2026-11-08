@@ -1,0 +1,35 @@
+.composer { position: relative; }
+.composer.is-conversation-drop-target { outline:2px solid var(--accent); outline-offset:var(--space-1); }
+.composer-references { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) var(--space-3) 0; }
+.product-frame .composer-references:has(.composer-conversation-reference) { max-height:min(calc(var(--control-height) * 5),30dvh); }
+.message-references { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.composer-reference-tag { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: var(--control-radius); padding: var(--space-1) var(--space-2); font-size: var(--type-meta); }
+.composer-reference-tag > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-reference-source { color: var(--muted); }
+.composer-conversation-reference { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-2); min-width:0; max-width:100%; padding:var(--space-2); border:1px solid var(--border); border-radius:var(--control-radius); font-size:var(--type-meta); }
+.composer-conversation-body { display:grid; flex:1 1 24ch; min-width:0; gap:var(--space-1); }
+.composer-conversation-body strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:32ch; }
+.composer-conversation-body small { color:var(--muted); font-size:inherit; }
+.composer-conversation-owner { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.composer-conversation-reference > .ui-select { width:auto; max-width:100%; }
+.product-frame .composer-reference-tag button { flex-shrink: 0; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; }
+.composer-reference-menu { position: absolute; bottom: calc(100% + var(--space-2)); left: 0; right: 0; z-index: 10; max-height: min(320px, 45vh); overflow-y: auto; padding: var(--space-1); border: 1px solid var(--border); border-radius: var(--dialog-radius); background: var(--panel); box-shadow: var(--overlay-shadow); }
+.product-frame .composer-reference-menu > button { width: 100%; min-height: var(--control-height); display: flex; flex-direction: row; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); text-align: left; border: 0; background: transparent; }
+.composer-reference-menu > button[aria-selected='true'] { background: var(--raised); }
+.composer-reference-menu > p { margin: 0; padding: var(--space-3); font-size: var(--control-font-size); color: var(--muted); }
+.composer-reference-name { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); font-size: var(--control-font-size); }
+.composer-reference-name > span, .composer-reference-detail { color: var(--muted); font-size: var(--type-meta); }
+.composer-reference-detail { overflow-wrap: anywhere; font-family: var(--font-mono); }
+@media (max-width: 600px) { .product-frame .composer-reference-tag button { width: var(--control-height); height: var(--control-height); } .composer-reference-tag { flex-wrap: wrap; } }
+
+.composer-reference-body { display:grid; flex:1; min-width:0; gap:var(--space-1); }
+.composer-reference-kind { display:flex; flex:none; color:var(--muted); }
+.composer-reference-name { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.composer-reference-detail { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.reference-status { width:6px; height:6px; border-radius:50%; flex:none; background:var(--muted); }
+.reference-status:is(.available,.effective,.completed) { background:var(--status-active); box-shadow:0 0 0 3px color-mix(in srgb,var(--status-active) 12%,transparent); }
+.reference-status:is(.unverified,.waiting,.review,.running) { background:var(--status-pending); }
+.reference-status.unavailable { background:var(--danger); }
+
+.composer-message-excerpt { white-space:pre-wrap; overflow-wrap:anywhere; max-width:40ch; max-height:120px; overflow:auto; }
+.selection-quote { display:flex; gap:4px; max-width:calc(100vw - 16px); }

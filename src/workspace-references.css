@@ -1,0 +1,4 @@
+.workspace-reference-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin:0 0 12px; color:var(--muted); font-size:var(--type-meta); }
+.workspace-reference-toolbar button,.file-reference-button { display:inline-flex; align-items:center; gap:4px; padding:4px 8px; background:transparent; border:1px solid var(--border); color:var(--muted); font-size:var(--type-meta); white-space:nowrap; }
+.workspace-code-preview .code-preview { margin:0; }
+.file-reference-button { margin-top:10px; }

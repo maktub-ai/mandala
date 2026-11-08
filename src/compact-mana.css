@@ -1,0 +1,29 @@
+.mana-page .mana-workspace { max-width:none; margin:0; padding:0; }
+.mana-location { display:flex; align-items:center; gap:12px; min-height:44px; padding:0 var(--page-gutter); border-bottom:1px solid var(--border-soft); color:var(--muted); font-size:var(--type-meta); }
+.mana-frame > :not(.workspace-page-header) { margin-inline:var(--page-gutter); }
+.mana-frame .memory-workspace { padding-block:16px 24px; }
+.mana-page .memory-overview { gap:8px; }
+.mana-page .memory-card { border:0; border-bottom:1px solid var(--border-soft); border-radius:0; padding:14px 0; background:transparent; }
+.mana-page .memory-card .memory-status { background:var(--raised); }
+.mana-skill-navigation { display:flex; gap:8px; padding-block:12px; }
+.mana-boundary { margin-bottom:12px; }
+.mana-boundary p { margin:0; }
+.mana-page .mana-filters { display:grid; grid-template-columns:minmax(180px,1fr) minmax(160px,220px) 160px; gap:8px; margin-block:12px 16px; }
+.mana-page .mana-filters label { gap:6px; }
+.mana-list-detail { border-top:1px solid var(--border-soft); }
+.mana-list-detail[data-detail-open=true] { grid-template-columns:minmax(260px,34%) minmax(0,1fr); }
+.mana-entry-row { display:flex; align-items:center; gap:12px; width:100%; min-height:64px; text-align:left; padding:12px 8px; border:0; border-radius:0; border-bottom:1px solid var(--border-soft); background:transparent; }
+.mana-entry-row > span:first-of-type { display:grid; gap:6px; min-width:0; flex:1; }
+.mana-entry-row strong { font-size:var(--type-ui); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mana-entry-row small { font-size:var(--type-meta); color:var(--muted); }
+.mana-entry-row[aria-current=true],.mana-entry-row:hover { background:var(--raised); }
+.mana-detail { padding:20px; min-width:0; }
+.mana-page .mana-detail .mana-entry,.mana-page .mana-editor { border:0; background:transparent; padding:0; margin:0; }
+.mana-page .mana-entry-heading h2,.mana-page .mana-editor h2 { font-size:16px; }
+.mana-detail-back { margin-bottom:16px; }
+.mana-page .mana-entry-meta { margin-block:12px; line-height:1.5; }
+@media(max-width:768px) { .mana-list-detail[data-detail-open=true] { grid-template-columns:minmax(0,1fr); }.mana-list-detail[data-detail-open=true] > .workspace-list { display:none; }.mana-detail { padding:16px 0; }.mana-page .mana-filters { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }.mana-filters > label:first-child { grid-column:1/-1; }.mana-page .memory-overview { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+.product-frame .mana-page .mana-workspace { padding:0; max-width:none; margin:0; }
+.mana-list-detail > .workspace-detail { padding:0; }
+@media(max-width:768px) { .mana-page[data-detail-open=true] .mana-filters,.mana-page[data-detail-open=true] .mana-skill-navigation,.mana-page[data-detail-open=true] .mana-boundary,.mana-page[data-detail-open=true] .workspace-page-actions { display:none; } }

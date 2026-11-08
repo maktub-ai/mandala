@@ -1,0 +1,81 @@
+.mana-workspace { min-width: 0; width: 100%; max-width: 1120px; margin: 0 auto; padding: 28px; overflow: auto; }
+.mana-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.mana-header h1 { margin: 6px 0; font-size: 24px; font-weight: var(--weight-heading); }
+.mana-header p { color: var(--muted); font-size: var(--type-meta); line-height: 1.6; }
+.mana-header button { flex-shrink: 0; }
+.mana-boundary { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: var(--type-meta); line-height: 1.6; }
+.mana-filters { display: grid; grid-template-columns: 2fr 2fr 1fr 1fr; gap: 12px; margin: 14px 0 20px; }
+.mana-workspace label { display: flex; flex-direction: column; gap: 8px; min-width: 0; font-size: var(--type-meta); color: var(--muted); }
+.mana-workspace input, .mana-workspace textarea { min-width: 0; width: 100%; margin: 0; font-size: var(--type-ui); }
+.mana-workspace textarea { resize: vertical; line-height: 1.7; }
+.mana-editor { background: var(--surface); border: 1px solid var(--border); border-radius: var(--panel-radius); padding:var(--card-padding); margin-bottom: 20px; }
+.mana-editor h2 { margin: 0 0 16px; font-size: 16px; font-weight: var(--weight-heading); }
+.mana-editor fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 16px; min-width: 0; }
+.mana-editor-scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.mana-editor-actions, .mana-entry-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.mana-entry { border: 1px solid var(--border); border-radius: var(--panel-radius); padding:var(--card-padding); margin-bottom: 12px; min-width: 0; }
+.mana-entry-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.mana-entry-heading h2 { margin: 0; font-size: 16px; font-weight: var(--weight-heading); overflow-wrap: anywhere; }
+.mana-status { font-size: var(--type-meta); flex-shrink: 0; color: var(--muted); }
+.mana-status-candidate { color: var(--accent); }
+.mana-entry-meta { display: flex; gap: 8px 16px; flex-wrap: wrap; margin: 10px 0; font-size: var(--type-meta); color: var(--muted); overflow-wrap: anywhere; }
+.mana-content { margin: 12px 0; font-size: var(--type-ui); }
+
+.mana-content .markdown-text { margin: 14px 0; overflow-wrap: anywhere; min-width: 0; }
+.mana-content .markdown-text img { max-width: 100%; }
+.mana-entry-actions button { font-size: var(--type-meta); min-height: 32px; }
+.mana-delete-confirm { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--border); color: var(--danger); font-size: var(--type-meta); }
+.mana-empty { padding: 24px 16px; border:1px dashed var(--border); border-radius: var(--panel-radius); color: var(--muted); font-size: var(--type-ui); }
+.mana-organization > p { color: var(--muted); font-size: var(--type-meta); line-height: 1.6; }
+.mana-org-root { display: flex; flex-direction: column; gap: 8px; width: fit-content; border: 1px solid var(--border-strong); border-radius: var(--control-radius); padding: 12px 24px; margin: 24px auto 0; background: var(--accent-bg); text-align: center; }
+.mana-org-root span { font-size: var(--type-meta); color: var(--muted); }
+.mana-org-projects { position: relative; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; padding-top: 28px; }
+.mana-org-projects::before { content: ""; position: absolute; top: 0; left: 50%; height: 28px; border-left: 1px solid var(--border); }
+.mana-project-node { position: relative; min-width: 0; padding-top: 18px; }
+.mana-project-node::before { content: ""; position: absolute; top: 0; left: 50%; height: 18px; border-left: 1px solid var(--border); }
+.mana-project-node::after { content: ""; position: absolute; top: 0; left: -10px; right: -10px; border-top: 1px solid var(--border); }
+.mana-org-node { position: relative; z-index: 1; padding: 12px; border: 1px solid var(--border); border-radius: var(--panel-radius); background: var(--surface); min-width: 0; overflow-wrap: anywhere; }
+.mana-org-node h2, .mana-org-node h3 { font-size: var(--type-body); font-weight: var(--weight-heading); margin: 6px 0; }
+.mana-node-identity { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mana-node-identity > div { min-width: 0; }
+.mana-org-node small, .mana-org-node span { font-size: var(--type-meta); color: var(--muted); line-height: 1.6; }
+.mana-agent-branches { list-style: none; padding: 12px 0 0 20px; margin: 0; }
+.mana-agent-branches li { position: relative; padding: 0 0 12px 12px; border-left: 1px solid var(--border); }
+.mana-agent-branches li::before { content: ""; position: absolute; left: 0; top: 25px; width: 12px; border-top: 1px solid var(--border); }
+.mana-unlinked { border-top: 1px solid var(--border); margin-top: 24px; padding-top: 12px; }
+.mana-unlinked h2 { font-size: var(--type-body); }
+.mana-unlinked .mana-org-node { margin: 10px 0; }
+@media (max-width: 720px) {
+  .mana-workspace { padding: 16px 12px; }
+  .mana-filters { grid-template-columns: 1fr 1fr; }
+  .mana-entry, .mana-editor { padding: 12px; }
+  .mana-header h1 { font-size: 20px; }
+  .mana-org-projects { grid-template-columns: 1fr; }
+  .mana-project-node::after { left: 50%; right: auto; }
+}
+
+.mana-workspace button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.mana-workspace button.ui-select-trigger { justify-content: flex-start; }
+.mana-workspace svg { flex-shrink: 0; }
+.mana-help, .mana-editor-source { color: var(--muted); font-size: var(--type-meta); line-height: 1.6; }
+.mana-help { margin: 14px 0; }
+.mana-help p { margin: 6px 0; max-width: 760px; }
+.mana-help summary, .mana-editor-source summary, .mana-content summary { display: flex; align-items: center; gap: 8px; width: fit-content; min-height: 30px; color: var(--muted); cursor: pointer; list-style: none; }
+.mana-help summary::-webkit-details-marker, .mana-editor-source summary::-webkit-details-marker, .mana-content summary::-webkit-details-marker { display: none; }
+.mana-help summary:hover, .mana-editor-source summary:hover, .mana-content summary:hover { color: var(--text); }
+.mana-help[open] > summary > svg:last-child, .mana-editor-source[open] > summary > svg:last-child, .mana-content[open] > summary > svg:last-child { transform: rotate(180deg); }
+.mana-editor-source > label { margin-top: 10px; }
+.mana-search-input { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--control-radius); background: var(--surface); padding: 0 8px; min-height: 38px; }
+.mana-search-input:focus-within { border-color: var(--accent); }
+.mana-search-input input { border: 0; background: transparent; padding: 8px 0; outline: none; }
+.mana-status { padding: 3px 8px; border: 1px solid var(--border); border-radius: var(--badge-radius); }
+.mana-status-candidate { background: var(--accent-bg); border-color: transparent; }
+.mana-entry-actions { align-items: center; border-top: 1px solid var(--border); padding-top: 12px; }
+.mana-entry-actions .mana-delete-action { margin-left: auto; color: var(--muted); }
+.mana-entry-actions .mana-delete-action:hover { color: var(--danger); border-color: var(--danger); }
+@media (max-width: 520px) {
+  .mana-search { grid-column: 1 / -1; }
+  .mana-filters { gap: 8px; }
+  .mana-entry-meta time { flex-basis: 100%; }
+  .mana-entry-actions .mana-delete-action { margin-left: 0; }
+}

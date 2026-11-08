@@ -1,0 +1,59 @@
+.automation-workspace { display: grid; gap: 16px; min-width: 0; }
+.automation-heading, .automation-plan, .automation-run, .project-automations > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.automation-heading > label { display: grid; gap: 8px; min-width: 210px; font-size: var(--type-meta); color: var(--muted); }
+.automation-workspace button, .project-automations a { display: inline-flex; align-items: center; gap: 8px; }
+.automation-note, .automation-help, .automation-plan p, .automation-next { font-size: var(--type-meta); color: var(--muted); margin: 0; line-height: 1.7; }
+.automation-help summary { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.automation-help p { margin-top: 8px; }
+.automation-editor { border: 1px solid var(--border); border-radius: var(--panel-radius); padding: 16px; background: var(--panel); }
+.automation-editor h2, .automation-history h2 { font-size: var(--type-body); margin: 0 0 12px; }
+.automation-editor fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 12px; }
+.automation-editor label { display: grid; gap: 8px; font-size: var(--type-meta); color: var(--muted); min-width: 0; }
+.automation-editor input:not([type=checkbox]), .automation-editor textarea { width: 100%; box-sizing: border-box; min-width: 0; }
+.automation-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px 16px; }
+.automation-editor .automation-enabled { display: flex; flex-direction: row; align-items: center; gap: 8px; }
+.automation-editor input[type=checkbox] { width: 16px; height: 16px; flex: none; }
+.automation-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.automation-plans { display: grid; gap: 0; }
+.automation-plan, .automation-run { padding: 12px 0; border-bottom: 1px solid var(--border-soft); }
+.automation-plan > div:first-child, .automation-run > div:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.automation-plan h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 5px; font-size: var(--type-ui); flex-wrap: wrap; }
+.automation-state { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: var(--type-meta); font-weight: 400; white-space: nowrap; }
+.automation-state.approval { color: var(--status-pending); }
+.automation-state.failed { color: var(--danger); }
+.automation-plan-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; position: relative; }
+.automation-plan-actions button, .automation-run button { font-size: var(--type-meta); }
+.automation-delete { flex-basis: 100%; max-width: 320px; padding: 12px; border: 1px solid var(--border); border-radius: var(--control-radius); background: var(--panel); }
+.automation-delete p { margin: 0 0 8px; }
+.automation-empty { text-align: center; color: var(--muted); padding: 24px 16px; border: 1px solid var(--border-soft); border-radius: var(--panel-radius); font-size: var(--type-ui); }
+.automation-run strong { font-size: var(--type-ui); }
+.automation-run small { display: block; color: var(--muted); font-size: var(--type-meta); margin-top: 5px; }
+.project-automations > header h2 { margin: 0; }
+.project-automations a { font-size: var(--type-meta); text-decoration: none; color: var(--accent); }
+.project-automation-row { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; font-size: var(--type-ui); }
+.project-automation-row span { color: var(--muted); font-size: var(--type-meta); }
+@media(max-width: 640px) {
+  .automation-heading { align-items: flex-end; }
+  .automation-heading > label { min-width: 0; flex: 1; }
+  .automation-heading > button { font-size: var(--type-meta); }
+  .automation-fields { grid-template-columns: minmax(0,1fr); }
+  .automation-editor { padding: 12px; }
+  .automation-plan, .automation-run { flex-wrap: wrap; gap: 12px; }
+  .automation-plan > div:first-child, .automation-run > div:first-child { flex-basis: 100%; }
+  .automation-plan-actions { justify-content: flex-start; }
+}
+
+
+.automation-identities { display:flex; flex-wrap:wrap; gap:4px 12px; color:var(--muted); font-size:var(--type-meta); line-height:1.5; margin:4px 0; }
+.automation-identities > span { display:inline-flex; align-items:center; gap:5px; min-width:0; overflow-wrap:anywhere; }
+.automation-editor small { font-size:var(--type-meta); line-height:1.5; font-weight:400; }
+.automation-plan-actions { row-gap:6px; }
+.automation-run { min-width:0; }
+.automation-run > .automation-state { flex:none; }
+.automation-history { min-width:0; }
+@media(max-width:640px) { .automation-actions { flex-wrap:wrap; justify-content:flex-start; margin-top:16px; }.automation-plan-actions { width:100%; gap:6px; }.automation-run { align-items:flex-start; }.automation-delete { max-width:none; width:100%; }.automation-heading { flex-wrap:wrap; gap:12px; }.automation-heading > label { flex-basis:160px; } }
+.automation-editor .schedule-weekdays { min-width:0; }
+.schedule-weekdays legend { color:var(--muted); font-size:var(--type-meta); margin-bottom:8px; }
+.schedule-weekdays > div { display:flex; flex-wrap:wrap; gap:8px 12px; }
+.automation-editor .schedule-weekdays label { display:inline-flex; align-items:center; gap:6px; min-height:30px; }
+.automation-editor details > .automation-fields { margin-top:12px; }

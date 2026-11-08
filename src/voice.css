@@ -1,0 +1,13 @@
+.voice-settings-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.voice-enable,.voice-actions{display:flex;align-items:center;gap:8px;margin-block:12px}
+.settings-card.voice-settings .voice-enable{display:flex;flex-direction:row;align-items:center;gap:8px}
+.settings-card.voice-settings input:is([type=checkbox],[type=radio]){width:16px;height:16px;min-height:0;flex:none;margin:0;accent-color:var(--accent)}
+.voice-models{display:grid;gap:8px;margin-block:12px}
+.voice-model{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-block:8px;border-bottom:1px solid var(--border-soft)}
+.voice-model label{display:flex;align-items:center;gap:8px;flex:1;min-width:180px}
+.voice-model small{display:block;color:var(--muted);margin-top:4px}
+.voice-model progress{width:100px;accent-color:var(--accent)}
+.voice-input{display:flex;align-items:center;gap:4px;position:relative;min-width:0}
+.voice-input>[role=status]{font-size:var(--type-meta);color:var(--muted);white-space:nowrap}
+.voice-error{position:absolute;bottom:calc(100% + 8px);right:0;width:min(320px,70vw);padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--overlay-shadow);color:var(--danger);z-index:10;overflow-wrap:anywhere}
+@media(max-width:600px){.voice-settings-fields{grid-template-columns:1fr}.voice-input>[role=status]{max-width:80px;white-space:normal}}

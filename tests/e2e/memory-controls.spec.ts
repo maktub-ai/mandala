@@ -1,0 +1,33 @@
+import {test,expect} from '@playwright/test';
+import {chooseOption} from './helpers/select';
+
+test('deep memory is the only view; legacy summaries are not displayed',async({page})=>{
+ await page.route('**/api/config',async route=>{if(route.request().method()!=='GET')return route.continue();const response=await route.fetch(),value=await response.json();value.config.agents.push({id:'memory-alice',name:'Memory Alice',instructions:'',defaultCli:'codex',models:{},mcp:[],skills:[]});await route.fulfill({json:value});});
+ const base={collectionId:'personal',revision:1,layer:'L1',status:'active',text:'English source fact',verification:'evidence_extract',evidence:[],extractedAt:'2026-10-13T00:00:00Z',effectiveFrom:'2026-10-13T00:00:00Z',sourceAgentIds:['memory-alice']};
+ await page.route('**/api/v2/memory/records?*',route=>route.fulfill({json:{records:[{...base,recordId:'active'}, {...base,recordId:'proposed',status:'proposed'}, {...base,recordId:'context',layer:'L2',semanticKey:'session.context',text:'Ongoing conversation context'}],collections:[{id:'personal',projectId:null,agentId:null}],summaries:[{id:'summary',collectionId:'personal',conversationId:'source-chat',text:'English conversation summary',evidence:[],updatedAt:'2026-10-13T00:00:00Z'}]}}));
+ await page.route('**/api/v2/memory/jobs',route=>route.fulfill({json:[{id:'incomplete-job',collectionId:'personal',kind:'request',state:'failed',stage:'scene',error:'dependency_not_provided',createdAt:'2026-10-13T00:00:00Z',sourceRefs:[],extraction:{nextChunk:3,totalChunks:3}}]}));
+ await page.goto('/mana?tab=memory');
+ await expect(page.getByRole('tab',{name:'会话摘要',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'立即整理',exact:true})).toHaveCount(0);
+ await expect(page.locator('.memory-records [data-record-id]')).toHaveCount(1);
+ await expect(page.getByRole('combobox',{name:'层级',exact:true})).toHaveCount(0);
+ await expect(page.locator('[data-job-id="incomplete-job"]')).toHaveCount(0);
+ await expect(page.locator('.memory-processing')).toHaveCount(0);
+ await page.getByText('高级筛选',{exact:true}).click();
+ await chooseOption(page,page.getByRole('combobox',{name:'Agent',exact:true}),'memory-alice');
+ await expect(page.locator('.memory-records [data-record-id]')).toHaveCount(1);
+ await chooseOption(page,page.getByRole('combobox',{name:'Agent',exact:true}),'all');
+ await expect(page.locator('.memory-session-summary')).toHaveCount(0);
+ await expect(page.locator('.memory-records')).not.toContainText('Ongoing conversation context');
+ await page.getByLabel('开始日期',{exact:true}).fill('2026-10-14');
+ await expect(page.locator('.memory-session-summary')).toHaveCount(0);
+ await page.getByLabel('开始日期',{exact:true}).fill('');
+ await page.screenshot({path:'/tmp/mandala-memory-light-desktop.png',fullPage:true});
+ await page.evaluate(()=>{document.documentElement.dataset.theme='dark';});
+ await page.screenshot({path:'/tmp/mandala-memory-dark-desktop.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:'/tmp/mandala-memory-dark-mobile.png',fullPage:true});
+ await page.getByRole('searchbox',{name:'搜索记忆',exact:true}).fill('does not match');
+ await expect(page.locator('.memory-session-summary')).toHaveCount(0);
+});

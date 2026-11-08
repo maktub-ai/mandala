@@ -1,0 +1,64 @@
+.workspace-directory { padding: 0; }
+.workspace-directory .workspace-page-toolbar input { width: min(320px, 100%); }
+.workspace-directory-rows { border-top: 0; }
+.workspace-directory-rows > :last-child { border-bottom: 0; }
+.workspace-directory-row { display: flex; gap: 12px; align-items: center; min-height: 64px; padding: 12px 20px; border-bottom: 1px solid var(--border-soft); color: var(--text); text-decoration: none; }
+.workspace-directory-row:hover { background: var(--raised); }
+.workspace-directory-row > svg:last-child { color: var(--muted); }
+.workspace-directory-identity { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.workspace-directory-identity strong { font-weight: 600; overflow-wrap: anywhere; }
+.workspace-directory-identity small { font-size:max(12px,calc(var(--theme-font-size,13px) - 1px)); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.workspace-directory-context { display: flex; align-items: center; gap: 12px; color: var(--muted); flex-shrink: 0; font-size: var(--type-meta); max-width: 40%; min-width: 0; }
+.workspace-directory-context .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.workspace-directory-runtime { display: inline-flex; }
+.workspace-directory-context > span:last-child { flex-shrink: 0; }
+.workspace-directory-members { display: flex; }
+.workspace-directory-members > * + * { margin-left: -6px; }
+.workspace-directory-members > * { box-shadow: 0 0 0 2px var(--bg); border-radius: 50%; --avatar-base: var(--bg); }
+/* Projects are bare symbols, so they sit side by side instead of overlapping like avatars. */
+.workspace-directory-members.is-projects { gap: 4px; }
+.workspace-directory-members.is-projects > * { margin-left: 0; box-shadow: none; border-radius: 0; }
+@media(max-width: 600px) { .workspace-directory-row { padding-inline: 16px; flex-wrap: wrap; row-gap: 4px; } .workspace-directory-identity { flex-basis: calc(100% - 72px); } .workspace-directory-context { order: 3; margin-left: 44px; max-width: calc(100% - 44px); } }
+
+.object-directory-layout.independent-directory { display: block; }
+.independent-directory > .object-settings-sidebar { display: none; }
+.independent-directory > .object-settings-content { width: 100%; max-width: 1100px; margin: 0 auto; }
+
+.agent-overview { max-width: 820px; }
+.agent-overview .workspace-metadata { padding-bottom: 20px; border-bottom: 1px solid var(--border-soft); }
+.agent-overview .workspace-metadata dd { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.agent-overview .workspace-metadata a, .agent-overview a { color: var(--text); text-underline-offset: 3px; }
+.agent-role-reader { max-width: 72ch; font-size: var(--type-body); line-height: 1.65; }
+.agent-work-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--border-soft); text-decoration: none; min-width: 0; }
+.agent-work-row strong { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.agent-work-row small { color: var(--muted); }
+.agent-overview h3 { font-size: var(--type-meta); color: var(--muted); font-weight: 500; margin: 20px 0 4px; }
+.independent-directory .object-detail-heading { margin-top: 20px; margin-bottom: 16px; }
+.independent-directory .settings-tab-panel > .agent-overview { padding: 4px 0 24px; }
+.independent-directory .agent-settings-detail .settings-card { padding: 16px 0; border: 0; border-bottom: 1px solid var(--border-soft); border-radius: 0; background: transparent; }
+.independent-directory .instructions-card textarea { min-height: 160px; }
+
+.independent-directory > .object-settings-content { max-width: none; }
+.independent-directory .directory-back { margin: 12px 0; padding-block: 4px; }
+.independent-directory .object-detail-heading { gap: 12px; margin-top: 8px; margin-bottom: 12px; }
+.independent-directory .object-detail-heading h2 { font-size: var(--page-heading-size); letter-spacing: -.02em; line-height: 1.25; }
+.independent-directory .settings-page-body { padding: 0; }
+.independent-directory .settings-tab-panel { padding-top: 12px; }
+
+.agent-overview .workspace-metadata dd button { min-width: 0; max-width: 100%; white-space: normal; height: auto; text-align: left; }
+@media(max-width: 600px) { .agent-overview .workspace-metadata > div { grid-template-columns: 84px minmax(0, 1fr); gap: 8px; } }
+
+/* The system Agent uses the same row grammar as other Agents: 32px identity, 12px gap, same type, actions where the chevron sits. */
+.system-agent-section { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 12px 20px; border-bottom: 1px solid var(--border-soft); }
+.system-agent-avatar { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: calc(32px * 7 / 40); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.system-agent-avatar .brand-mark { width: 20px; height: 20px; }
+.system-agent-copy { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.system-agent-identity { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+.system-agent-identity h2 { margin: 0; font-size: inherit; font-weight: 600; line-height: inherit; overflow-wrap: anywhere; min-width: 0; }
+.system-agent-identity > span { color: var(--muted); font-size: var(--type-meta); }
+.system-agent-copy p { margin: 0; color: var(--muted); font-size: max(12px, calc(var(--theme-font-size, 13px) - 1px)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.system-agent-actions { display: flex; gap: 4px; flex-wrap: wrap; flex-shrink: 0; }
+.system-agent-actions a { display: inline-flex; align-items: center; min-height: var(--control-height); text-decoration: none; background: transparent; color: var(--muted); }
+.system-agent-actions a:hover { background: var(--raised); color: var(--text); }
+@media(max-width: 768px) { .system-agent-section { flex-wrap: wrap; padding-inline: 16px; } .system-agent-copy { flex-basis: calc(100% - 44px); } .system-agent-actions { margin-left: 34px; } }
+@media(pointer: coarse) { .system-agent-actions a { min-height: 44px; } }

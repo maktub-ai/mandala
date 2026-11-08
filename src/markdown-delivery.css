@@ -1,0 +1,10 @@
+.markdown-table { position: relative; min-width: 0; margin: var(--space-4) 0; }
+.markdown-table-copy { position: absolute; z-index: 1; inset-block-start: var(--space-1); inset-inline-end: var(--space-1); display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); min-height: 32px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--control-radius); font-size: var(--control-font-size); opacity: 0; pointer-events: none; }
+.markdown-table:hover .markdown-table-copy, .markdown-table:focus-within .markdown-table-copy { opacity: 1; pointer-events: auto; }
+.markdown-table-copy:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.markdown-table .table-scroll { margin: 0; }
+.markdown-table table { min-width: max-content; }
+@media (hover: none), (pointer: coarse) {
+ .markdown-table-copy { opacity: 1; pointer-events: auto; min-height: 44px; min-width: 44px; justify-content: center; }
+ .markdown-table-copy span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+}

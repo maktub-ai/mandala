@@ -1,0 +1,57 @@
+import { test, expect } from "@playwright/test";
+import { chooseOption } from "./helpers/select";
+test("uploads files, switches model and effort between turns, and saves chat defaults by model name", async ({ page, request }) => {
+  const { revision } = await (await request.get("/api/config")).json();
+  await request.put("/api/config", { data: { revision, config: { version: 2, projects: [], agents: [], runtimes: ["codex"] } } });
+  await page.goto("/?project=");
+  await expect(page.getByRole("textbox", { name: "消息", exact: true })).toBeEditable();
+  await expect(page.getByRole("button", { name: "上传附件", exact: true })).toBeEnabled();
+  const files = await page.evaluateHandle(() => { const transfer = new DataTransfer(); transfer.items.add(new File(["Synthetic attachment"], "notes.txt", {type:"text/plain"})); return transfer; });
+  await page.locator("main.workspace-main").dispatchEvent("drop", {dataTransfer:files});
+  await expect(page.locator(".composer-attachments")).toContainText("notes.txt");
+  await chooseOption(page, "思考强度", "high");
+  await page.getByRole("textbox", { name: "消息", exact: true }).fill("Read the attachment");
+  await page.getByRole("button", { name: "发送消息" }).click();
+  await expect(page.locator('.message.text')).toContainText('Fixture reply: Read the attachment');
+  await expect(page.getByTestId("chat-status")).toHaveText("就绪");
+  await expect(page.locator(".message.user .message-attachments")).toContainText("notes.txt");
+  const id = new URL(page.url()).searchParams.get("conversation")!;
+  const first = await (await request.get(`/api/conversations/${id}`)).json();
+  expect(first.conversation).toMatchObject({ model: "model-fixture", effort: "high" });
+
+  await chooseOption(page, "模型", "model-second");
+  await chooseOption(page, "思考强度", "low");
+  await page.getByRole("textbox", { name: "消息", exact: true }).fill("Second turn");
+  await page.getByRole("button", { name: "发送消息" }).click();
+  await expect(page.getByText("Fixture reply: Second turn", { exact: true })).toBeVisible();
+  expect((await (await request.get(`/api/conversations/${id}`)).json()).conversation).toMatchObject({ model: "model-second", effort: "low" });
+  await page.goto("/settings/runtimes/codex");
+  await chooseOption(page, "Codex 模型", "model-second");
+  await expect.poll(async()=>(await(await request.get('/api/config')).json()).config.chatDefaults?.codex?.model).toBe('model-second');
+  await page.goto("/settings/runtimes/codex");
+  await page.reload();
+  await expect(page.getByRole("combobox", { name: "Codex 模型", exact: true })).toContainText("Second fixture");
+  await page.goto("/?project=");
+  await expect(page.getByRole("combobox", { name: "模型", exact: true })).toContainText("Second fixture");
+});
+
+test('opens a published task list and keeps unknown local paths as ordinary text', async ({page,request}) => {
+ const uploaded=await request.post('/api/v2/assets/uploads?name=tasks.md',{data:Buffer.from('# 自用任务清单\n\n- 修复附件拖放\n- 支持模型切换')});
+ expect(uploaded.ok()).toBe(true);
+ const {submissionId}=await uploaded.json();
+ const published=await request.post('/api/v2/assets/imports',{headers:{'Idempotency-Key':crypto.randomUUID()},data:{kind:'document',title:'自用任务清单',submissionId}});
+ expect(published.ok()).toBe(true);
+ const {asset,version}=await published.json();
+ await page.goto('/?project=');
+ await page.getByLabel('消息',{exact:true}).fill(`[查看任务清单](/assets/${asset.id}?version=${version.id}) [本地清单](/Users/example/tasks.md)`);
+ await page.getByRole('button',{name:'发送消息',exact:true}).click();
+ await expect(page.locator('.message.text')).toContainText('本地清单');
+ await expect(page.locator('.message.text').getByRole('link',{name:'本地清单',exact:true})).toHaveCount(0);
+ const opened=page.waitForEvent('popup');
+ await page.locator('.message.text').getByRole('link',{name:'查看任务清单',exact:true}).click();
+ const preview=await opened;
+ await expect(preview.getByRole('heading',{name:'自用任务清单',exact:true}).first()).toBeVisible();
+ await expect(preview.locator('.asset-content')).toContainText('修复附件拖放');
+ const missing=await request.get('/Users/example/tasks.md');
+ expect(missing.status()).toBe(404);expect(await missing.json()).toEqual({error:'File not found'});
+});

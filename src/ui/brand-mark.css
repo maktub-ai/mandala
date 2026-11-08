@@ -1,0 +1,3 @@
+.brand-mark { position:relative; display:inline-block; flex:none; width:128px; height:128px; color:var(--heading); }
+.brand-mark::before { content:''; position:absolute; inset:0; }
+.brand-mark::before { background:currentColor; mask:url('../assets/logo-petals.svg') center / contain no-repeat; }

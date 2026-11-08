@@ -1,0 +1,75 @@
+.team-capabilities { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: var(--space-5); min-width: 0; }
+.team-capability-nav { display: flex; flex-direction: column; gap: var(--space-1); border-right: 1px solid var(--border-soft); padding-right: var(--space-4); }
+.team-capability-nav button { text-align: left; justify-content: start; border-color: transparent; background: transparent; }
+.team-capability-nav button[aria-pressed='true'], .team-picker-tabs button[aria-pressed='true'], .team-skill-index button[aria-pressed='true'] { background: var(--accent-bg); color: var(--text); }
+.team-capability-body, .team-native-capabilities { display: grid; gap: var(--space-6); min-width: 0; }
+.team-capability-section { min-width: 0; }
+.team-capability-heading { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-4); }
+.team-capability-heading h2, .team-capability-heading h3 { margin: 0; font-weight: var(--weight-heading); }
+.team-capability-heading h3 { font-size: 16px; }
+.team-capability-heading .field-hint { margin: var(--space-2) 0 0; }
+.team-capability-heading > div { flex: 1; min-width: 160px; }
+.team-capability-heading > button { flex-shrink: 0; }
+.team-capability-list { border: 1px solid var(--border-soft); border-radius: var(--panel-radius); overflow: hidden; }
+.team-capability-list:empty { display: none; }
+.team-capability-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); min-width: 0; }
+.team-capability-row + .team-capability-row { border-top: 1px solid var(--border-soft); }
+.team-capability-row > svg { color: var(--muted); flex-shrink: 0; }
+.team-capability-copy { flex: 1; min-width: 0; display: grid; gap: var(--space-1); }
+.team-capability-copy strong { font-weight: var(--weight-medium); }
+.team-capability-copy small, .team-capability-copy code { color: var(--muted); font-size: var(--type-meta); overflow-wrap: anywhere; }
+.team-capability-copy .team-skill-link { display: block; padding: 0; min-height: auto; background: transparent; border: 0; text-align: left; justify-content: start; overflow-wrap: anywhere; color: var(--text); font-weight: var(--weight-medium); }
+.team-skill-link:hover { color: var(--link); text-decoration: underline; }
+.team-capability-actions { display: flex; align-items: center; justify-content: end; gap: var(--space-2); }
+.team-capability-switch { width: 44px; min-height: var(--control-height); padding: 0; background: transparent; border: 0; }
+.team-capability-switch > span { display: block; width: 32px; height: 20px; background: var(--raised); border: 1px solid var(--border-strong); border-radius: var(--control-radius); padding: 2px; }
+.team-capability-switch > span::after { content: ''; display: block; width: 14px; height: 14px; border-radius: 2px; background: var(--muted); }
+.team-capability-switch[aria-checked='true'] > span { background: var(--button); border-color: var(--button); }
+.team-capability-switch[aria-checked='true'] > span::after { margin-left: auto; background: var(--button-text); }
+.team-discovery-controls { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.team-discovery-controls:empty { display: none; }
+.team-discovery-controls > label { flex: 1; min-width: 180px; margin: 0; }
+.team-legacy-source { padding: var(--space-4) 0; overflow-wrap: anywhere; }
+.team-legacy-source h4 { margin: 0 0 var(--space-2); font-weight: var(--weight-medium); }
+.team-skill-library { min-width: 0; }
+.team-library-layout { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); gap: var(--space-5); }
+.team-skill-index { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.team-skill-index > input { width: 100%; margin-bottom: var(--space-2); }
+.team-skill-index > button { justify-content: start; text-align: left; background: transparent; border-color: transparent; min-width: 0; }
+.team-skill-index > button span { overflow-wrap: anywhere; min-width: 0; }
+.team-skill-detail { min-width: 0; }
+.team-skill-form { display: grid; gap: var(--space-3); }
+.team-skill-form > label { display: grid; gap: var(--space-2); margin: 0; }
+.team-skill-form textarea { font-family: var(--font-mono); line-height: 1.6; width: 100%; resize: vertical; }
+.team-skill-form .field-hint { margin: 0; }
+.team-assignment-section { margin-top: var(--space-6); }
+.team-assignment-row { display: flex !important; align-items: center !important; gap: var(--space-3); margin: 0 !important; padding: var(--space-3) 0; border-bottom: 1px solid var(--border-soft); }
+.team-assignment-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.team-assignment-row > .team-assignment-avatar { flex: none; }
+.team-assignment-row small { display: block; color: var(--muted); margin-top: var(--space-1); }
+.team-assignment-row input[type='checkbox'] { width: 18px; height: 18px; margin: 0; flex-shrink: 0; }
+.team-capability-dialog.settings-panel { width: min(680px, calc(100vw - 32px)); padding: var(--space-5); overflow-y: auto; }
+.team-capability-dialog > h2 { margin-top: 0; font-weight: var(--weight-heading); }
+.team-capability-dialog > input { width: 100%; }
+.team-capability-dialog > .team-capability-actions { margin-top: var(--space-5); }
+.team-picker-tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-5); }
+.team-picker-list { max-height: 320px; overflow-y: auto; margin: var(--space-3) 0; }
+.team-skill-content { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); max-height: 55vh; overflow-y: auto; }
+@media (max-width: 900px) {
+  .team-capabilities { grid-template-columns: minmax(0, 1fr); gap: var(--space-5); }
+  .team-capability-nav { flex-direction: row; border-right: 0; border-bottom: 1px solid var(--border-soft); padding: 0 0 var(--space-2); }
+  .team-library-layout { grid-template-columns: minmax(0, 1fr); }
+  .team-skill-index { max-height: 220px; overflow-y: auto; }
+}
+@media (max-width: 600px) {
+  .team-capability-dialog.settings-panel { padding: var(--space-4); }
+  .team-capability-row { padding: var(--space-3); gap: var(--space-2); flex-wrap: wrap; }
+  .team-capability-row > .team-capability-copy { flex-basis: calc(100% - 32px); }
+  .team-capability-row > .team-capability-actions { width: 100%; }
+}
+
+.team-skill-suggestion-content { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; }
+
+.team-skill-library a { color: var(--link); text-decoration: none; }
+.team-skill-library .team-learning-agent { color: var(--text); }
+.team-skill-library a:hover { text-decoration: underline; }

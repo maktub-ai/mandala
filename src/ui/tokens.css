@@ -1,0 +1,147 @@
+/* Mandala Compact C fallback tokens (visual language v2: cool neutrals, indigo actions, Geist). ThemeProvider applies saved preferences
+   to the document root so application chrome and portalled controls share them. */
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Noto Sans SC';
+  src: url('../assets/fonts/NotoSansSC.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter Variable';
+  src: url('../assets/fonts/InterVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'EB Garamond';
+  src: url('../assets/fonts/EBGaramond.ttf') format('truetype');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+ :root {
+  color-scheme: light;
+  --font-ui: 'Geist', 'PingFang SC', 'Noto Sans SC', sans-serif;
+  --font-editorial: 'EB Garamond', 'Iowan Old Style', 'Songti SC', Georgia, serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-ui);
+  letter-spacing: 0;
+  --theme-font-size: 13px;
+  /* Type roles follow the saved UI size (13px default): meta 12, ui 13, body 14. */
+  --type-meta: max(11px, calc(var(--theme-font-size) - 1px));
+  --type-ui: var(--theme-font-size);
+  --type-body: calc(var(--theme-font-size) + 1px);
+  --code-font-size: 13px;
+  --bg: #f7f8fa;
+  --panel: #f0f1f4;
+  --surface: #ffffff;
+  --raised: #eceef2;
+  --text: #1b1d22;
+  --heading: #1b1d22;
+  --muted: #5d616a;
+  --subtle: #5d616a;
+  --border: #d9dce2;
+  --border-strong: #9a9ea7;
+  --border-soft: #e7e9ed;
+  --accent: #4f5ae6;
+  --accent-bg: #ebedfb;
+  --link: #4f5ae6;
+  --focus: #5a64ea;
+  --button: #4f5ae6;
+  --button-text: #ffffff;
+  --secondary: #eceef2;
+  --danger: #cf3a3a;
+  --warning: #a0650b;
+  --success: #168a4e;
+  --status-active: #168a4e;
+  --status-running: #285ca7;
+  --status-pending: #a0650b;
+  --overlay-shadow: 0 8px 24px #0f111514, 0 1px 2px #0f11150f;
+  /* Backdrop behind dialogs and the mobile inspector. */
+  --scrim: rgb(8 9 12 / .45);
+  --terminal-selection: #c4c8f6;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px;
+  --space-4: 16px; --space-5: 24px; --space-6: 32px;
+  --control-height: 32px;
+  --control-radius: 8px;
+  --panel-radius: 8px;
+  --dialog-radius: 8px;
+  --badge-radius: 0px;
+  --pill-radius: 8px;
+  --hairline: 1px;
+  --card-padding: 16px;
+  --page-width-compact: 960px;
+  --page-width-standard: 1240px;
+  --page-width-fluid: 100%;
+  --page-width: var(--page-width-standard);
+  --page-gutter: 20px;
+  --workspace-radius: 12px;
+  --page-heading-size: 20px;
+  --page-heading-mobile: 20px;
+  --page-heading-leading: 1.25;
+  --page-heading-tracking: -.02em;
+  --chat-heading-size: 24px;
+  --section-heading-size: 15px;
+  --weight-heading: 600;
+  --weight-medium: 500;
+  --weight-action: 500;
+  --action-tracking: 0;
+  --control-font-size: 13px;
+  --input-font-size: 13px;
+  --primary-padding: 5px 10px;
+  --secondary-padding: 5px 10px;
+  --input-padding: 5px 9px;
+  --nav-font-size: 13px;
+  --nav-height: 32px;
+  --nav-padding: 5px 8px;
+  --chrome-height: 44px;
+  --brand-accent: #1b1d22;
+  --brand-on-accent: #ffffff;
+}
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #121317;
+  --panel: #0e0f12;
+  --surface: #18191d;
+  --raised: #1f2126;
+  --text: #e4e6ea;
+  --heading: #e4e6ea;
+  --muted: #989ca5;
+  --subtle: #989ca5;
+  --border: #2e3138;
+  --border-strong: #4d515a;
+  --border-soft: #23252b;
+  --accent: #7c86ff;
+  --accent-bg: #1f2240;
+  --focus: #8a94ff;
+  --button: #7c86ff;
+  --button-text: #000000;
+  --secondary: #1f2126;
+  --link: #7c86ff;
+  --danger: #f07575;
+  --warning: #e2ac4c;
+  --success: #4ccb85;
+  --status-active: #4ccb85;
+  --status-running: #91baff;
+  --status-pending: #e2ac4c;
+  --overlay-shadow: 0 12px 32px #00000073;
+  --terminal-selection: #353b7a;
+  --brand-accent: #e4e6ea;
+  --brand-on-accent: #000000;
+}

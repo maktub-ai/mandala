@@ -1,0 +1,89 @@
+name: Desktop preview release
+
+on:
+  # Local validation/builds are the default; cloud runs require an explicit manual dispatch.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing reviewed vX.Y.Z tag to build
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.23.2'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - run: node scripts/verify-release-tag.mjs
+      - run: npm ci
+      - run: npm ci --prefix desktop
+      - run: npm run typecheck
+      - run: npm test -- tests/desktop-runtime.test.ts tests/local-setup.test.ts tests/windows-execution.test.ts tests/windows-private-path.test.ts tests/windows-terminal.test.ts --maxWorkers=1
+      - run: npm audit --omit=dev
+      - run: npm audit --prefix desktop
+      - run: npm run desktop:build
+      - run: node scripts/desktop-smoke.mjs
+      - run: node scripts/desktop-window-smoke.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mandala-desktop-${{ matrix.os }}
+          path: |
+            release/desktop/*.dmg
+            release/desktop/*.zip
+            release/desktop/*.exe
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mandala-evidence-${{ matrix.os }}
+          path: release/verification/
+          retention-days: 14
+
+  draft-release:
+    needs: [desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: mandala-desktop-*
+          path: release/artifacts
+          merge-multiple: true
+      - run: node scripts/release-checksums.mjs release/artifacts
+      - name: Create draft prerelease for maintainer review
+        run: gh release create "$RELEASE_TAG" release/artifacts/* --verify-tag --draft --prerelease --title "Mandala $RELEASE_TAG preview" --notes-file deploy/desktop-release-notes.md

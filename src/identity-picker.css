@@ -1,0 +1,18 @@
+.identity-picker-trigger { display:inline-flex; align-items:center; gap:var(--space-2); padding:4px 10px 4px 4px; border:1px solid var(--border); border-radius:10px; background:transparent; color:inherit; font:inherit; cursor:pointer; }
+.identity-picker-trigger:hover { background:var(--hover, color-mix(in srgb, currentColor 6%, transparent)); }
+.identity-picker-trigger:focus-visible,.identity-picker button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+.identity-picker.identity-picker { width:min(336px, calc(100vw - 24px)); padding:8px; gap:8px; }
+.identity-picker-tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); }
+.identity-picker-tabs button { padding:6px 10px; border:0; border-bottom:2px solid transparent; background:none; color:var(--muted); font:inherit; font-weight:500; cursor:pointer; margin-bottom:-1px; }
+.identity-picker-tabs button[aria-selected="true"] { color:inherit; border-bottom-color:var(--accent); }
+.identity-picker-body { max-height:280px; overflow-y:auto; overscroll-behavior:contain; }
+.identity-picker-body h3 { margin:8px 2px 4px; font-size:11.5px; font-weight:500; color:var(--muted); }
+.identity-picker-grid { display:grid; grid-template-columns:repeat(8, 1fr); gap:2px; }
+.identity-picker-grid button { display:grid; place-items:center; aspect-ratio:1; border:0; border-radius:7px; background:none; color:var(--muted); cursor:pointer; font-size:20px; padding:0; }
+.identity-picker-grid button:hover { background:color-mix(in srgb, currentColor 10%, transparent); color:inherit; }
+.identity-picker-grid button[aria-pressed="true"] { background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--accent); }
+.identity-picker-empty { grid-column:1 / -1; margin:12px 4px; color:var(--muted); font-size:12.5px; }
+.identity-picker-regenerate { align-self:flex-start; border:0; background:none; color:var(--accent); font:inherit; font-size:12.5px; cursor:pointer; padding:2px 4px; }
+.identity-picker-trigger { justify-self:start; align-self:flex-start; }
+.identity-picker.identity-picker { z-index:1500; }
+.object-identity-dialog .identity-picker-trigger { margin:var(--space-2) 0 var(--space-1); }

@@ -1,0 +1,53 @@
+/* Changes are objects, not speech: one bordered group under the reply, one line per Task or setting it changed. */
+.turn-changes { width:100%; min-width:0; margin:4px 0 12px; border:1px solid var(--border); border-radius:min(12px,calc(var(--panel-radius) * 2)); background:var(--surface); overflow:hidden; }
+.turn-changes > .turn-changes-head { margin:0; padding:7px 14px; border-bottom:1px solid var(--border-soft); color:var(--muted); font-size:var(--type-meta); font-weight:500; font-variant-numeric:tabular-nums; }
+.turn-changes ul { margin:0; padding:0; list-style:none; }
+.turn-change + .turn-change { border-top:1px solid var(--border-soft); }
+.turn-change > :is(a,div) { display:flex; align-items:center; gap:10px; min-height:40px; padding:6px 14px; color:var(--text); text-decoration:none; font-size:var(--type-ui); }
+.turn-change > a:hover { background:color-mix(in srgb,var(--raised) 55%,var(--surface)); }
+.turn-change > a:focus-visible { outline:2px solid var(--focus); outline-offset:-2px; }
+.turn-change-verb { flex:none; color:var(--muted); font-size:var(--type-meta); white-space:nowrap; }
+.turn-change-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.turn-change .workspace-status { flex:none; white-space:nowrap; }
+.turn-change-go { flex:none; color:var(--muted); }
+@media (max-width:600px) { .turn-change > :is(a,div) { flex-wrap:wrap; row-gap:2px; } .turn-change-name { flex-basis:calc(100% - 80px); } }
+@media (pointer:coarse) { .turn-change > :is(a,div) { min-height:44px; } }
+.product-frame .mandala-messages .agent-reply:has(> .turn-changes) { width:100%; max-width:100%; }
+.product-frame .mandala-messages .agent-reply:has(> .turn-changes) > .chat-reply-bubble { max-width:92%; }
+.product-frame .messages:not(.mandala-messages) .agent-reply > .turn-changes { width:calc(100% - 39px); margin-left:39px; }
+@media (max-width:700px) { .product-frame .messages:not(.mandala-messages) .agent-reply > .turn-changes { width:100%; margin-left:0; } }
+
+.execution-chats { margin:0; padding:0; list-style:none; border-top:1px solid var(--border-soft); }
+.execution-chats > li + li { border-top:1px solid var(--border-soft); }
+.execution-chats a { display:flex; flex-wrap:wrap; align-items:center; column-gap:10px; row-gap:2px; min-height:40px; padding:6px 12px; color:var(--text); text-decoration:none; font-size:var(--type-ui); }
+.execution-chats a:hover { background:var(--raised); }
+.execution-chats a:focus-visible { outline:2px solid var(--focus); outline-offset:-2px; }
+.execution-chat-agent { flex:none; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:var(--weight-heading); }
+.execution-chat-title { flex:1; min-width:0; display:inline-flex; align-items:center; gap:6px; color:var(--muted); }
+.execution-chat-title > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.execution-chats a > .workspace-status { flex:none; white-space:nowrap; }
+.execution-chats a > svg:last-child { flex:none; color:var(--muted); }
+@media (max-width:600px) {
+ .execution-chats a { flex-wrap:wrap; row-gap:2px; }
+ .execution-chat-agent { flex:1; max-width:none; }
+ .execution-chat-title { order:5; flex-basis:100%; padding-left:30px; }
+}
+@media (pointer:coarse) { .execution-chats a { min-height:44px; } }
+
+/* One mark per execution chat plus the count; shared by task rows everywhere. */
+.execution-marks { display:inline-flex; align-items:center; gap:6px; font-variant-numeric:tabular-nums; }
+.execution-marks > span:first-child { display:inline-flex; align-items:center; gap:2px; line-height:1; }
+.execution-marks .status-mark { display:block; }
+.execution-marks .status-mark { width:15px; height:15px; }
+.execution-marks [data-tone=active] { color:var(--status-running); }
+.execution-marks [data-tone=success] { color:var(--success); }
+.execution-marks [data-tone=warning] { color:var(--warning); }
+.execution-marks [data-tone=danger] { color:var(--danger); }
+.execution-marks [data-tone=neutral] { color:var(--muted); }
+.turn-change .execution-marks { color:var(--muted); font-size:var(--type-meta); }
+.turn-change .execution-marks .status-mark { width:13px; height:13px; }
+
+/* Latest Agent commentary for the chat: one quiet line, so expanding many tasks stays compact. */
+.execution-chat-progress { order:10; flex-basis:100%; display:flex; align-items:center; gap:6px; min-width:0; padding-left:30px; color:var(--muted); font-size:var(--type-meta); line-height:1.5; }
+.execution-chat-progress > span:not(.progress-dot) { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.execution-chat-progress > time { flex:none; font-variant-numeric:tabular-nums; opacity:.8; }

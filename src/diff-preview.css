@@ -1,0 +1,28 @@
+.diff-view { min-width:0; font-size:var(--type-meta); }
+.diff-toolbar { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--border); }
+.diff-toolbar [role=group] { display:flex; gap:2px; }
+.diff-toolbar button { font-size:var(--type-meta); padding:4px 8px; background:transparent; color:var(--muted); border:0; }
+.diff-toolbar button[aria-pressed=true] { background:var(--raised); color:var(--text); }
+.diff-scroll { overflow:auto; }
+.diff-table { border-collapse:collapse; width:100%; font:12px/1.5 var(--font-mono); white-space:pre; }
+.diff-table td { border:0; padding:0 10px 0 0; vertical-align:top; }
+.diff-table code { font:inherit; }
+.diff-table .diff-number { color:var(--muted); user-select:none; text-align:right; min-width:28px; padding:0 8px; font-size:var(--type-meta); opacity:.8; white-space:nowrap; overflow-wrap:normal; }
+.diff-sign { width:12px; user-select:none; }
+.diff-add { background:#2ea04320; }
+.diff-remove { background:#f8514920; }
+.diff-add .diff-sign,.change-add { color:light-dark(#16743c,#6cd995); }
+.diff-remove .diff-sign,.change-remove { color:light-dark(#b4232c,#ff9797); }
+.diff-hunk { background:var(--accent-bg); color:var(--muted); font-size:var(--type-meta); }
+.diff-hunk td,.diff-note td { padding:7px 12px; }
+.diff-note { color:var(--muted); font-size:var(--type-meta); }
+.diff-table.split { table-layout:fixed; }
+.diff-table.split .diff-cell { width:50%; border-right:1px solid var(--border); overflow-wrap:anywhere; white-space:pre-wrap; }
+.diff-cell .diff-number { display:inline-block; min-width:24px; }
+.diff-empty { background:var(--raised); }
+.diff-more { display:block; margin:12px auto; font-size:var(--type-meta); }
+.diff-notice { padding:12px 18px; color:var(--muted); }
+.change-stats { display:inline-flex; gap:6px; font:12px var(--font-mono); white-space:nowrap; }
+
+.diff-table.unified.wrap { table-layout:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+.diff-table.unified.wrap td:last-child { min-width:0; max-width:0; width:100%; }

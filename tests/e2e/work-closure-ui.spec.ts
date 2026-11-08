@@ -1,0 +1,96 @@
+import { expect, test } from './helpers/execution-fixture';
+import { chooseOption } from './helpers/select';
+import { mkdirSync } from 'node:fs';
+import type { Task } from '../../shared/tasks';
+
+test('completed history is discoverable and a real send returns the conversation to current work', async ({ page, request, executionDirectory }) => {
+  const { config, revision } = await (await request.get('/api/config')).json();
+  const agent = { id: 'closure-ui-agent', name: 'Closure UI Agent', instructions: '', defaultCli: 'codex', models: {}, mcp: [], skills: [] };
+  const project = { id: 'closure-ui-project', name: 'Closure UI Project', cwd: executionDirectory, agentIds: [agent.id], resources: [], mcp: [], skills: [] };
+  expect((await request.put('/api/config', { data: { revision, config: { ...config, runtimes: ['codex', 'omp'], agents: [...config.agents, agent], projects: [...config.projects, project] } } })).ok()).toBe(true);
+  const source = await (await request.post('/api/conversations', { data: { projectId: project.id, agentId: agent.id } })).json();
+  const title = 'Closure history sample';
+  await request.patch('/api/conversations/' + source.id, { data: { title } });
+  const task = await (await request.post('/api/v2/tasks', { headers: { 'Idempotency-Key': 'closure-ui-todo' }, data: { goal: 'Independent work stays pending', criteria: [], acceptance: 'delivery', projectId: project.id, assigneeAgentId: null } })).json();
+  expect((await request.post('/api/conversations/' + source.id + '/completion', { data: { completed: true } })).ok()).toBe(true);
+  await page.goto('/?project=' + project.id + '&conversation=' + source.id);
+  const picker = page.getByRole('combobox', { name: '会话视图', exact: true });
+  await expect(picker).toContainText('最近对话');
+  const list = page.getByRole('navigation', { name: '会话列表', exact: true });
+  await expect(list.getByRole('button', { name: title, exact: true })).toBeVisible();
+  await chooseOption(page, picker, 'recent');
+  await list.getByRole('button', { name: title, exact: true }).click();
+  await page.reload();
+  await expect(picker).toHaveAttribute('data-value', 'recent');
+  await expect(list.getByRole('button', { name: title, exact: true })).toBeVisible();
+  await page.getByLabel('消息', { exact: true }).fill('Resume current work');
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await expect(picker).toHaveAttribute('data-value', 'recent');
+  await expect(list.getByRole('button', { name: title, exact: true })).toBeVisible();
+  await expect.poll(async () => (await (await request.get('/api/conversations/' + source.id)).json()).conversation.completedAt).toBeNull();
+  expect((await (await request.get('/api/v2/tasks/' + task.id)).json()).task.state).toBe('todo');
+  expect(await (await request.get('/api/v2/tasks?projectId=' + project.id)).json()).toHaveLength(1);
+});
+
+test('task list and board share filters, reasons and detail links while URL restores the view', async ({ page, request }) => {
+  const { config } = await (await request.get('/api/config')).json();
+  const projectId = config.projects[0].id, agentId = config.agents[0].id;
+  const tasks: Task[] = ['todo', 'running', 'waiting', 'review', 'completed', 'cancelled'].map((state, i) => ({
+    automaticProgress: true, id: 'closure-board-' + state, goal: 'Board ' + state, state, criteria: [], acceptance: 'delivery', projectId, assigneeAgentId: agentId,
+    originConversationId: null, executions: [], participantAgentIds:[],conversationIds:[],ownerUserId: 'local', creatorAgentId: null, waitingReason: state === 'waiting' ? 'input' : null,
+    revision: 1, continuationEpoch: 0, futureAutoResume: false, completion: null, legacyId: null, createdAt: new Date(i).toISOString(),
+  } as Task));
+  tasks.push({ ...tasks[0], id: 'closure-board-other', goal: 'Other task', projectId: null, assigneeAgentId: null });
+  await page.route('**/api/v2/tasks', route => route.fulfill({ json: tasks }));
+  await page.route('**/api/v2/tasks/closure-board-todo/control', route => route.fulfill({ json: { taskId: tasks[0].id, state: 'todo', waitingReason: null, revision: 1, runs: [] } }));
+  await page.route('**/api/v2/tasks/closure-board-todo', route => route.fulfill({ json: { task: tasks[0], runs: [], receipts: [], contexts: [], executions: [],planVersions: [] } }));
+  await page.route('**/api/conversation-progress?*',route=>route.fulfill({json:[]}));
+  await page.goto('/tasks?type=tasks&scope=all&view=list&project=' + projectId + '&agent=' + agentId);
+  const rows = page.locator('main .progress-item-title');
+  await expect(rows).toHaveCount(5);
+  const listIds = await rows.evaluateAll(nodes => nodes.map(node => new URL(node.getAttribute('href')!,location.origin).pathname).sort());
+  await page.getByRole('button', { name: '看板', exact: true }).click();
+  await expect(page).toHaveURL(/view=board/);
+  const board = page.getByRole('region', { name: '进度看板', exact: true });
+  await expect(board.locator('.task-group')).toHaveCount(3);
+  await expect(board.locator('.progress-item-title')).toHaveCount(5);
+  await expect(board.locator('.task-group h2')).toHaveText(['待处理3', '进行中与最近1', '已完成1']);
+  const geometry=await board.evaluate(node=>{const box=node.getBoundingClientRect();return {width:node.clientWidth,scrollWidth:node.scrollWidth,left:box.left,right:box.right,columns:[...node.querySelectorAll('.task-group')].map(column=>{const bounds=column.getBoundingClientRect();return {left:bounds.left,right:bounds.right};})};});
+  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.width);
+  expect(geometry.columns.every(column=>column.right-column.left>=180)).toBe(true);
+  await expect(board.locator('.progress-owner [data-identity-kind="agent"]')).toHaveCount(5);
+  for(const card of await board.locator('[data-task-id]').all())await card.getByRole('button',{name:/^展开详情：/}).click();
+  await expect(board.locator('.progress-item-context').getByText(config.projects[0].name,{exact:true})).toHaveCount(5);
+  const screenshots = '/tmp/mandala-task-compat/superpowers/sdd/2026-10-04-work-closure-memory/screenshots';
+  mkdirSync(screenshots, { recursive: true });
+  await page.screenshot({ path: screenshots + '/task-board-desktop.png', fullPage: true });
+  expect(await board.locator('.progress-item-title').evaluateAll(nodes => nodes.map(node => new URL(node.getAttribute('href')!,location.origin).pathname).sort())).toEqual(listIds);
+  expect(await board.locator('.progress-item-title').evaluateAll(nodes=>nodes.every(node=>new URL(node.getAttribute('href')!,location.origin).searchParams.get('view')==='board'))).toBe(true);
+  await expect(board).toContainText('需要输入');
+  await page.reload();
+  await expect(page.getByRole('button', { name: '看板', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: '列表', exact: true }).click();
+  await page.goBack();
+  await expect(board).toBeVisible();
+  await page.getByRole('button',{name:'筛选',exact:true}).click();
+  await chooseOption(page, page.getByRole('combobox', { name: '进度负责人', exact: true }), '');
+  await chooseOption(page, page.getByRole('combobox', { name: '进度项目', exact: true }), '');
+  await expect(board.locator('.progress-item-title')).toHaveCount(6);
+  await chooseOption(page, page.getByRole('combobox', { name: '任务状态', exact: true }), 'cancelled');
+  await expect(page.locator('main .progress-item-title')).toHaveCount(1);
+  await expect(page.locator('main .progress-item-title')).toContainText('Board cancelled');
+  await chooseOption(page, page.getByRole('combobox', { name: '任务状态', exact: true }), 'active');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(board).toBeVisible();
+  expect(await board.evaluate(node => getComputedStyle(node).overflowX)).toBe('auto');
+  expect(await board.locator('.task-group').evaluateAll(nodes=>nodes.every(node=>node.getBoundingClientRect().width>=180))).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const groups = await board.locator('.task-group').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().top));
+  expect(groups.every(top=>Math.abs(top-groups[0])<2)).toBe(true);
+  await board.getByRole('link', { name: /Board completed/ }).scrollIntoViewIfNeeded();
+  await expect(board.getByRole('link', { name: /Board completed/ })).toBeInViewport();
+  await page.screenshot({ path: screenshots + '/task-board-mobile.png', fullPage: true });
+  await board.getByRole('link', { name: /Board todo/ }).click();
+  await expect(page).toHaveURL(/tasks\/closure-board-todo(?:\?|$)/);
+  await expect(page.getByRole('heading', { name: 'Board todo', exact: true })).toBeVisible();
+});

@@ -1,0 +1,36 @@
+.mandala-settings.settings-panel { width: min(560px, calc(100vw - 32px)); padding: var(--space-5); }
+.mandala-settings-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.mandala-settings-heading .brand-mark { width: 24px; height: 24px; }
+.mandala-settings-heading h2 { margin: 0; font-size: 20px; }
+.mandala-settings form { display: grid; gap: 16px; }
+.mandala-settings-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.mandala-header-identity { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.mandala-header-identity .brand-mark { width: 24px; height: 24px; flex-shrink: 0; }
+.mandala-header-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mandala-runtime-pending { display: block; color: var(--muted); font-size: inherit; }
+.sidebar-mandala .brand-mark { width: 18px; height: 18px; flex-shrink: 0; }
+.mandala-welcome { width: min(calc(100% - 32px), 52ch); margin: auto; padding: 24px 0; text-align: center; color: var(--muted); }
+.mandala-welcome > .brand-mark { width: 40px; height: 40px; color: var(--text); }
+.mandala-welcome h1 { margin: 16px 0 8px; color: var(--text); font-size: 24px; overflow-wrap: anywhere; }
+.mandala-welcome-intro { margin: 0; line-height: 1.6; }
+.mandala-welcome-suggestions { display: grid; gap: 4px; margin: 24px 0 12px; text-align: left; }
+.mandala-welcome .mandala-welcome-suggestions button { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; padding: 12px; border: 0; background: transparent; text-align: start; white-space: normal; }
+.mandala-welcome-suggestions button > span { display: grid; gap: 4px; min-width: 0; }
+.mandala-welcome-suggestions strong { color: var(--text); font-size: var(--type-body); font-weight: 500; }
+.mandala-welcome-suggestions button span span { color: var(--muted); font-size: var(--type-ui); line-height: 1.5; }
+.mandala-welcome-suggestions button > svg { flex-shrink: 0; color: var(--muted); }
+.mandala-welcome-suggestions button:not(:disabled):hover { background: var(--raised); }
+.mandala-welcome-hint { margin: 0; font-size: var(--type-meta); line-height: 1.6; }
+
+.mandala-avatar { width: 100%; height: 100%; }
+
+.workspace-main .mandala-topbar .context { display: flex; min-width: 0; flex: 1; }
+.workspace-main .mandala-topbar .context > .mandala-header-identity { display: inline-flex; }
+
+@media (max-width: 600px) { .mandala-settings.settings-panel { padding: var(--space-4); } }
+.mandala-settings .pet-settings { display: grid; gap: 4px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border-soft); }
+
+.mandala-welcome-loop { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:4px 8px; margin:24px 0 0; padding-top:16px; border-top:1px solid var(--border-soft); font-size:var(--type-ui); color:var(--text); }
+.mandala-welcome-loop > svg { color:var(--muted); }
+.mandala-welcome-loop small { flex-basis:100%; color:var(--muted); font-size:var(--type-meta); line-height:1.6; }
+.cli-notice code { font-size:var(--type-meta); font-family:var(--font-mono); padding:0 4px; border-radius:4px; background:var(--raised); }

@@ -1,0 +1,12 @@
+// spec: specs/progress-acceptance-plan.md
+// seed: tests/e2e/seed.spec.ts
+import {test,expect} from '@playwright/test';
+import {acceptanceMessagePair} from './helpers/progress-acceptance';
+test.describe('Progress 用户目标验收',()=>{test('P31 queued long request preserves exact attachment and reference identities through reload and cancellation',async({page,request})=>{
+
+ await request.post('/__test__/progress-fixture');const c=await(await request.post('/api/conversations',{data:{projectId:'progress-demo',agentId:'progress-planner',workspaceId:null}})).json();await request.post('/api/conversations/'+c.id+'/messages',{data:{text:'hold'}});await page.goto('/?conversation='+c.id);
+ const input=page.getByRole('textbox',{name:'消息',exact:true});await input.fill('@');await page.getByRole('option',{name:/^代码评审 · Agent/}).click();await expect(page.locator('.composer-references')).toContainText('代码评审');const long='请保留完整排队内容和文件引用。'.repeat(60);await input.fill(long);await page.locator('input[type=file][aria-label="上传附件"]').setInputFiles({name:'queue-evidence.txt',mimeType:'text/plain',buffer:Buffer.from('Immutable queued attachment')});await expect(page.getByRole('button',{name:'移除附件 queue-evidence.txt',exact:true})).toBeEnabled();await page.getByRole('button',{name:'排队发送',exact:true}).click();await expect(input).toHaveValue('');
+ const before=(await(await request.get('/api/conversations/'+c.id+'/queue')).json()).find((q:{text:string})=>q.text===long);expect(before.attachments).toHaveLength(1);expect(before.references).toHaveLength(1);await page.reload();const row=page.locator('.queued-input').filter({hasText:long});await expect(row).toBeVisible();await expect(row).toContainText('1 个附件');const after=(await(await request.get('/api/conversations/'+c.id+'/queue')).json()).find((q:{id:string})=>q.id===before.id);expect(after).toMatchObject({id:before.id,text:long,state:'queued',attachments:before.attachments,references:before.references});
+ await row.getByRole('button',{name:'取消排队',exact:true}).click();await expect(row).toHaveCount(0);const cancelled=(await(await request.get('/api/conversations/'+c.id+'/queue')).json()).find((q:{id:string})=>q.id===before.id);expect(cancelled.state).toBe('cancelled');expect(cancelled.references).toEqual(before.references);expect(cancelled.attachments).toEqual(before.attachments);expect((await(await request.get('/api/conversations/'+c.id)).json()).conversation.status).toBe('running');
+
+});});

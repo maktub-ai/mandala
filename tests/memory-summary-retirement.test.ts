@@ -1,0 +1,51 @@
+import {afterEach,expect,test,vi} from 'vitest';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {openStore} from '../server/store';
+import {readConfig} from '../server/config';
+import {createMemoryRuntime,normalizeMemorySettings} from '../server/memory-runtime';
+const cleanups:(()=>Promise<void>)[]=[];
+afterEach(async()=>{for(const cleanup of cleanups.splice(0))await cleanup();});
+test('legacy session settings cannot enable summary generation or injection',async()=>{
+ const home=mkdtempSync(join(tmpdir(),'summary-retired-')),store=openStore(home),config=(await readConfig(home)).config;
+ config.system={cli:'codex',memory:{request:{generate:true,read:true},session:{generate:true,read:true},idleHours:0}};
+ const generate=vi.fn(async()=> '[]'),runtime=createMemoryRuntime({home,store,schedule:false,loadConfig:async()=>config,generate});
+ cleanups.push(async()=>{await runtime.close();store.close();rmSync(home,{recursive:true,force:true});});
+ expect(normalizeMemorySettings(config).session).toEqual({generate:false,read:false});
+ expect(await runtime.reading()).toEqual(['request']);
+ const chat=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null});
+ store.appendEvent(chat.id,'user',{text:'Remember a synthetic fact'});store.appendEvent(chat.id,'text',{text:'Acknowledged'});store.appendEvent(chat.id,'status',{status:'idle'});
+ await runtime.scan(Date.now()+24*3600000);
+ expect(runtime.jobs.list({userId:store.ownerUserId}).map(job=>job.kind)).toEqual(['request']);
+ const captured=await runtime.captureConversation(chat.id,'explicit','session',true);
+ expect(captured).toMatchObject({sources:[],jobs:[],pendingReason:'generation_disabled'});
+});
+
+test('retirement preserves queued legacy jobs and historical summary evidence without model calls',async()=>{
+ const home=mkdtempSync(join(tmpdir(),'summary-history-')),store=openStore(home),config=(await readConfig(home)).config;
+ config.system={cli:'codex',memory:{request:{generate:false,read:true},session:{generate:true,read:true},idleHours:0}};
+ const generate=vi.fn(async()=> '[]'),runtime=createMemoryRuntime({home,store,schedule:false,loadConfig:async()=>config,generate});
+ cleanups.push(async()=>{await runtime.close();store.close();rmSync(home,{recursive:true,force:true});});
+ const p={userId:store.ownerUserId},chat=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null});
+ store.appendEvent(chat.id,'user',{text:'Synthetic historical summary source'});store.appendEvent(chat.id,'text',{text:'Acknowledged'});store.appendEvent(chat.id,'status',{status:'idle'});
+ const c=runtime.memory.ensureCollection(p,{projectId:null,agentId:null});
+ // Seed a pre-retirement session job through the legacy storage API.
+ const capture=runtime.memory.captureConversation(p,{collectionId:c.id,conversationId:chat.id,trigger:'explicit',kind:'session'}),job=capture.jobs[0];
+ const summary={conversationId:chat.id,text:'Historical summary',evidence:job.sourceRefs,dependencies:[]};
+ store.database.prepare('INSERT INTO memory_session_summaries VALUES (?,?,?,?)').run(job.id,c.id,chat.id,JSON.stringify(summary));
+ const before=store.database.prepare('SELECT data FROM memory_jobs WHERE id=?').get(job.id)?.data;
+ await runtime.scan();await runtime.drain();
+ expect(generate).not.toHaveBeenCalled();
+ expect(store.database.prepare('SELECT data FROM memory_jobs WHERE id=?').get(job.id)?.data).toBe(before);
+ expect(runtime.result(p,job.id).summaries).toEqual([{conversationId:chat.id,text:'Historical summary'}]);
+ expect(runtime.memory.source(p,capture.sources[0].id).text).toContain('Synthetic historical');
+ await expect(runtime.organize(chat.id)).rejects.toMatchObject({code:'conversation_summary_retired',status:410});
+ const {createSessionManager}=await import('../server/sessions'),{createHttpServer}=await import('../server/http');
+ const manager=createSessionManager(store,async()=>config,undefined,undefined,home,undefined,undefined,runtime),server=createHttpServer({requireIdentity:false,home,store,manager,memoryRuntime:runtime});
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+(server.address() as {port:number}).port;
+ cleanups.unshift(async()=>{await manager.close();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));});
+ const index=await(await fetch(base+'/api/v2/memory/records')).json();expect(index).not.toHaveProperty('summaries');
+ expect((await fetch(base+'/api/v2/memory/organize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId:chat.id})})).status).toBe(410);
+ expect(store.database.prepare('SELECT data FROM memory_session_summaries WHERE id=?').get(job.id)?.data).toBe(JSON.stringify(summary));
+});

@@ -1,0 +1,5 @@
+.app-navigation-brand { display: block; color: var(--muted); font-size:var(--type-meta); letter-spacing: .035em; margin: 0 0 5px 4px; }
+.product-frame .app-navigation .app-brand { display: flex; gap: 8px; padding: 8px 4px; font-size: var(--type-body); }
+.product-frame .app-navigation .app-brand > svg:first-child { color: var(--text); opacity: .85; }
+.product-frame .app-navigation .app-brand strong { font-size: var(--type-body); font-weight: var(--weight-medium); }
+.product-frame .app-navigation .app-brand > svg:last-child { color: var(--muted); opacity: .6; }

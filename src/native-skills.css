@@ -1,0 +1,23 @@
+.native-skills-panel { margin-top: 20px; min-width: 0; }
+.native-skills-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.native-skills-heading h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; }
+.native-skills-heading > span, .native-skills-count { color: var(--muted); font-size: var(--type-meta); }
+.native-skills-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.native-skills-controls label { min-width: 0; font-size: var(--type-meta); }
+.native-skills-toolbar { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.native-skills-toolbar label { flex: 1; min-width: 0; margin: 0; }
+.native-skills-toolbar input { width: 100%; }
+.native-skills-toolbar > button { display: flex; align-items: center; justify-content: center; padding: 8px; }
+.native-skills-list { border-top: 1px solid var(--border); }
+.native-skill-row { padding: 12px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.native-skill-name, .native-skill-state { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; }
+.native-skill-name strong { font-size: var(--type-ui); overflow-wrap: anywhere; }
+.native-skill-name > span, .native-skill-state { color: var(--muted); font-size: var(--type-meta); }
+.native-skill-row code { display: block; margin: 6px 0; font-size: var(--type-meta); color: var(--muted); white-space: normal; overflow-wrap: anywhere; }
+.native-skill-override { color: var(--accent); }
+.native-skills-more { margin-top: 12px; font-size: var(--type-meta); }
+.native-skills-help { margin-top: 16px; color: var(--muted); font-size: var(--type-meta); line-height: 1.6; }
+.native-skills-help summary { cursor: pointer; }
+.native-skills-help p { margin: 6px 0; }
+.platform-skills-caption { color: var(--muted); font-size: var(--type-meta); margin: 0 0 16px; }
+@media (max-width: 600px) { .native-skills-controls { grid-template-columns: minmax(0, 1fr); } }

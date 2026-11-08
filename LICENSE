@@ -1,0 +1,69 @@
+Mandala Source-Available License
+Version 1.0 — 2026-10-18
+
+1. Scope and rights holders
+
+This license covers original Mandala source code and documentation made
+available under this license (the "Software"). Each contributing copyright
+holder (a "Licensor") grants only rights that they own and are entitled to
+license. Copyright remains with the respective rights holders. No ownership
+assignment, exclusive ownership, or legal entity is asserted by this file.
+
+Third-party code, dependencies, fonts, icons and other separately licensed
+material are excluded and remain under their own terms. See
+THIRD_PARTY_NOTICES.md and the notices accompanying those materials. This
+license does not replace, narrow, or revoke any rights already granted under
+an earlier license for a particular copy or contribution.
+
+2. Permitted use
+
+Subject to these terms, each Licensor permits you, without a license fee, to
+access, study, use, reproduce, modify, build and self-host the Software:
+
+(a) as an individual for your own personal purposes; or
+(b) within a single organization for that organization's own internal
+    operations, including internal commercial use.
+
+A single organization may operate multiple internal users, workspaces and
+instances. Internal commercial use does not require separate authorization.
+
+You may redistribute original or modified source and binary copies, provided
+that you retain this complete license and applicable copyright, attribution
+and third-party notices, identify your modifications, and give recipients
+these same terms for the covered Software. Each recipient's use remains
+subject to these terms. Distribution alone does not authorize a hosted
+service. Separately licensed materials remain governed by their own terms.
+
+3. Third-party hosted services
+
+You may not use the Software, including a modified version, to operate or
+provide a hosted service for third parties without prior written
+authorization from the applicable Licensor(s). A third party is a user outside
+your personal use or your single organization's internal operations. This
+restriction includes hosted application access, managed instances and relay
+or connection services operated for such third parties. It applies whether
+the service is paid or free, public or private, and whether it has advertising
+or any other source of revenue. An official hosted offering is not an
+exception to this requirement.
+
+Publishing a source repository or distributing a copy is not, by itself,
+operating a hosted service. Written authorization for a restricted service
+must come from the relevant rights holder(s); it cannot be inferred from
+availability of the source, silence, or a technical ability to deploy it.
+
+4. Notices and other rights
+
+This is a source-available license with a use restriction. It is not an
+unrestricted open-source license and is not represented as OSI-approved.
+No trademark right, endorsement, or right over user data, model services or
+native CLI credentials is granted. Other rights are reserved by their
+respective holders; third-party and prior grants described in section 1
+remain unaffected.
+
+5. Warranty and liability
+
+To the extent permitted by applicable law, the Software is supplied "AS IS",
+without warranties or conditions of any kind, express or implied, including
+merchantability, fitness for a particular purpose and noninfringement. To the
+extent permitted by applicable law, no Licensor is liable for damages or
+other liability arising from use of or inability to use the Software.

@@ -1,0 +1,10 @@
+import { execFileSync } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
+const tag = process.env.RELEASE_TAG;
+if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(tag ?? '')) throw new Error('Release requires an existing vX.Y.Z tag');
+const tagged = execFileSync('git', ['rev-parse', `refs/tags/${tag}^{commit}`], { encoding: 'utf8' }).trim();
+const checked = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+if (tagged !== checked) throw new Error('Checkout does not match the fixed release tag');
+if (execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim()) throw new Error('Release source must be clean');
+appendFileSync(process.env.GITHUB_ENV, `MANDALA_VERSION=${tag.slice(1)}\n`);
+console.log(`${tag}: ${checked}`);

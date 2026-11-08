@@ -1,0 +1,24 @@
+import {openNotifications} from './helpers/notifications';
+// spec: specs/progress-acceptance-plan.md P18/P19/P32/P37
+// seed: tests/e2e/seed.spec.ts
+import {test,expect} from '@playwright/test';
+test.describe('Progress 用户目标验收',()=>{test('P37 current Task notices cannot intercept composer or selected queued-message actions',async({page,request},info)=>{
+ test.setTimeout(60000);
+ await page.addInitScript(()=>localStorage.setItem('mana-language','en'));await request.post('/__test__/progress-fixture');
+ const chat=await(await request.post('/api/conversations',{data:{projectId:'',agentId:'',workspaceId:null}})).json();await request.post('/api/conversations/'+chat.id+'/messages',{data:{text:'hold'}});const queued=await(await request.post('/api/conversations/'+chat.id+'/queue',{data:{text:'Queued human request must stay pending',commandKey:crypto.randomUUID()}})).json();
+ await page.setViewportSize({width:1280,height:450});const firstCursor=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v2/task-notifications');await page.goto('/?conversation='+chat.id);await firstCursor;await page.getByRole('textbox',{name:'Message',exact:true}).fill('Unsent draft protected from current notices');
+ const taskIds:string[]=[];
+ // Three independent current approvals fill the notification stack without stale or synthetic toast state.
+ for(let index=0;index<3;index++){
+  const {directory}=await(await request.post('/__test__/execution-directory')).json(),current=await(await request.get('/api/config')).json(),projectId='notice-'+crypto.randomUUID();await request.put('/api/config',{data:{revision:current.revision,config:{...current.config,projects:[...current.config.projects,{id:projectId,name:'Current approval '+index,cwd:directory,agentIds:['progress-reviewer'],resources:[],mcp:[],skills:[]}]}}});const task=await(await request.post('/api/v2/tasks',{headers:{'Idempotency-Key':crypto.randomUUID()},data:{goal:'approval',projectId,assigneeAgentId:'progress-reviewer'}})).json();taskIds.push(task.id);expect((await request.post('/api/v2/tasks/'+task.id+'/start',{headers:{'Idempotency-Key':crypto.randomUUID()},data:{expectedRevision:task.revision}})).ok()).toBe(true);await expect.poll(async()=>(await(await request.get('/api/v2/tasks/'+task.id)).json()).runs.at(-1)?.state,{timeout:15000}).toBe('approval');
+ }
+ const notices=page.getByRole('dialog',{name:'Notifications',exact:true});await expect(page.getByRole('button',{name:'Notifications',exact:true})).toContainText('3');await expect(notices).not.toBeVisible();
+ for(const width of [1280,390]){
+  await page.setViewportSize({width,height:450});const send=page.getByRole('button',{name:'Queue message',exact:true}),interrupt=page.locator('.queued-input').filter({hasText:'Queued human request must stay pending'}).getByRole('button',{name:'Interrupt and send',exact:true});
+  await expect(notices).not.toBeVisible();for(const button of [send,interrupt]){await button.scrollIntoViewIfNeeded();await expect(button).toBeEnabled();await expect(button).toBeVisible();}
+  await page.screenshot({path:info.outputPath('notices-actions-current-'+width+'.png'),fullPage:true});await openNotifications(page);await expect(notices.getByRole('link',{name:'Review approval',exact:true})).toHaveCount(3);await expect(notices.getByRole('link',{name:'View all tasks',exact:true})).toBeInViewport();await page.screenshot({path:info.outputPath('notices-current-'+width+'.png'),fullPage:true});await page.keyboard.press('Escape');if(width===390)await page.keyboard.press('Escape');
+ }
+ // Moving the same live notices between chat flow and the non-chat surface must preserve their identities/cursor.
+ await page.setViewportSize({width:1280,height:450});await openNotifications(page);const destinations=await notices.getByRole('link',{name:'Review approval',exact:true}).evaluateAll(links=>links.map(link=>link.getAttribute('href')));await page.setViewportSize({width:1280,height:450});await page.locator('.sidebar a[href="/tasks"]').click();await openNotifications(page);await expect(notices.getByRole('link',{name:'Review approval',exact:true})).toHaveCount(3);expect(await notices.getByRole('link',{name:'Review approval',exact:true}).evaluateAll(links=>links.map(link=>link.getAttribute('href')))).toEqual(destinations);await page.goBack();await expect(page).toHaveURL(new RegExp('conversation='+chat.id));await openNotifications(page);await expect(notices.getByRole('link',{name:'Review approval',exact:true})).toHaveCount(3);
+ await page.keyboard.press('Escape');await expect(page.getByRole('textbox',{name:'Message',exact:true})).toHaveValue('Unsent draft protected from current notices');expect((await(await request.get('/api/conversations/'+chat.id+'/queue')).json()).find((q:{id:string})=>q.id===queued.id).state).toBe('queued');for(const id of taskIds)expect((await(await request.get('/api/v2/tasks/'+id)).json()).runs.at(-1).state).toBe('approval');
+});});

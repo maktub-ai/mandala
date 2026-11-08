@@ -1,0 +1,19 @@
+.markdown-text .local-file-link { display: inline; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--accent); font: inherit; line-height: inherit; text-align: left; text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.markdown-text .local-file-link:hover { background: transparent; color: var(--text); }
+.file-preview-panel.settings-panel { width: min(900px, calc(100vw - 48px)); max-height: calc(100dvh - 48px); padding: 16px; gap: 16px; }
+.file-preview-header { display: flex; align-items: center; gap: 8px; flex: none; }
+.file-preview-header h2 { flex: 1; min-width: 0; margin: 0; font-size: var(--type-body); font-weight: var(--weight-heading); overflow-wrap: anywhere; }
+.file-preview-header button { display: grid; place-items: center; padding: 8px; border: 0; background: transparent; color: var(--muted); flex: none; }
+.file-preview-content { min-height: 0; overflow: auto; font-size: var(--type-ui); }
+.file-preview-content > pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.html-preview { min-width:0; }
+.html-preview-toolbar { display:flex; justify-content:flex-end; margin-bottom:8px; }
+.html-preview iframe { display:block; width:100%; min-height:480px; height:65dvh; border:1px solid var(--border); border-radius:var(--control-radius); background:var(--surface); }
+.local-file-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; font-size:var(--type-meta); }
+.local-file-actions button { display:inline-flex; align-items:center; gap:6px; }
+.local-file-actions [role=alert] { color:var(--danger); overflow-wrap:anywhere; }
+.markdown-text .source-link { display:inline-flex; align-items:baseline; gap:4px; max-width:100%; color:var(--accent); text-decoration:none; vertical-align:baseline; }
+.markdown-text .source-link svg { flex-shrink:0; align-self:center; opacity:.85; }
+.markdown-text .source-link span { min-width:0; overflow-wrap:anywhere; }
+.markdown-text .source-link[data-source=local],.markdown-text .source-link[data-source=attachment],.markdown-text .source-link[data-source=material] { padding:1px 8px; border:1px solid var(--border); border-radius: var(--badge-radius); background:var(--raised); font-size:.92em; }
+.markdown-text .source-link:hover { color:var(--text); text-decoration:underline; }

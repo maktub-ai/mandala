@@ -1,0 +1,2215 @@
+{
+  "provenance": "Agent-authored synthetic regression gold: six parameterized scenario templates, five Chinese and five English cases each. Limited semantic diversity; not human reviewed; no real model or private conversation data.",
+  "cases": [
+    {
+      "id": "fact-zh-1",
+      "category": "fact",
+      "language": "zh",
+      "user": "请记住：阿特拉斯项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "阿特拉斯",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "阿特拉斯 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：阿特拉斯项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：阿特拉斯项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：阿特拉斯项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：阿特拉斯项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "fact-zh-2",
+      "category": "fact",
+      "language": "zh",
+      "user": "请记住：雪松项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "雪松",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "雪松 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：雪松项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：雪松项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：雪松项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：雪松项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "fact-zh-3",
+      "category": "fact",
+      "language": "zh",
+      "user": "请记住：港湾项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "港湾",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "港湾 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：港湾项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：港湾项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：港湾项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：港湾项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "fact-zh-4",
+      "category": "fact",
+      "language": "zh",
+      "user": "请记住：枫树项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "枫树",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "枫树 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：枫树项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：枫树项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：枫树项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：枫树项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "fact-zh-5",
+      "category": "fact",
+      "language": "zh",
+      "user": "请记住：轨道项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "轨道",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "轨道 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：轨道项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：轨道项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：轨道项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：轨道项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "fact-en-1",
+      "category": "fact",
+      "language": "en",
+      "user": "Please remember: atlas project color is blue.",
+      "assistant": "Noted.",
+      "query": "atlas",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "atlas deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: atlas project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: atlas project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: atlas project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: atlas project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "fact-en-2",
+      "category": "fact",
+      "language": "en",
+      "user": "Please remember: cedar project color is blue.",
+      "assistant": "Noted.",
+      "query": "cedar",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "cedar deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: cedar project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: cedar project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: cedar project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: cedar project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "fact-en-3",
+      "category": "fact",
+      "language": "en",
+      "user": "Please remember: harbor project color is blue.",
+      "assistant": "Noted.",
+      "query": "harbor",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "harbor deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: harbor project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: harbor project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: harbor project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: harbor project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "fact-en-4",
+      "category": "fact",
+      "language": "en",
+      "user": "Please remember: maple project color is blue.",
+      "assistant": "Noted.",
+      "query": "maple",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "maple deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: maple project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: maple project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: maple project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: maple project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "fact-en-5",
+      "category": "fact",
+      "language": "en",
+      "user": "Please remember: orbit project color is blue.",
+      "assistant": "Noted.",
+      "query": "orbit",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "orbit deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: orbit project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: orbit project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: orbit project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: orbit project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "preference-zh-1",
+      "category": "preference",
+      "language": "zh",
+      "user": "以后阿特拉斯报告按日期排序。",
+      "assistant": "收到。",
+      "query": "阿特拉斯",
+      "allowed": [
+        "target:L2",
+        "target:L3"
+      ],
+      "required": [
+        "target:L2",
+        "target:L3"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "阿特拉斯 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L3": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：以后阿特拉斯报告按日期排序。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：阿特拉斯项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：阿特拉斯项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：阿特拉斯项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "preference-zh-2",
+      "category": "preference",
+      "language": "zh",
+      "user": "以后雪松报告按日期排序。",
+      "assistant": "收到。",
+      "query": "雪松",
+      "allowed": [
+        "target:L2",
+        "target:L3"
+      ],
+      "required": [
+        "target:L2",
+        "target:L3"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "雪松 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L3": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：以后雪松报告按日期排序。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：雪松项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：雪松项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：雪松项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "preference-zh-3",
+      "category": "preference",
+      "language": "zh",
+      "user": "以后港湾报告按日期排序。",
+      "assistant": "收到。",
+      "query": "港湾",
+      "allowed": [
+        "target:L2",
+        "target:L3"
+      ],
+      "required": [
+        "target:L2",
+        "target:L3"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "港湾 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L3": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：以后港湾报告按日期排序。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：港湾项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：港湾项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：港湾项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "preference-zh-4",
+      "category": "preference",
+      "language": "zh",
+      "user": "以后枫树报告按日期排序。",
+      "assistant": "收到。",
+      "query": "枫树",
+      "allowed": [
+        "target:L2",
+        "target:L3"
+      ],
+      "required": [
+        "target:L2",
+        "target:L3"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "枫树 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L3": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：以后枫树报告按日期排序。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：枫树项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：枫树项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：枫树项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "preference-zh-5",
+      "category": "preference",
+      "language": "zh",
+      "user": "以后轨道报告按日期排序。",
+      "assistant": "收到。",
+      "query": "轨道",
+      "allowed": [
+        "target:L2",
+        "target:L3"
+      ],
+      "required": [
+        "target:L2",
+        "target:L3"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "轨道 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L3": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：以后轨道报告按日期排序。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：轨道项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：轨道项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：轨道项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "preference-en-1",
+      "category": "preference",
+      "language": "en",
+      "user": "I prefer atlas reports sorted by date.",
+      "assistant": "Noted.",
+      "query": "atlas",
+      "allowed": [
+        "target:L2",
+        "target:L3"
+      ],
+      "required": [
+        "target:L2",
+        "target:L3"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "atlas deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L3": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：I prefer atlas reports sorted by date.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: atlas project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: atlas project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: atlas project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "preference-en-2",
+      "category": "preference",
+      "language": "en",
+      "user": "I prefer cedar reports sorted by date.",
+      "assistant": "Noted.",
+      "query": "cedar",
+      "allowed": [
+        "target:L2",
+        "target:L3"
+      ],
+      "required": [
+        "target:L2",
+        "target:L3"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "cedar deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L3": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：I prefer cedar reports sorted by date.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: cedar project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: cedar project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: cedar project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "preference-en-3",
+      "category": "preference",
+      "language": "en",
+      "user": "I prefer harbor reports sorted by date.",
+      "assistant": "Noted.",
+      "query": "harbor",
+      "allowed": [
+        "target:L2",
+        "target:L3"
+      ],
+      "required": [
+        "target:L2",
+        "target:L3"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "harbor deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L3": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：I prefer harbor reports sorted by date.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: harbor project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: harbor project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: harbor project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "preference-en-4",
+      "category": "preference",
+      "language": "en",
+      "user": "I prefer maple reports sorted by date.",
+      "assistant": "Noted.",
+      "query": "maple",
+      "allowed": [
+        "target:L2",
+        "target:L3"
+      ],
+      "required": [
+        "target:L2",
+        "target:L3"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "maple deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L3": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：I prefer maple reports sorted by date.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: maple project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: maple project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: maple project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "preference-en-5",
+      "category": "preference",
+      "language": "en",
+      "user": "I prefer orbit reports sorted by date.",
+      "assistant": "Noted.",
+      "query": "orbit",
+      "allowed": [
+        "target:L2",
+        "target:L3"
+      ],
+      "required": [
+        "target:L2",
+        "target:L3"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "orbit deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L3": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：I prefer orbit reports sorted by date.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: orbit project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: orbit project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: orbit project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "correction-zh-1",
+      "category": "correction",
+      "language": "zh",
+      "user": "请记住：阿特拉斯项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "阿特拉斯",
+      "allowed": [
+        "target:L1"
+      ],
+      "required": [
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "阿特拉斯 已经部署成功。",
+        "请记住：阿特拉斯项目的颜色是蓝色。"
+      ],
+      "sourceExpectations": {
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：阿特拉斯项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：阿特拉斯项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：阿特拉斯项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：阿特拉斯项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "correction-zh-2",
+      "category": "correction",
+      "language": "zh",
+      "user": "请记住：雪松项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "雪松",
+      "allowed": [
+        "target:L1"
+      ],
+      "required": [
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "雪松 已经部署成功。",
+        "请记住：雪松项目的颜色是蓝色。"
+      ],
+      "sourceExpectations": {
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：雪松项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：雪松项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：雪松项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：雪松项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "correction-zh-3",
+      "category": "correction",
+      "language": "zh",
+      "user": "请记住：港湾项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "港湾",
+      "allowed": [
+        "target:L1"
+      ],
+      "required": [
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "港湾 已经部署成功。",
+        "请记住：港湾项目的颜色是蓝色。"
+      ],
+      "sourceExpectations": {
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：港湾项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：港湾项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：港湾项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：港湾项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "correction-zh-4",
+      "category": "correction",
+      "language": "zh",
+      "user": "请记住：枫树项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "枫树",
+      "allowed": [
+        "target:L1"
+      ],
+      "required": [
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "枫树 已经部署成功。",
+        "请记住：枫树项目的颜色是蓝色。"
+      ],
+      "sourceExpectations": {
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：枫树项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：枫树项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：枫树项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：枫树项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "correction-zh-5",
+      "category": "correction",
+      "language": "zh",
+      "user": "请记住：轨道项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "轨道",
+      "allowed": [
+        "target:L1"
+      ],
+      "required": [
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "轨道 已经部署成功。",
+        "请记住：轨道项目的颜色是蓝色。"
+      ],
+      "sourceExpectations": {
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：轨道项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：轨道项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：轨道项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：轨道项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "correction-en-1",
+      "category": "correction",
+      "language": "en",
+      "user": "Please remember: atlas project color is blue.",
+      "assistant": "Noted.",
+      "query": "atlas",
+      "allowed": [
+        "target:L1"
+      ],
+      "required": [
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "atlas deployment succeeded.",
+        "Please remember: atlas project color is blue."
+      ],
+      "sourceExpectations": {
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: atlas project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: atlas project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: atlas project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: atlas project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "correction-en-2",
+      "category": "correction",
+      "language": "en",
+      "user": "Please remember: cedar project color is blue.",
+      "assistant": "Noted.",
+      "query": "cedar",
+      "allowed": [
+        "target:L1"
+      ],
+      "required": [
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "cedar deployment succeeded.",
+        "Please remember: cedar project color is blue."
+      ],
+      "sourceExpectations": {
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: cedar project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: cedar project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: cedar project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: cedar project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "correction-en-3",
+      "category": "correction",
+      "language": "en",
+      "user": "Please remember: harbor project color is blue.",
+      "assistant": "Noted.",
+      "query": "harbor",
+      "allowed": [
+        "target:L1"
+      ],
+      "required": [
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "harbor deployment succeeded.",
+        "Please remember: harbor project color is blue."
+      ],
+      "sourceExpectations": {
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: harbor project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: harbor project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: harbor project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: harbor project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "correction-en-4",
+      "category": "correction",
+      "language": "en",
+      "user": "Please remember: maple project color is blue.",
+      "assistant": "Noted.",
+      "query": "maple",
+      "allowed": [
+        "target:L1"
+      ],
+      "required": [
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "maple deployment succeeded.",
+        "Please remember: maple project color is blue."
+      ],
+      "sourceExpectations": {
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: maple project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: maple project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: maple project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: maple project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "correction-en-5",
+      "category": "correction",
+      "language": "en",
+      "user": "Please remember: orbit project color is blue.",
+      "assistant": "Noted.",
+      "query": "orbit",
+      "allowed": [
+        "target:L1"
+      ],
+      "required": [
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "orbit deployment succeeded.",
+        "Please remember: orbit project color is blue."
+      ],
+      "sourceExpectations": {
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: orbit project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: orbit project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: orbit project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: orbit project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "scope-zh-1",
+      "category": "scope",
+      "language": "zh",
+      "user": "请记住：阿特拉斯项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "阿特拉斯",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "阿特拉斯 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：阿特拉斯项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：阿特拉斯项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：阿特拉斯项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：阿特拉斯项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "scope-zh-2",
+      "category": "scope",
+      "language": "zh",
+      "user": "请记住：雪松项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "雪松",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "雪松 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：雪松项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：雪松项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：雪松项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：雪松项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "scope-zh-3",
+      "category": "scope",
+      "language": "zh",
+      "user": "请记住：港湾项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "港湾",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "港湾 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：港湾项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：港湾项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：港湾项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：港湾项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "scope-zh-4",
+      "category": "scope",
+      "language": "zh",
+      "user": "请记住：枫树项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "枫树",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "枫树 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：枫树项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：枫树项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：枫树项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：枫树项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "scope-zh-5",
+      "category": "scope",
+      "language": "zh",
+      "user": "请记住：轨道项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "轨道",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "轨道 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：轨道项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：轨道项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：轨道项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：轨道项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "scope-en-1",
+      "category": "scope",
+      "language": "en",
+      "user": "Please remember: atlas project color is blue.",
+      "assistant": "Noted.",
+      "query": "atlas",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "atlas deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: atlas project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: atlas project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: atlas project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: atlas project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "scope-en-2",
+      "category": "scope",
+      "language": "en",
+      "user": "Please remember: cedar project color is blue.",
+      "assistant": "Noted.",
+      "query": "cedar",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "cedar deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: cedar project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: cedar project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: cedar project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: cedar project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "scope-en-3",
+      "category": "scope",
+      "language": "en",
+      "user": "Please remember: harbor project color is blue.",
+      "assistant": "Noted.",
+      "query": "harbor",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "harbor deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: harbor project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: harbor project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: harbor project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: harbor project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "scope-en-4",
+      "category": "scope",
+      "language": "en",
+      "user": "Please remember: maple project color is blue.",
+      "assistant": "Noted.",
+      "query": "maple",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "maple deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: maple project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: maple project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: maple project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: maple project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "scope-en-5",
+      "category": "scope",
+      "language": "en",
+      "user": "Please remember: orbit project color is blue.",
+      "assistant": "Noted.",
+      "query": "orbit",
+      "allowed": [
+        "target:L2",
+        "target:L1"
+      ],
+      "required": [
+        "target:L2",
+        "target:L1"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "orbit deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ],
+        "target:L1": [
+          "target:user"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: orbit project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: orbit project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: orbit project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: orbit project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "withdrawal-zh-1",
+      "category": "withdrawal",
+      "language": "zh",
+      "user": "请记住：阿特拉斯项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "阿特拉斯",
+      "allowed": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "required": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "阿特拉斯 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "survivor:L1": [
+          "survivor:user"
+        ],
+        "survivor:L2": [
+          "survivor:user",
+          "survivor:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：阿特拉斯项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：阿特拉斯项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：阿特拉斯项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：阿特拉斯项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "withdrawal-zh-2",
+      "category": "withdrawal",
+      "language": "zh",
+      "user": "请记住：雪松项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "雪松",
+      "allowed": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "required": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "雪松 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "survivor:L1": [
+          "survivor:user"
+        ],
+        "survivor:L2": [
+          "survivor:user",
+          "survivor:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：雪松项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：雪松项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：雪松项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：雪松项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "withdrawal-zh-3",
+      "category": "withdrawal",
+      "language": "zh",
+      "user": "请记住：港湾项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "港湾",
+      "allowed": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "required": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "港湾 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "survivor:L1": [
+          "survivor:user"
+        ],
+        "survivor:L2": [
+          "survivor:user",
+          "survivor:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：港湾项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：港湾项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：港湾项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：港湾项目的颜色是绿色。",
+      "withdrawalMode": "expired"
+    },
+    {
+      "id": "withdrawal-zh-4",
+      "category": "withdrawal",
+      "language": "zh",
+      "user": "请记住：枫树项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "枫树",
+      "allowed": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "required": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "枫树 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "survivor:L1": [
+          "survivor:user"
+        ],
+        "survivor:L2": [
+          "survivor:user",
+          "survivor:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：枫树项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：枫树项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：枫树项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：枫树项目的颜色是绿色。",
+      "withdrawalMode": "source_update"
+    },
+    {
+      "id": "withdrawal-zh-5",
+      "category": "withdrawal",
+      "language": "zh",
+      "user": "请记住：轨道项目的颜色是蓝色。",
+      "assistant": "收到。",
+      "query": "轨道",
+      "allowed": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "required": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "轨道 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "survivor:L1": [
+          "survivor:user"
+        ],
+        "survivor:L2": [
+          "survivor:user",
+          "survivor:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：轨道项目的颜色是蓝色。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "survivorUser": "请记住：轨道项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：轨道项目的形状是圆形。\n助手答复（未验证结论）：收到。\n来源事件：1,2,3",
+      "correction": "请记住：轨道项目的颜色是绿色。",
+      "withdrawalMode": "source_retract"
+    },
+    {
+      "id": "withdrawal-en-1",
+      "category": "withdrawal",
+      "language": "en",
+      "user": "Please remember: atlas project color is blue.",
+      "assistant": "Noted.",
+      "query": "atlas",
+      "allowed": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "required": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "atlas deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "survivor:L1": [
+          "survivor:user"
+        ],
+        "survivor:L2": [
+          "survivor:user",
+          "survivor:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: atlas project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: atlas project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: atlas project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: atlas project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "withdrawal-en-2",
+      "category": "withdrawal",
+      "language": "en",
+      "user": "Please remember: cedar project color is blue.",
+      "assistant": "Noted.",
+      "query": "cedar",
+      "allowed": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "required": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "cedar deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "survivor:L1": [
+          "survivor:user"
+        ],
+        "survivor:L2": [
+          "survivor:user",
+          "survivor:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: cedar project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: cedar project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: cedar project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: cedar project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "withdrawal-en-3",
+      "category": "withdrawal",
+      "language": "en",
+      "user": "Please remember: harbor project color is blue.",
+      "assistant": "Noted.",
+      "query": "harbor",
+      "allowed": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "required": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "harbor deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "survivor:L1": [
+          "survivor:user"
+        ],
+        "survivor:L2": [
+          "survivor:user",
+          "survivor:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: harbor project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: harbor project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: harbor project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: harbor project color is green.",
+      "withdrawalMode": "expired"
+    },
+    {
+      "id": "withdrawal-en-4",
+      "category": "withdrawal",
+      "language": "en",
+      "user": "Please remember: maple project color is blue.",
+      "assistant": "Noted.",
+      "query": "maple",
+      "allowed": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "required": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "maple deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "survivor:L1": [
+          "survivor:user"
+        ],
+        "survivor:L2": [
+          "survivor:user",
+          "survivor:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: maple project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: maple project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: maple project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: maple project color is green.",
+      "withdrawalMode": "source_update"
+    },
+    {
+      "id": "withdrawal-en-5",
+      "category": "withdrawal",
+      "language": "en",
+      "user": "Please remember: orbit project color is blue.",
+      "assistant": "Noted.",
+      "query": "orbit",
+      "allowed": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "required": [
+        "survivor:L1",
+        "survivor:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1",
+        "target:L1",
+        "target:L2"
+      ],
+      "forbiddenClaims": [
+        "orbit deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "survivor:L1": [
+          "survivor:user"
+        ],
+        "survivor:L2": [
+          "survivor:user",
+          "survivor:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: orbit project color is blue.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: orbit project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: orbit project shape is round.\n助手答复（未验证结论）：Noted.\n来源事件：1,2,3",
+      "correction": "Please remember: orbit project color is green.",
+      "withdrawalMode": "source_retract"
+    },
+    {
+      "id": "unsupported-zh-1",
+      "category": "unsupported",
+      "language": "zh",
+      "user": "分析阿特拉斯部署计划。",
+      "assistant": "阿特拉斯 已经部署成功。",
+      "query": "阿特拉斯",
+      "allowed": [
+        "target:L2"
+      ],
+      "required": [
+        "target:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "阿特拉斯 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：分析阿特拉斯部署计划。\n助手答复（未验证结论）：阿特拉斯 已经部署成功。\n来源事件：1,2,3",
+      "survivorUser": "请记住：阿特拉斯项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：阿特拉斯项目的形状是圆形。\n助手答复（未验证结论）：阿特拉斯 已经部署成功。\n来源事件：1,2,3",
+      "correction": "请记住：阿特拉斯项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "unsupported-zh-2",
+      "category": "unsupported",
+      "language": "zh",
+      "user": "分析雪松部署计划。",
+      "assistant": "雪松 已经部署成功。",
+      "query": "雪松",
+      "allowed": [
+        "target:L2"
+      ],
+      "required": [
+        "target:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "雪松 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：分析雪松部署计划。\n助手答复（未验证结论）：雪松 已经部署成功。\n来源事件：1,2,3",
+      "survivorUser": "请记住：雪松项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：雪松项目的形状是圆形。\n助手答复（未验证结论）：雪松 已经部署成功。\n来源事件：1,2,3",
+      "correction": "请记住：雪松项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "unsupported-zh-3",
+      "category": "unsupported",
+      "language": "zh",
+      "user": "分析港湾部署计划。",
+      "assistant": "港湾 已经部署成功。",
+      "query": "港湾",
+      "allowed": [
+        "target:L2"
+      ],
+      "required": [
+        "target:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "港湾 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：分析港湾部署计划。\n助手答复（未验证结论）：港湾 已经部署成功。\n来源事件：1,2,3",
+      "survivorUser": "请记住：港湾项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：港湾项目的形状是圆形。\n助手答复（未验证结论）：港湾 已经部署成功。\n来源事件：1,2,3",
+      "correction": "请记住：港湾项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "unsupported-zh-4",
+      "category": "unsupported",
+      "language": "zh",
+      "user": "分析枫树部署计划。",
+      "assistant": "枫树 已经部署成功。",
+      "query": "枫树",
+      "allowed": [
+        "target:L2"
+      ],
+      "required": [
+        "target:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "枫树 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：分析枫树部署计划。\n助手答复（未验证结论）：枫树 已经部署成功。\n来源事件：1,2,3",
+      "survivorUser": "请记住：枫树项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：枫树项目的形状是圆形。\n助手答复（未验证结论）：枫树 已经部署成功。\n来源事件：1,2,3",
+      "correction": "请记住：枫树项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "unsupported-zh-5",
+      "category": "unsupported",
+      "language": "zh",
+      "user": "分析轨道部署计划。",
+      "assistant": "轨道 已经部署成功。",
+      "query": "轨道",
+      "allowed": [
+        "target:L2"
+      ],
+      "required": [
+        "target:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "轨道 已经部署成功。"
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：分析轨道部署计划。\n助手答复（未验证结论）：轨道 已经部署成功。\n来源事件：1,2,3",
+      "survivorUser": "请记住：轨道项目的形状是圆形。",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：请记住：轨道项目的形状是圆形。\n助手答复（未验证结论）：轨道 已经部署成功。\n来源事件：1,2,3",
+      "correction": "请记住：轨道项目的颜色是绿色。",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "unsupported-en-1",
+      "category": "unsupported",
+      "language": "en",
+      "user": "Analyze the atlas deployment plan.",
+      "assistant": "atlas deployment succeeded.",
+      "query": "atlas",
+      "allowed": [
+        "target:L2"
+      ],
+      "required": [
+        "target:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "atlas deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Analyze the atlas deployment plan.\n助手答复（未验证结论）：atlas deployment succeeded.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: atlas project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: atlas project shape is round.\n助手答复（未验证结论）：atlas deployment succeeded.\n来源事件：1,2,3",
+      "correction": "Please remember: atlas project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "unsupported-en-2",
+      "category": "unsupported",
+      "language": "en",
+      "user": "Analyze the cedar deployment plan.",
+      "assistant": "cedar deployment succeeded.",
+      "query": "cedar",
+      "allowed": [
+        "target:L2"
+      ],
+      "required": [
+        "target:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "cedar deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Analyze the cedar deployment plan.\n助手答复（未验证结论）：cedar deployment succeeded.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: cedar project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: cedar project shape is round.\n助手答复（未验证结论）：cedar deployment succeeded.\n来源事件：1,2,3",
+      "correction": "Please remember: cedar project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "unsupported-en-3",
+      "category": "unsupported",
+      "language": "en",
+      "user": "Analyze the harbor deployment plan.",
+      "assistant": "harbor deployment succeeded.",
+      "query": "harbor",
+      "allowed": [
+        "target:L2"
+      ],
+      "required": [
+        "target:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "harbor deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Analyze the harbor deployment plan.\n助手答复（未验证结论）：harbor deployment succeeded.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: harbor project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: harbor project shape is round.\n助手答复（未验证结论）：harbor deployment succeeded.\n来源事件：1,2,3",
+      "correction": "Please remember: harbor project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "unsupported-en-4",
+      "category": "unsupported",
+      "language": "en",
+      "user": "Analyze the maple deployment plan.",
+      "assistant": "maple deployment succeeded.",
+      "query": "maple",
+      "allowed": [
+        "target:L2"
+      ],
+      "required": [
+        "target:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "maple deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Analyze the maple deployment plan.\n助手答复（未验证结论）：maple deployment succeeded.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: maple project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: maple project shape is round.\n助手答复（未验证结论）：maple deployment succeeded.\n来源事件：1,2,3",
+      "correction": "Please remember: maple project color is green.",
+      "withdrawalMode": "record"
+    },
+    {
+      "id": "unsupported-en-5",
+      "category": "unsupported",
+      "language": "en",
+      "user": "Analyze the orbit deployment plan.",
+      "assistant": "orbit deployment succeeded.",
+      "query": "orbit",
+      "allowed": [
+        "target:L2"
+      ],
+      "required": [
+        "target:L2"
+      ],
+      "forbiddenIds": [
+        "foreign:L1",
+        "foreign:L2",
+        "candidate:L1"
+      ],
+      "forbiddenClaims": [
+        "orbit deployment succeeded."
+      ],
+      "sourceExpectations": {
+        "target:L2": [
+          "target:user",
+          "target:assistant"
+        ]
+      },
+      "historicalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Analyze the orbit deployment plan.\n助手答复（未验证结论）：orbit deployment succeeded.\n来源事件：1,2,3",
+      "survivorUser": "Please remember: orbit project shape is round.",
+      "survivorHistoricalText": "对话阶段摘录（2026-10-04T00:00:00Z；不代表当前状态）\n用户输入：Please remember: orbit project shape is round.\n助手答复（未验证结论）：orbit deployment succeeded.\n来源事件：1,2,3",
+      "correction": "Please remember: orbit project color is green.",
+      "withdrawalMode": "record"
+    }
+  ]
+}

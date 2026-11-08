@@ -1,0 +1,16 @@
+.telegram-settings { margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--border-soft); }
+.telegram-connection { display:grid; gap:12px; min-width:0; }
+.telegram-connection a { color:var(--link); text-decoration:underline; }
+.telegram-connection p { margin:0; overflow-wrap:anywhere; }
+.telegram-status,.telegram-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.telegram-status small { flex-basis:100%; color:var(--muted); font-size:var(--type-meta); }
+.telegram-actions > p { flex-basis:100%; }
+.telegram-pairing { display:flex; align-items:center; flex-wrap:wrap; gap:16px; }
+.telegram-pairing img { flex-shrink:0; max-width:100%; height:auto; }
+.telegram-candidate { display:grid; gap:8px; }
+.telegram-candidate > button { justify-self:start; }
+.telegram-option { display:flex; align-items:center; gap:8px; font-size:var(--type-ui); min-height:var(--control-height); cursor:pointer; }
+.telegram-task-notification { padding:4px 0; }
+.turn-change > .telegram-task-notification { padding-inline:12px; }
+.telegram-source { display:block; color:var(--muted); font-size:var(--type-meta); margin-bottom:4px; }
+@media (pointer:coarse) { .telegram-option { min-height:44px; } }

@@ -1,0 +1,75 @@
+.chat-setup { max-width: 760px; margin: 0 auto; padding: 40px 24px 24px; }
+.chat-setup > h1 { margin: 8px 0 12px; font-size: 28px; font-weight: var(--weight-heading); letter-spacing: -.6px; }
+.chat-setup > p { color: var(--muted); line-height: 1.7; }
+.setup-fields { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, .8fr); gap: 16px; margin-top: 28px; }
+.setup-fields label { display: flex; flex-direction: column; gap: 8px; color: var(--muted); font-size: var(--type-meta); min-width: 0; }
+.setup-fields select { width: 100%; min-width: 0; color: var(--text); font-size: var(--type-body); }
+.setup-model { grid-column: 1 / -1; }
+.setup-instructions { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: var(--type-ui); }
+.setup-environment { display: flex; gap: 12px; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); padding: 16px 0; }
+.setup-environment > span { color: var(--muted); min-width: 0; font-size: var(--type-meta); overflow-wrap: anywhere; }
+.setup-environment > button { flex-shrink: 0; font-size: var(--type-meta); }
+.setup-capabilities { padding: 12px 0; border-top: 1px solid var(--border); }
+.setup-capabilities summary { cursor: pointer; color: var(--accent); font-size: var(--type-ui); }
+.setup-capabilities .effective-panel { padding-top: 16px; }
+.context-identity { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+.composer-context { color: var(--muted); font-size: var(--type-meta); flex: 1 0 auto; white-space: nowrap; }
+.environment-panel { width: 410px; flex-shrink: 0; overflow-y: auto; padding: 24px 20px; background: var(--panel); border-left: 1px solid var(--border); }
+.environment-heading { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; margin-bottom: 24px; }
+.environment-heading h2 { font-size: 16px; margin: 0 0 6px; }
+.environment-heading p { font-size: var(--type-meta); color: var(--muted); margin: 0; overflow-wrap: anywhere; }
+.environment-panel .effective-filters { grid-template-columns: 1fr 1fr; }
+.environment-panel .effective-search { grid-column: 1 / -1; }
+.environment-panel .effective-summary dl { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.environment-panel .effective-row { flex-wrap: wrap; }
+.chat-utilities { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 32px; color: var(--muted); }
+.chat-utilities > button { padding: 4px 8px; font-size: var(--type-meta); border-color: transparent; }
+.chat-utilities > span { font-size: var(--type-meta); line-height: 1.5; }
+.runtime-preview { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 20px; font-size: var(--type-meta); }
+.runtime-preview h3 { font-size: var(--type-ui); }
+.runtime-preview dl > div { margin: 10px 0; }
+.runtime-preview dt { color: var(--muted); margin-bottom: 6px; }
+.runtime-preview dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 1100px) {
+  .environment-panel { position: fixed; right: 0; top: 0; height: 100dvh; width: min(440px, 100vw); z-index: 25; box-shadow: var(--overlay-shadow); }
+}
+@media (max-width: 600px) {
+  .chat-setup { padding: 24px 16px 12px; }
+  .chat-setup > h1 { font-size: 24px; }
+  .setup-fields { gap: 12px; margin-top: 20px; }
+  .environment-panel { padding: 20px 16px; }
+  .context-identity { max-width: 100px; }
+  .chat-utilities { padding: 4px 16px; }
+}
+
+.setup-agent-label { display: flex; align-items: center; gap: 8px; }
+
+.setup-workspace { display: flex; align-items: center; gap: 8px; margin-top: 12px; max-width: 100%; }
+.setup-workspace > .ui-select { min-width: 0; max-width: 100%; }
+.setup-workspace .ui-select-trigger, .setup-workspace > button { display: flex; align-items: center; gap: 8px; min-height: 32px; border: 0; padding: 4px 8px; background: transparent; color: var(--muted); font-size: var(--type-meta); }
+.setup-workspace .ui-select-trigger:hover, .setup-workspace > button:hover { color: var(--text); background: var(--raised); }
+.workspace-editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
+.workspace-editor-toolbar > .ui-select { flex: 1; min-width: 160px; }
+.workspace-editor-toolbar > button { font-size: var(--type-meta); }
+.project-workspaces > label { margin-bottom: 14px; }
+.workbench-workspace h3 { display: flex; align-items: center; gap: 8px; font-size: var(--type-ui); margin: 18px 0 10px; }
+.project-workbench > .connected-workspace { max-width:none; }
+.workbench-goal { margin-bottom:26px; padding:24px; border:1px solid var(--border); border-radius: var(--control-radius); background:var(--panel); }
+.workbench-goal h2 { font-size:var(--type-body); margin-top:0; }
+.workbench-goal .markdown-text { font-size:var(--type-body); }
+.project-workbench .workbench-columns { display:block; }
+.workbench-goal > button { margin-top:12px; }
+.setup-project { grid-column: 1 / -1; }
+
+/* The workspace is inset from the navigation frame, like a document on a desk. */
+.product-frame .app-shell { padding:8px 8px 8px 0; gap:8px; background:var(--panel); }
+.product-frame .app-shell > main { border:1px solid var(--border-soft); border-radius:var(--workspace-radius); background:var(--bg); }
+.product-frame .app-shell > .sidebar { border-right:0; }
+.product-frame .app-shell > .workspace-inspector { border:1px solid var(--border-soft); border-radius:var(--workspace-radius); }
+.product-frame .workspace-navigation .sidebar-destination { font-size:var(--nav-font-size); line-height:20px; }
+.product-frame .sidebar-start .new-chat { border-color:var(--border-soft); }
+@media(max-width:600px) {
+ .product-frame .app-shell { padding:0; gap:0; }
+ .product-frame .app-shell > main { border:0; border-radius:0; }
+ .product-frame .app-shell > .workspace-inspector { border-radius:0; }
+}

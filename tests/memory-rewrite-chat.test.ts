@@ -1,0 +1,91 @@
+import {readConfiguredRuntime} from './configured-runtime';
+import {historicalConfirmation} from './historical-memory-fixture';
+import { businessCliContext } from './business-cli-context';
+import { afterEach, expect, test } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { openStore } from '../server/store';
+import { readConfig } from '../server/config';
+import { createMemoryRuntime } from '../server/memory-runtime';
+import { createSessionManager } from '../server/sessions';
+import type { CodexOptions, CodexClient } from '../server/codex';
+const cleanups:(()=>Promise<void>)[]=[];
+afterEach(async()=>{for(const fn of cleanups.splice(0))await fn();});
+async function setup() {
+ const home=mkdtempSync(join(tmpdir(),'memory-chat-rewrite-')),store=openStore(home),config=(await readConfiguredRuntime(home)).config;
+ const runtime=createMemoryRuntime({verifyOutput:false,schedule:false,home,store,loadConfig:async()=>config,generate:async()=> '[]'});
+ await runtime.initialize();
+ const c=runtime.memory.ensureCollection({userId:'local'},{projectId:null,agentId:null});
+ const source=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null});
+ const e=store.appendEvent(source.id,'user',{text:'我的笔记项目使用 pnpm。'});store.appendEvent(source.id,'status',{status:'idle'});
+ const captured=runtime.memory.captureConversation({userId:'local'},{collectionId:c.id,conversationId:source.id,trigger:'explicit',kind:'request'}).sources[0];
+ const r=runtime.memory.applyProposal({userId:'local'},{collectionId:c.id,layer:'L1',contentType:'fact',text:'我的笔记项目使用 pnpm。',operation:'store',replaces:[],evidence:[{sourceId:captured.id,sourceRevision:captured.revision}],support:[{sourceId:captured.id,eventId:e.id,quote:'我的笔记项目使用 pnpm。'}],validUntil:null,certainty:'user_asserted',pipeline:'request'},c.generation,'evidence_extract')!;
+ let options!:CodexOptions,token='';const instructions:string[]=[];
+ const factory=async(o:CodexOptions):Promise<CodexClient>=>{options=o;return {getStatus:async()=>({status:'ready',version:'fixture'}),listModels:async()=>[],startThread:async p=>{token=businessCliContext(p.instructions).token;expect(p.mcp).toEqual([]);instructions.push(p.instructions??'');return 'n';},resumeThread:async(_id,mcp,text)=>{token=businessCliContext(text).token;expect(mcp).toEqual([]);instructions.push(text??'');},startTurn:async()=> 't',interrupt:async()=>{},replyApproval(){},close(){}};};
+ const manager=createSessionManager(store,async()=>config,factory,undefined,home,undefined,undefined,runtime);
+ cleanups.push(async()=>{await manager.close();await runtime.close();store.close();rmSync(home,{recursive:true,force:true});});
+ return {store,config,runtime,manager,r,instructions,get token(){return token;},finish(){options.onEvent({method:'turn/completed',params:{threadId:'n',turn:{id:'t',status:'completed'}}});}};
+}
+test('request hook loads relevant ordinary L1 before reply; disabling both reads disables bound tools',async()=>{
+ const s=await setup(),chat=await s.manager.create('','',undefined,'codex');await s.manager.send(chat.id,'pnpm');
+ expect(s.instructions.at(-1)).toContain('我的笔记项目使用 pnpm。');
+ s.config.system={cli:'codex',memory:{request:{read:false},session:{read:false}}};
+ await expect(s.manager.callBoundTool(s.token,'memory_search',{query:'pnpm'},'q')).rejects.toThrow('memory_read_disabled');
+});
+test('correction and withdrawal provide notices in existing conversation instead of permanently blocking it',async()=>{
+ const s=await setup(),chat=await s.manager.create('','',undefined,'codex');await s.manager.send(chat.id,'pnpm');s.finish();
+ const changed=s.runtime.memory.correct({userId:'local'},{recordId:s.r.recordId,expectedRevision:s.r.revision,text:'我的笔记项目使用 bun。'});
+ await expect(s.manager.send(chat.id,'继续')).resolves.toBeUndefined();
+ expect(s.instructions.at(-1)).toContain('bun');expect(s.instructions.at(-1)).toContain('memory_changed');s.finish();
+ s.runtime.memory.retract({userId:'local'},{recordId:changed.recordId,expectedRevision:changed.revision});
+ await expect(s.manager.send(chat.id,'继续')).resolves.toBeUndefined();expect(s.instructions.at(-1)).toContain('retracted');
+});
+test('corrected and retracted text is absent from search and the next actual native instructions',async()=>{
+ const s=await setup(),chat=await s.manager.create('','',undefined,'codex'),root={userId:'local'};
+ await s.manager.send(chat.id,'pnpm');s.finish();
+ const changed=s.runtime.memory.correct(root,{recordId:s.r.recordId,expectedRevision:s.r.revision,text:'我的笔记项目使用 bun。'});
+ expect(s.runtime.recall.search(root,{projectId:null,query:'pnpm'}).items).toEqual([]);
+ expect(s.runtime.recall.search(root,{projectId:null,query:'bun'}).items.map(r=>r.revision)).toEqual([changed.revision]);
+ await s.manager.send(chat.id,'bun');expect(s.instructions.at(-1)).not.toContain('我的笔记项目使用 pnpm。');expect(s.instructions.at(-1)).toContain('我的笔记项目使用 bun。');s.finish();
+ s.runtime.memory.retract(root,{recordId:changed.recordId,expectedRevision:changed.revision});
+ expect(s.runtime.recall.search(root,{projectId:null,query:'bun'}).items).toEqual([]);
+ await s.manager.send(chat.id,'继续');expect(s.instructions.at(-1)).not.toContain('我的笔记项目使用 bun。');expect(s.instructions.at(-1)).toContain('retracted');s.finish();
+ const fresh=await s.manager.create('','',undefined,'codex');await s.manager.send(fresh.id,'bun');
+ expect(s.instructions.at(-1)).not.toContain('我的笔记项目使用 bun。');
+ expect(s.runtime.memory.read(root,s.r.recordId,null).status).toBe('retracted');
+});
+test('one persona derived from confirmed legacy rules reaches actual native handoff on unrelated requests and existing chats, with accurate references and read controls',async()=>{
+ const s=await setup(),root={userId:'local'},text='核对执行成功与目标表真实入库，保留当前环境证据。';
+ s.runtime.memory.importLegacy(root,[{id:'old-l3',kind:'memory',level:'L3',title:'长期核对规程',content:text,scope:'global',status:'candidate',createdAt:'2020-01-01T00:00:00Z',updatedAt:'2020-01-01T00:00:00Z'}]);
+ const candidate=s.runtime.memory.listAll(root).find(r=>r.legacyId==='old-l3')!,chat=await s.manager.create('','',undefined,'codex');
+ await s.manager.send(chat.id,'你好');expect(s.instructions.at(-1)).not.toContain(text);s.finish();
+ const confirmed=historicalConfirmation(s.runtime.memory,root,{recordId:candidate.recordId,expectedRevision:candidate.revision});
+ const proposal={collectionId:confirmed.collectionId,layer:'L2' as const,contentType:'procedure' as const,text,semanticKey:'scene.work',operation:'store' as const,replaces:[],evidence:[],dependencies:[{recordId:confirmed.recordId,revision:confirmed.revision}],validUntil:null,certainty:'observed' as const,pipeline:'request' as const};
+ const generation=s.runtime.memory.collection(root,confirmed.collectionId).generation,scene=s.runtime.memory.applyProposal(root,proposal,generation,'layer_summary')!;
+ const profileCollection=s.runtime.memory.ensureCollection(root,{projectId:null,agentId:null});
+ const persona=s.runtime.memory.applyProposal(root,{...proposal,collectionId:profileCollection.id,layer:'L3',semanticKey:'persona.operating-doctrine',dependencies:[{recordId:scene.recordId,revision:scene.revision}]},profileCollection.generation,'layer_summary')!;
+ expect((await s.manager.listReferenceSummary(chat.id)).memories).toContainEqual(expect.objectContaining({recordId:persona.recordId,relation:'available'}));
+ await s.manager.send(chat.id,'继续');expect(s.instructions.at(-1)).toContain(text);s.finish();
+ expect(s.store.listEvents(chat.id,0).filter(e=>e.kind==='metadata')).toContainEqual(expect.objectContaining({data:expect.objectContaining({memoryUse:'acknowledged',items:expect.arrayContaining([expect.objectContaining({recordId:persona.recordId,revision:persona.revision})])})}));
+ expect((await s.manager.listReferenceSummary(chat.id)).memories).toContainEqual(expect.objectContaining({recordId:persona.recordId,relation:'provided',suppliedRevision:persona.revision}));
+ s.config.system={cli:'codex',memory:{request:{read:false},session:{read:false}}};
+ const disabled=await s.manager.create('','',undefined,'codex');await s.manager.send(disabled.id,'你好');expect(s.instructions.at(-1)).not.toContain(text);s.finish();
+ s.config.system.memory={request:{read:false},session:{read:true}};
+ const sessionOnly=await s.manager.create('','',undefined,'codex');await s.manager.send(sessionOnly.id,'你好');expect(s.instructions.at(-1)).not.toContain(text);s.finish();
+ s.config.system.memory={request:{read:true},session:{read:true}};
+ s.runtime.memory.retract(root,{recordId:confirmed.recordId,expectedRevision:confirmed.revision});
+ await s.manager.send(chat.id,'继续');expect(s.instructions.at(-1)).not.toContain(text);expect(s.instructions.at(-1)).toContain('stale');
+ expect((await s.manager.listReferenceSummary(chat.id)).memories).not.toContainEqual(expect.objectContaining({recordId:persona.recordId}));
+});
+
+test('retired session contexts never enter fresh native instructions or bound recall while deep facts remain',async()=>{
+ const s=await setup(),root={userId:'local'},c=s.runtime.memory.collection(root,s.r.collectionId);
+ const legacy=s.runtime.memory.applyProposal(root,{collectionId:c.id,layer:'L2',semanticKey:'session.context',contentType:'fact',text:'RETIRED_SESSION_CONTEXT pnpm',operation:'store',replaces:[],evidence:s.r.evidence,support:[],dependencies:[{recordId:s.r.recordId,revision:s.r.revision}],validUntil:null,certainty:'observed',pipeline:'session'},c.generation,'layer_summary')!;
+ s.config.system={cli:'codex',memory:{request:{read:true},session:{read:true,generate:true}}};
+ const chat=await s.manager.create('','',undefined,'codex');await s.manager.send(chat.id,'pnpm');
+ expect(s.instructions.at(-1)).toContain('我的笔记项目使用 pnpm。');expect(s.instructions.at(-1)).not.toContain('RETIRED_SESSION_CONTEXT');
+ const found=await s.manager.callBoundTool(s.token,'memory_search',{query:'pnpm'},'retired-search') as {items:{recordId:string}[]};
+ expect(found.items.some(record=>record.recordId===legacy.recordId)).toBe(false);
+ expect(s.runtime.memory.read(root,legacy.recordId).text).toContain('RETIRED_SESSION_CONTEXT');
+});

@@ -1,0 +1,123 @@
+/* Mandala pet: the logo is a flower, so every state moves like one: slowly, slightly, from the heart of the flower,
+   and mostly through colour and light. The upper petals share strokes, so the mark always moves as a whole. */
+.mandala-pet { display:block; flex:none; overflow:visible; color:var(--pet-color, var(--heading)); --pet-accent-color:var(--pet-accent, var(--accent)); transition:color .9s ease; }
+.mandala-pet .pet-petal path { fill:currentColor; }
+/* Origins are in the SVG's user units: the flower's centre is (50,50) and its base is (50,92). */
+.mandala-pet .pet-petal, .mandala-pet .pet-ring, .mandala-pet .pet-halo { transform-box:view-box; transform-origin:50px 50px; }
+.mandala-pet .pet-ring { transition:opacity .9s ease, transform 1.2s ease; }
+.mandala-pet .pet-body { transform-box:view-box; transform-origin:50px 92px; transition:transform 1.2s ease; }
+.mandala-pet .pet-dots, .mandala-pet .pet-badge, .mandala-pet .pet-sparks, .mandala-pet .pet-zz { display:none; }
+.mandala-pet .pet-halo { fill:none; stroke:var(--pet-accent-color); stroke-width:1.2; opacity:0; }
+.mandala-pet .pet-dots circle, .mandala-pet .pet-badge circle { fill:var(--pet-accent-color); }
+.mandala-pet .pet-badge text { fill:var(--button-text, #fff); font:600 11px var(--font-ui, sans-serif); }
+.mandala-pet .pet-sparks path { stroke:var(--pet-accent-color); stroke-width:1.2; stroke-linecap:round; fill:none; }
+.mandala-pet .pet-zz text { fill:var(--muted); font:600 9px var(--font-ui, sans-serif); }
+
+/* Idle: a slow breath. */
+.mandala-pet[data-state="idle"] .pet-ring { animation:pet-breathe 5s ease-in-out infinite; }
+/* Thinking: a slightly quicker breath and three soft dots. */
+.mandala-pet[data-state="thinking"] .pet-ring { animation:pet-breathe 3.2s ease-in-out infinite; }
+.mandala-pet[data-state="thinking"] .pet-dots { display:inline; }
+.mandala-pet[data-state="thinking"] .pet-dots circle { animation:pet-dot 1.6s ease-in-out infinite; }
+.mandala-pet[data-state="thinking"] .pet-dots circle:nth-child(2) { animation-delay:.25s; }
+.mandala-pet[data-state="thinking"] .pet-dots circle:nth-child(3) { animation-delay:.5s; }
+/* Working: the flower stays still while a light travels around its petals; the dimmed mark brightens where it passes. */
+.mandala-pet .pet-light { display:none; }
+.mandala-pet .pet-sweep { transform-box:view-box; transform-origin:50px 50px; }
+.mandala-pet .pet-sweep path { fill:currentColor; }
+.mandala-pet[data-state="working"] .pet-ring { opacity:.32; }
+.mandala-pet[data-state="working"] .pet-light { display:inline; }
+.mandala-pet[data-state="working"] .pet-sweep { animation:pet-spin 2.8s linear infinite; }
+.mandala-pet[data-state="working"] .pet-badge { display:inline; }
+/* Waiting: the flower opens toward the light and closes again, its colour deepening to the accent as it opens.
+   A ring of light leaves its heart when the state begins and once a minute after that, never continuously. */
+.mandala-pet[data-state="waiting"] { animation:pet-tint 3.6s ease-in-out infinite; }
+.mandala-pet[data-state="waiting"] .pet-ring { animation:pet-bloom 3.6s ease-in-out infinite; }
+.mandala-pet[data-state="waiting"] .pet-halo { animation:pet-ripple 60s ease-out infinite; }
+/* Error: the mark turns red, sags a little and shudders now and then. */
+.mandala-pet[data-state="error"] { color:var(--danger); }
+.mandala-pet[data-state="error"] .pet-ring { transform:translateY(2px) scale(.95); }
+.mandala-pet[data-state="error"] .pet-body { animation:pet-shake 2.6s ease-in-out infinite; }
+/* Lost contact: the flower fades and drifts a little. */
+.mandala-pet[data-state="unknown"] .pet-ring { opacity:.38; }
+.mandala-pet[data-state="unknown"] .pet-body { animation:pet-float 5s ease-in-out infinite; }
+/* Done: a single full bloom that settles back. */
+.mandala-pet[data-state="done"] .pet-ring { animation:pet-fullbloom 2.4s cubic-bezier(.25,.8,.3,1) 1; }
+.mandala-pet[data-state="done"] .pet-sparks { display:inline; }
+.mandala-pet[data-state="done"] .pet-sparks path { opacity:0; animation:pet-spark 2.4s ease-out 1; }
+/* Sleep: folded in and faded, breathing slowly. */
+.mandala-pet[data-state="sleep"] .pet-ring { transform:scale(.94); opacity:.6; }
+.mandala-pet[data-state="sleep"] .pet-body { animation:pet-breathe 7s ease-in-out infinite; }
+.mandala-pet[data-state="sleep"] .pet-zz { display:inline; }
+.mandala-pet[data-state="sleep"] .pet-zz text { animation:pet-zz 4s ease-in-out infinite; }
+.mandala-pet[data-state="sleep"] .pet-zz text:nth-child(2) { animation-delay:1.3s; }
+
+/* Packs: an image per state; a tinted pack is a mask filled with the theme colour. */
+.mandala-pet.is-pack { position:relative; display:inline-block; }
+.mandala-pet.is-pack img { width:100%; height:100%; object-fit:contain; display:block; }
+.mandala-pet.is-pack[data-tint] { background:currentColor; -webkit-mask-size:contain; mask-size:contain; -webkit-mask-repeat:no-repeat; mask-repeat:no-repeat; -webkit-mask-position:center; mask-position:center; }
+.mandala-pet.is-pack[data-state="waiting"][data-tint] { color:var(--pet-accent-color); }
+
+@keyframes pet-breathe { 0%,100% { transform:scale(1); } 50% { transform:scale(1.02); } }
+@keyframes pet-spin { to { transform:rotate(360deg); } }
+@keyframes pet-dot { 0%,100% { opacity:.25; } 50% { opacity:.9; } }
+@keyframes pet-tint { 0%,100% { color:var(--pet-color, var(--heading)); } 50% { color:var(--pet-accent-color); } }
+@keyframes pet-bloom { 0%,100% { transform:scale(.98); } 50% { transform:scale(1.04); } }
+@keyframes pet-ripple { 0% { transform:scale(.6); opacity:.8; } 5% { transform:scale(1.75); opacity:0; } 100% { transform:scale(1.75); opacity:0; } }
+@keyframes pet-ripple-once { 0% { transform:scale(.6); opacity:.8; } 100% { transform:scale(1.75); opacity:0; } }
+@keyframes pet-fullbloom { 0% { transform:scale(.97); } 40% { transform:scale(1.07); } 100% { transform:scale(1); } }
+@keyframes pet-shake { 0%,80%,100% { transform:translateX(0); } 84% { transform:translateX(-2px); } 88% { transform:translateX(2px); } 92% { transform:translateX(-1px); } }
+@keyframes pet-float { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-2px); } }
+@keyframes pet-spark { 0% { opacity:0; } 30% { opacity:.55; } 100% { opacity:0; } }
+@keyframes pet-zz { 0% { opacity:0; transform:translate(0,0); } 40% { opacity:.8; } 100% { opacity:0; transform:translate(4px,-8px); } }
+@keyframes pet-glow { 0% { filter:brightness(1); } 40% { filter:brightness(1.25); } 100% { filter:brightness(1); } }
+/* Reduced motion: colour still carries the state; nothing moves. */
+@media (prefers-reduced-motion: reduce) { .mandala-pet, .mandala-pet * { animation:none !important; transition:none !important; } .mandala-pet .pet-light { display:none !important; } .mandala-pet[data-state="working"] .pet-ring { opacity:1; } }
+
+/* Panel card */
+.mandala-pet-card { position:relative; display:grid; justify-items:center; gap:2px; padding:18px 12px 14px; border-bottom:1px solid var(--border-soft); }
+.mandala-pet-figure { border:0; background:transparent; padding:4px; border-radius:var(--control-radius); cursor:pointer; color:inherit; line-height:0; }
+.mandala-pet-figure:hover { background:var(--raised); }
+.mandala-pet-figure:focus-visible, .mandala-pet-toggle:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.mandala-pet-name { font-size:var(--type-ui, 14px); font-weight:600; margin-top:2px; color:var(--heading); }
+.mandala-pet-status { display:inline-flex; align-items:center; gap:6px; font-size:var(--type-meta); color:var(--muted); text-align:center; }
+.mandala-pet-status i { width:7px; height:7px; border-radius:50%; flex:none; background:var(--muted); }
+.mandala-pet-status[data-tone="warning"] i { background:var(--warning); }
+.mandala-pet-status[data-tone="danger"] i { background:var(--danger); }
+.mandala-pet-status[data-tone="accent"] i { background:var(--accent); }
+.mandala-pet-status[data-tone="success"] i { background:var(--success); }
+.mandala-pet-toggle { position:absolute; top:7px; left:8px; width:32px; height:32px; display:grid; place-items:center; border:0; border-radius:var(--control-radius); background:transparent; color:var(--muted); cursor:pointer; }
+.mandala-pet-toggle:hover { background:var(--raised); color:var(--text); }
+.mandala-pet-card[data-compact] { grid-template-columns:auto minmax(0,1fr) auto; justify-items:start; align-items:center; column-gap:8px; row-gap:0; padding:8px 10px; }
+.mandala-pet-card[data-compact] .mandala-pet-figure { grid-row:1 / span 2; padding:2px; }
+.mandala-pet-card[data-compact] .mandala-pet-name { margin:0; font-size:var(--type-meta); }
+.mandala-pet-card[data-compact] .mandala-pet-status { grid-column:2; text-align:left; }
+.mandala-pet-card[data-compact] .mandala-pet-toggle { position:static; grid-column:3; grid-row:1 / span 2; }
+
+/* Desktop pet window: only the pet is visible; everything around it is transparent and lets clicks through. */
+html.pet-window, html.pet-window body, html.pet-window #root { background:transparent !important; overflow:hidden; }
+.pet-window-root { position:fixed; inset:0; user-select:none; -webkit-user-select:none; }
+.pet-window-pet { position:absolute; left:50%; bottom:6px; transform:translateX(-50%); display:grid; justify-items:center; }
+.pet-window-figure { border:0; background:transparent; padding:6px; cursor:grab; color:inherit; line-height:0; touch-action:none; border-radius:50%; }
+.pet-window-figure:active { cursor:grabbing; }
+.pet-window-figure:focus-visible { outline:2px solid var(--focus); outline-offset:0; }
+/* A soft halo keeps the dark petals visible on any wallpaper. */
+.pet-window-figure .mandala-pet { filter:drop-shadow(0 0 1.5px var(--surface)) drop-shadow(0 0 1.5px var(--surface)) drop-shadow(0 3px 6px rgba(0,0,0,.28)); }
+.pet-window-figure[data-poke] .pet-halo { animation:pet-ripple-once 1.4s ease-out 1; }
+.pet-window-figure[data-poke] .mandala-pet.is-pack { animation:pet-glow 1.2s ease-out 1; }
+.pet-window-bubble { position:absolute; left:50%; bottom:calc(100% - 2px); transform:translateX(-50%); display:flex; align-items:center; gap:6px; white-space:nowrap; max-width:194px; padding:3px 4px 3px 10px; border-radius:999px; background:var(--surface); color:var(--text); border:1px solid var(--border); box-shadow:0 4px 14px rgba(0,0,0,.18); font-size:var(--type-meta); opacity:0; pointer-events:none; transition:opacity .15s; }
+.pet-window-bubble[data-visible] { opacity:1; pointer-events:auto; }
+.pet-window-bubble span { overflow:hidden; text-overflow:ellipsis; }
+.pet-window-bubble button { border:0; background:transparent; color:var(--muted); cursor:pointer; width:20px; height:20px; display:grid; place-items:center; border-radius:50%; flex:none; }
+.pet-window-bubble button:hover { background:var(--raised); color:var(--text); }
+.pet-window-bubble .pet-window-open { width:auto; height:22px; padding:0 8px; border-radius:999px; color:var(--accent); font:inherit; font-weight:500; }
+
+/* Settings */
+.pet-settings-list { display:grid; grid-template-columns:repeat(auto-fill, minmax(132px, 1fr)); gap:var(--space-3, 12px); margin-top:var(--space-3, 12px); }
+.pet-choice { display:grid; justify-items:center; gap:6px; padding:12px 8px 10px; border:1px solid var(--border); border-radius:var(--panel-radius, 8px); background:var(--surface); cursor:pointer; color:inherit; font:inherit; text-align:center; }
+.pet-choice:hover { background:var(--raised); }
+.pet-choice[aria-pressed="true"] { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+.pet-choice small { color:var(--muted); font-size:var(--type-meta); }
+.pet-preview-states { display:flex; flex-wrap:wrap; gap:14px; margin-top:var(--space-3, 12px); }
+.pet-preview-states figure { margin:0; display:grid; justify-items:center; gap:4px; font-size:var(--type-meta); color:var(--muted); }
+.pet-settings-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:var(--space-3, 12px); }

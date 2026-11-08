@@ -1,0 +1,73 @@
+import {test,expect} from '@playwright/test';
+
+test('one task entry contains both creation modes and preserves drafts without creating records',async({page,request},testInfo)=>{
+ const before=await(await request.get('/api/v2/tasks')).json();
+ await page.goto('/tasks?rules=1');
+ await expect(page.getByRole('button',{name:'新建任务',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'智能体创建',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'保存待办',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'新建定时任务',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'新建任务',exact:true}).click();await page.getByRole('button',{name:'手动填写',exact:true}).click();
+ await page.locator('.task-creation-panel:visible').getByLabel('任务标题',{exact:true}).fill('保留手动草稿');
+ await page.screenshot({path:testInfo.outputPath('manual-desktop.png')});
+ await page.getByRole('button',{name:'智能体创建',exact:true}).click();
+ await page.locator('.task-creation-panel:visible').getByLabel('描述任务需求',{exact:true}).fill('保留需求草稿');
+ const heading=await page.locator('.task-create-heading').boundingBox(),form=await page.locator('.task-creation-panel:visible form').boundingBox();
+ expect(Math.abs(heading!.x+heading!.width-form!.x-form!.width)).toBeLessThan(2);
+ await page.screenshot({path:testInfo.outputPath('agent-desktop.png')});
+ await page.getByRole('button',{name:'手动填写',exact:true}).click();
+ await expect(page.locator('.task-creation-panel:visible').getByLabel('任务标题',{exact:true})).toHaveValue('保留手动草稿');
+ await page.getByRole('button',{name:'智能体创建',exact:true}).click();
+ await expect(page.locator('.task-creation-panel:visible').getByLabel('描述任务需求',{exact:true})).toHaveValue('保留需求草稿');
+ expect(await(await request.get('/api/v2/tasks')).json()).toEqual(before);
+ await page.getByRole('button',{name:'手动填写',exact:true}).click();
+ await page.getByRole('button',{name:'创建任务',exact:true}).click();
+ await expect(page).toHaveURL(/\/tasks\/[^/?]+$/);
+ const task=await(await request.get('/api/v2/tasks/'+new URL(page.url()).pathname.split('/').pop())).json();
+ expect(task.task.state).toBe('todo');expect(task.runs).toEqual([]);
+});
+
+test('selecting a team node focuses direct relations and clear focus restores all identities',async({page,request},testInfo)=>{
+ const {revision}=await(await request.get('/api/config')).json();
+ const config={version:2,projects:['one','two'].map((id,i)=>({id,name:id,cwd:'/tmp',agentIds:[i?'b':'a'],resources:[],mcp:[],skills:[]})),agents:['a','b','free'].map(id=>({id,name:id,instructions:'',defaultCli:'codex',models:{},mcp:[],skills:[]}))};
+ expect((await request.put('/api/config',{data:{revision,config}})).ok()).toBe(true);
+ await page.setViewportSize({width:1440,height:900});await page.goto('/agents');
+ const nodes=page.locator('[data-node-id]');await expect(nodes).toHaveCount(5);
+ await page.locator('[data-graph-project="one"]').click();
+ await expect(nodes).toHaveCount(2);
+ await expect(page.locator('[data-graph-agent="b"]')).toHaveCount(0);
+ await expect(page.locator('[data-graph-agent="a"]')).toBeVisible();
+ await expect(page.locator('[data-connection]')).toHaveCount(1);
+ await page.screenshot({path:testInfo.outputPath('team-focus.png')});
+ await page.getByRole('button',{name:'取消聚焦',exact:true}).click();
+ await expect(nodes).toHaveCount(5);
+ await page.locator('[data-graph-agent="b"]').click();
+ await expect(page.locator('[data-graph-agent="b"]')).toHaveAttribute('aria-pressed','true');
+ await expect(nodes).toHaveCount(2);
+});
+
+test('large team graphs keep readable nodes instead of shrinking all identities into the viewport',async({page,request},testInfo)=>{
+ const {revision}=await(await request.get('/api/config')).json();
+ const agents=Array.from({length:12},(_,i)=>({id:'agent-'+i,name:'Agent '+i,instructions:'',defaultCli:'codex',models:{},mcp:[],skills:[]}));
+ const config={version:2,projects:[{id:'large',name:'Large team',cwd:'/tmp',agentIds:agents.map(agent=>agent.id),resources:[],mcp:[],skills:[]}],agents};
+ expect((await request.put('/api/config',{data:{revision,config}})).ok()).toBe(true);
+ await page.setViewportSize({width:1440,height:900});await page.goto('/agents');await page.locator('[data-graph-project="large"]').click();
+ await expect.poll(async()=> (await page.locator('[data-graph-agent="agent-0"]').boundingBox())!.width).toBeGreaterThanOrEqual(180);
+ const viewport=page.locator('.organization-viewport');
+ expect(await viewport.evaluate(element=>element.scrollHeight>element.clientHeight)).toBe(true);
+ await page.locator('[data-graph-agent="agent-11"]').click();
+ await expect(page.locator('[data-graph-agent="agent-11"]')).toHaveAttribute('aria-pressed','true');
+ await expect(page.locator('[data-node-id]')).toHaveCount(2);
+ await page.getByRole('button',{name:'取消聚焦',exact:true}).click();
+ await page.getByRole('button',{name:'放大画布',exact:true}).click();
+ await page.locator('[data-graph-agent="agent-11"]').click();
+ await expect(page.locator('[data-graph-agent="agent-11"]')).toBeInViewport();
+ await page.locator('.organization').getByRole('searchbox',{name:'搜索项目或智能体'}).fill('Agent 0');
+ await expect(page.locator('[data-graph-agent="agent-0"]')).toBeInViewport();
+ expect(await viewport.evaluate(element=>element.scrollTop)).toBe(0);
+ await page.locator('.organization').getByRole('searchbox',{name:'搜索项目或智能体'}).fill('');
+ await page.locator('[data-graph-agent="agent-11"]').click();
+ await page.getByRole('button',{name:'适应画布',exact:true}).click();
+ expect(await viewport.evaluate(element=>element.scrollTop)).toBe(0);
+ await expect(page.locator('[data-graph-agent="agent-11"]')).toBeInViewport();
+});

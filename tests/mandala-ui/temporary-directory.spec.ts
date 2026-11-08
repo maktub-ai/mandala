@@ -1,0 +1,26 @@
+import {expect,test} from '@playwright/test';
+test('temporary executors stay out of the maintained directory and project chat picker while history remains readable',async({page,request},info)=>{
+ await request.get('/api/mandala');
+ const current=await(await request.get('/api/config')).json();
+ const {directory}=await(await request.post('/__test__/execution-directory')).json();
+ const agent=(id:string,name:string,temporary=false)=>({id,name,instructions:'Fixture executor',defaultCli:'codex',models:{},mcp:[],skills:[],temporary});
+ const permanent=agent('directory-permanent','Maintained executor'),temporary=agent('directory-temporary','Temporary executor',true);
+ const config={...current.config,agents:[...current.config.agents,permanent,temporary],projects:[...current.config.projects,{id:'directory-project',name:'Directory project',cwd:directory,agentIds:[permanent.id,temporary.id],resources:[],mcp:[],skills:[]}]};
+ expect((await request.put('/api/config',{data:{revision:current.revision,config}})).ok()).toBe(true);
+ const chat=await(await request.post('/api/conversations',{data:{projectId:'directory-project',agentId:temporary.id}})).json();
+ await request.post(`/api/conversations/${chat.id}/messages`,{data:{text:'temporary history remains'}});
+ await page.goto('/agents');
+ await expect(page.locator('.workspace-directory-row').filter({hasText:'Maintained executor'})).toBeVisible();
+ await expect(page.locator('.workspace-directory-row').filter({hasText:'Temporary executor'})).toHaveCount(0);
+ await expect(page.locator('.workspace-directory .workspace-page-context')).toContainText(String(config.agents.filter((a:{temporary?:boolean})=>!a.temporary).length));
+ await page.screenshot({path:info.outputPath('maintained-agents.png'),fullPage:true});
+ await page.goto('/projects/manage?project=directory-project&tab=background');
+ await page.getByRole('combobox',{name:'选择对话智能体',exact:true}).click();
+ await expect(page.getByRole('option',{name:'Maintained executor',exact:true})).toBeVisible();
+ await expect(page.getByRole('option',{name:'Temporary executor',exact:true})).toHaveCount(0);
+ await page.screenshot({path:info.outputPath('project-executor-options.png'),fullPage:true});
+ await page.keyboard.press('Escape');
+ await page.goto('/?conversation='+chat.id);
+ await expect(page.getByText('Fixture reply: temporary history remains',{exact:true})).toBeVisible();
+ expect((await(await request.get('/api/conversations/'+chat.id)).json()).conversation.agentId).toBe(temporary.id);
+});

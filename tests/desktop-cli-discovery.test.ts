@@ -1,0 +1,21 @@
+import {afterEach,expect,it} from 'vitest';
+import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {createServer,type Server} from 'node:http';
+import {desktopCliEnvironment} from '../desktop/cli-launch';
+import {claimServiceRecord,handleServiceControl} from '../desktop/service-discovery';
+const roots:string[]=[],servers:Server[]=[];
+const home=()=>{const value=mkdtempSync(join(tmpdir(),'mandala-command-discovery-'));roots.push(value);return value;};
+afterEach(async()=>{await Promise.all(servers.splice(0).map(server=>new Promise<void>(resolve=>server.close(()=>resolve()))));for(const root of roots.splice(0))rmSync(root,{recursive:true,force:true});});
+it('discovers a verified random port in the configured App home without disclosing secrets',async()=>{const root=home();let record:ReturnType<typeof claimServiceRecord>;const server=createServer((req,res)=>{handleServiceControl(record,req,res,()=>{});});servers.push(server);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));record=claimServiceRecord(root,'http://127.0.0.1:'+(server.address() as {port:number}).port,'a'.repeat(43));const env=await desktopCliEnvironment(root,['tasks','list'],{});expect(env).toEqual({MANDALA_HOME:root,MANDALA_BASE_URL:record.origin});expect(JSON.stringify(env)).not.toContain(record.secret);});
+it('preserves Agent context, explicit destinations and explicit workspace precedence',async()=>{const root=home();for(const env of [{MANDALA_CONTEXT:'/private/context'},{OPEN_MANA_CONTEXT:'/private/context'},{MANDALA_BASE_URL:'http://127.0.0.1:9999'},{OPEN_MANA_BASE_URL:'http://127.0.0.1:9998'}])expect(await desktopCliEnvironment(root,['tasks','list'],env)).toMatchObject(env);expect(await desktopCliEnvironment(root,['tasks','list','--base-url=http://127.0.0.1:9997'],{MANDALA_HOME:'/explicit',OPEN_MANA_HOME:'/legacy'})).toMatchObject({MANDALA_HOME:'/explicit',OPEN_MANA_HOME:'/legacy'});expect(await desktopCliEnvironment(root,['--help'],{})).toEqual({MANDALA_HOME:root});});
+it('fails closed for missing, untrusted and forged runtime records instead of falling back to a port',async()=>{const root=home();await expect(desktopCliEnvironment(root,['tasks','list'],{})).rejects.toThrow('not running');writeFileSync(join(root,'.desktop-runtime.json'),'{}',{mode:0o600});await expect(desktopCliEnvironment(root,['tasks','list'],{})).rejects.toThrow('Invalid desktop');const server=createServer((_req,res)=>{res.writeHead(200);res.end();});servers.push(server);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));writeFileSync(join(root,'.desktop-runtime.json'),JSON.stringify({pid:process.pid,origin:'http://127.0.0.1:'+(server.address() as {port:number}).port,secret:'a'.repeat(64),setupToken:'a'.repeat(43)}));await expect(desktopCliEnvironment(root,['tasks','list'],{})).rejects.toThrow('verify');});
+it('refuses public, stale and still-starting discovery records',async()=>{
+ const {chmodSync}=await import('node:fs'),root=home(),path=join(root,'.desktop-runtime.json');
+ const record={pid:process.pid,origin:'http://127.0.0.1:65534',secret:'b'.repeat(64),setupToken:'b'.repeat(43)};
+ writeFileSync(path,JSON.stringify(record),{mode:0o644});chmodSync(path,0o644);await expect(desktopCliEnvironment(root,['tasks','list'],{})).rejects.toThrow('not private');
+ chmodSync(path,0o600);writeFileSync(path,JSON.stringify({...record,pid:2147483647}));await expect(desktopCliEnvironment(root,['tasks','list'],{})).rejects.toThrow('not running');
+ const server=createServer((_req,res)=>{res.writeHead(503);res.end();});servers.push(server);await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ writeFileSync(path,JSON.stringify({...record,origin:'http://127.0.0.1:'+(server.address() as {port:number}).port}));await expect(desktopCliEnvironment(root,['tasks','list'],{})).rejects.toThrow('still starting');
+});

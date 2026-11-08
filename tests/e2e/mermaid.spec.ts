@@ -1,0 +1,192 @@
+import { test, expect } from "@playwright/test";
+
+async function send(page: import("@playwright/test").Page, text: string) {
+  await page.goto('/?project=&agent=');
+  await page.getByLabel(/^(消息|Message)$/, { exact: true }).fill('图表示例\n\n' + text);
+  await page.getByRole('button', { name: /^(发送消息|Send message)$/, exact: true }).click();
+  await expect(page.getByTestId('chat-status')).toHaveText(/^(就绪|Ready)$/);
+}
+
+test('renders multiple Mermaid diagrams, updates mounted charts with the theme and preserves source copying', async ({ page, context }, testInfo) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => localStorage.setItem('mana-theme', 'dark'));
+  const flow = 'flowchart LR\n  A[开始] --> B[完成]';
+  const sequence = 'sequenceDiagram\n  participant U as 用户\n  participant A as Agent\n  U->>A: 执行任务\n  A-->>U: 完成';
+  await send(page, '```mermaid\n' + flow + '\n```\n\n```mermaid\n' + sequence + '\n```');
+  const charts = page.locator('.mermaid-stage > svg');
+  await expect(charts).toHaveCount(2);
+  const block = page.locator('.message.text .code-block').first();
+  const diagram = block.locator('.mermaid-diagram');
+  await expect(diagram).toHaveAttribute('data-theme', 'dark');
+  await expect(diagram).toContainText('开始');
+  const darkFill = await diagram.locator('.node rect').first().evaluate(el => getComputedStyle(el).fill);
+  const settings = await context.newPage();
+  await settings.goto('/settings/general');
+  await settings.getByRole('button', {name:'浅色',exact:true}).click();
+  await expect(diagram).toHaveAttribute('data-theme', 'light');
+  await expect(diagram.locator('.mermaid-stage > svg')).toBeVisible();
+  await expect.poll(() => diagram.locator('.node rect').first().evaluate(el => getComputedStyle(el).fill)).not.toBe(darkFill);
+  await page.screenshot({ path: testInfo.outputPath('mermaid-light.png') });
+  await block.getByRole('button', { name: '复制代码', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(flow);
+  await block.getByRole('button', { name: '查看源码', exact: true }).click();
+  await expect(block.locator('pre')).toHaveText(flow + '\n');
+  await block.getByRole('button', { name: '查看图表', exact: true }).click();
+  await expect(block.locator('.mermaid-stage > svg')).toBeVisible();
+  await settings.getByRole('button', {name:'深色',exact:true}).click();
+  await settings.close();
+  await expect(diagram).toHaveAttribute('data-theme', 'dark');
+  await expect(diagram.locator('.mermaid-stage > svg')).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: testInfo.outputPath('mermaid-dark-mobile.png') });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('invalid diagrams retain source without preventing other diagrams from rendering', async ({ page }) => {
+  await send(page, '```mermaid\nflowchart LR\nA[Unclosed\n```\n\n```mermaid\nflowchart LR\nB[Valid] --> C[Rendered]\n```');
+  const block = page.locator('.message.text .code-block').first();
+  await expect(block.getByRole('status')).toContainText('图表暂时无法渲染');
+  await expect(block.locator('pre')).toContainText('A[Unclosed');
+  await expect(page.locator('.mermaid-stage > svg')).toHaveCount(1);
+  await expect(page.locator('body > svg, body > div[id^="dmana-mermaid"]')).toHaveCount(0);
+});
+
+test('untrusted Mermaid cannot enable HTML or executable links through diagram configuration', async ({ page }) => {
+  const malicious = '---\nconfig:\n  securityLevel: loose\n  theme: forest\n---\nflowchart LR\n A["<img src=x onerror=window.mermaidInjection=true>"] --> B[Safe]\n click A "javascript:window.mermaidInjection=true"';
+  await send(page, '```mermaid\n' + malicious + '\n```');
+  const chart = page.locator('.message.text .mermaid-diagram');
+  await expect(chart.locator('.mermaid-stage > svg')).toBeVisible();
+  await expect(chart.locator('script, img, foreignObject, a[href^="javascript:"]')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).mermaidInjection)).toBeUndefined();
+});
+
+test('Mermaid controls and error fallback support English in the light theme', async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem('mana-language', 'en'); localStorage.setItem('mana-theme', 'light'); });
+  await send(page, '```mermaid\nflowchart LR\nA[Unclosed\n```');
+  const block = page.locator('.message.text .code-block');
+  await expect(block.getByRole('status')).toContainText('The diagram could not be rendered');
+  await block.getByRole('button', { name: 'View source', exact: true }).click();
+  await expect(block.locator('pre')).toContainText('A[Unclosed');
+  await expect(block.getByRole('button', { name: 'View diagram', exact: true })).toBeVisible();
+  await expect(block.getByRole('button', { name: 'Copy code', exact: true })).toBeVisible();
+});
+
+test('wide diagrams fit the message, support zoom and drag, and refit after resizing', async ({ page }, testInfo) => {
+  const source = 'flowchart LR\n' + Array.from({ length: 10 }, (_, i) => `N${i}[阶段 ${i}：处理与验证]`).join(' --> ');
+  await send(page, '```mermaid\n' + source + '\n```');
+  const diagram = page.locator('.message.text .mermaid-diagram');
+  const canvas = diagram.locator('.mermaid-canvas');
+  const svg = diagram.locator('.mermaid-stage > svg');
+  await expect(svg).toBeVisible();
+  const fit = async () => {
+    const frame = (await canvas.boundingBox())!;
+    const image = (await svg.boundingBox())!;
+    expect(image.x).toBeGreaterThanOrEqual(frame.x - 1);
+    expect(image.y).toBeGreaterThanOrEqual(frame.y - 1);
+    expect(image.x + image.width).toBeLessThanOrEqual(frame.x + frame.width + 1);
+    expect(image.y + image.height).toBeLessThanOrEqual(frame.y + frame.height + 1);
+  };
+  await diagram.getByRole('button', { name: '适应图表', exact: true }).click();
+  await fit();
+  const initial = (await svg.boundingBox())!;
+  await diagram.getByRole('button', { name: '放大图表', exact: true }).click();
+  await expect.poll(async () => (await svg.boundingBox())!.width).toBeGreaterThan(initial.width);
+  const zoomed = (await svg.boundingBox())!;
+  const frame = (await canvas.boundingBox())!;
+  await page.mouse.move(frame.x + frame.width / 2, frame.y + frame.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(frame.x + frame.width / 2 + 60, frame.y + frame.height / 2 + 20, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await svg.boundingBox())!.x).toBeCloseTo(zoomed.x + 60, 0);
+  await canvas.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => (await svg.boundingBox())!.x).toBeLessThan(zoomed.x + 60);
+  await diagram.getByRole('button', { name: '适应图表', exact: true }).click();
+  await fit();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => (await svg.boundingBox())!.width).toBeLessThan(initial.width);
+  await fit();
+  await diagram.screenshot({ path: testInfo.outputPath('mermaid-fit-mobile.png') });
+  await diagram.getByRole('button', { name: '原始大小', exact: true }).click();
+  await expect(diagram.getByRole('button', { name: '原始大小', exact: true })).toHaveText('100%');
+  await expect.poll(async () => (await svg.boundingBox())!.width).toBeGreaterThan(initial.width);
+  await diagram.getByRole('button', { name: '适应图表', exact: true }).click();
+  await fit();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('tall diagrams fit a bounded viewport and zoom controls are translated', async ({ page }, testInfo) => {
+  await page.addInitScript(() => { localStorage.setItem('mana-language', 'en'); localStorage.setItem('mana-theme', 'light'); });
+  const source = 'flowchart TD\n' + Array.from({ length: 12 }, (_, i) => `N${i}[Step ${i}]`).join(' --> ');
+  await send(page, '```mermaid\n' + source + '\n```');
+  const diagram = page.locator('.message.text .mermaid-diagram');
+  await expect(diagram.locator('.mermaid-stage > svg')).toBeVisible();
+  await diagram.getByRole('button', { name: 'Fit diagram', exact: true }).click();
+  const frame = (await diagram.locator('.mermaid-canvas').boundingBox())!;
+  const image = (await diagram.locator('.mermaid-stage > svg').boundingBox())!;
+  expect(frame.height).toBeLessThanOrEqual(420);
+  expect(image.height).toBeLessThanOrEqual(frame.height);
+  await diagram.getByRole('button', { name: 'Zoom in diagram', exact: true }).click();
+  await expect.poll(async () => (await diagram.locator('.mermaid-stage > svg').boundingBox())!.height).toBeGreaterThan(image.height);
+  await diagram.getByRole('button', { name: 'Zoom out diagram', exact: true }).click();
+  await expect.poll(async () => (await diagram.locator('.mermaid-stage > svg').boundingBox())!.height).toBeCloseTo(image.height, 0);
+  await page.screenshot({ path: testInfo.outputPath('mermaid-fit-light.png') });
+  await diagram.getByRole('button', { name: 'View diagram fullscreen', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Mermaid diagram', exact: true });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Close diagram', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+});
+
+test('fullscreen viewing expands the diagram, supports interaction and restores focus on exit', async ({ page, context }, testInfo) => {
+  await page.addInitScript(() => localStorage.setItem('mana-theme', 'dark'));
+  await send(page, '```mermaid\nflowchart TD\n' + Array.from({ length: 12 }, (_, i) => `N${i}[阶段 ${i}]`).join(' --> ') + '\n```');
+  const inline = page.locator('.message.text .mermaid-diagram');
+  const expand = inline.getByRole('button', { name: '全屏查看图表', exact: true });
+  await expect(expand).toBeVisible();
+  const original = (await inline.locator('.mermaid-stage > svg').boundingBox())!;
+  await expand.click();
+  const dialog = page.getByRole('dialog', { name: 'Mermaid 图表', exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(page.locator('.mermaid-stage > svg')).toHaveCount(1);
+  await dialog.evaluate(async element => { await Promise.all(element.getAnimations().map(animation => animation.finished)); });
+  const bounds = (await dialog.boundingBox())!;
+  expect(bounds.width).toBeGreaterThan(1280 * 0.9);
+  expect(bounds.height).toBeGreaterThan(850 * 0.9);
+  expect(bounds.x).toBeGreaterThanOrEqual(0);
+  expect(bounds.y).toBeGreaterThanOrEqual(0);
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(1280);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(850);
+  const svg = dialog.locator('.mermaid-stage > svg');
+  await expect.poll(async () => (await svg.boundingBox())!.height).toBeGreaterThan(original.height);
+  const fitted = (await svg.boundingBox())!;
+  await dialog.getByRole('button', { name: '放大图表', exact: true }).click();
+  await expect.poll(async () => (await svg.boundingBox())!.height).toBeGreaterThan(fitted.height);
+  const canvas = dialog.locator('.mermaid-canvas');
+  await canvas.focus();
+  const zoomed = (await svg.boundingBox())!;
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await svg.boundingBox())!.x).toBeCloseTo(zoomed.x + 32, 0);
+  await page.screenshot({ path: testInfo.outputPath('mermaid-fullscreen-dark.png') });
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(expand).toBeFocused();
+  await expand.click();
+  const darkFill = await svg.locator('.node rect').first().evaluate(el => getComputedStyle(el).fill);
+  const settings = await context.newPage();
+  await settings.goto('/settings/general');
+  await settings.getByRole('button', {name:'浅色',exact:true}).click();
+  await settings.close();
+  await expect(dialog.locator('.mermaid-stage > svg')).toBeVisible();
+  await expect.poll(() => svg.locator('.node rect').first().evaluate(el => getComputedStyle(el).fill)).not.toBe(darkFill);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(async () => (await dialog.boundingBox())!.width).toBeLessThanOrEqual(390);
+  await dialog.getByRole('button', { name: '适应图表', exact: true }).click();
+  const mobileCanvas = (await canvas.boundingBox())!;
+  const mobileImage = (await svg.boundingBox())!;
+  expect(mobileImage.height).toBeLessThanOrEqual(mobileCanvas.height);
+  await page.screenshot({ path: testInfo.outputPath('mermaid-fullscreen-light-mobile.png') });
+  await dialog.getByRole('button', { name: '关闭图表', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(expand).toBeFocused();
+});

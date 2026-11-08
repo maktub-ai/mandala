@@ -1,0 +1,164 @@
+# Compact workspace implementation
+
+
+## Ordered gates
+
+1. Inventory routes, workflows and backend contracts; agree the complete page map.
+2. Ship the selected C monochrome open six-petal identity and neutral compact design tokens; inspect in context.
+3. Install shadcn/Radix and Tailwind 4 without a global reset; migrate shared controls, preserve public contracts, validate catalog and representative pages.
+4. Hand the verified foundation commit to **GPT-6.1 Sol** for real integration: shell/Projects/Agents → Tasks/Chat → Library/documents → Schedules → remaining screens.
+5. Independently review functionality and rendered completeness. Material findings require fixes and same-scenario verification; no fixed iteration count overrides quality.
+6. Merge/push verified main, build the fixed clean revision, check active work, back up App and data, install, verify runtime identity and user preferences.
+
+## Page and ownership map
+
+| Entry | Primary content | Contract |
+| --- | --- | --- |
+| Tasks | Attention, progress, saved work; selected task detail and contextual reply | `/api/v2/tasks`, existing Run controls and conversation submission |
+| Projects | Overview, Tasks, Library, associated Agents, Settings | Existing Config project IDs, workspaces, memberships and resources |
+| Agents | Role/capabilities, Memory, Work | Existing Agent IDs, effective capabilities and `/api/v2/memory` |
+| Library | Project Wiki, personal documents, attachments and versioned deliverables | `/api/v2/assets`; binding is not ownership transfer or access expansion |
+| Schedules | Trigger configuration, next occurrence, execution history | Existing automation service; disable future triggers independently of active runs |
+| Chat | Delivery, streaming, context, files/diff, approvals and execution state | Existing Conversation IDs, composer references, submission recovery and queue |
+
+Tasks, Projects and Agents are primary destinations. Library and Schedules are available under More and pinnable. Settings, usage and market remain available. Projects no longer highlight Teams/Agents. Project Library is always discoverable. Agent Memory is the primary memory entrance; legacy memory URLs retain access without moving records.
+
+## Behavioral decisions
+
+### Page composition
+
+- Shell: compact persistent navigation and recent Chats, quiet location bar, then the page toolbar. A new sidebar defaults to about 220px; saved widths remain authoritative. Mobile navigation is a dismissible overlay, not a permanently compressed desktop column.
+- Tasks: searchable, filterable rows with a status icon, goal and current activity, Agent, Project, and updated time. Selecting a row opens a right-hand detail with structured context, criteria, run history, deliverables and a clearly targeted reply composer. At narrow widths the selected detail replaces the list with an explicit return action. Do not compress both into unusable columns.
+- Projects: real project directory and details with Overview, Tasks, Library, Agents and Settings. Overview shows actionable current work and relevant resources rather than decorative metric cards. Membership editing updates existing associations and does not clone Agent identities.
+- Agents: independent directory; a detail presents role/instructions, runtime/capabilities, Memory and associated work. Project context is a filter/association. Explain effective versus inherited settings at the control that changes them, not with a page of repeated prose.
+- Library: compact file/document rows, type and source icons, search, project/source filters and sorting; selection opens a readable viewer/editor with versions and provenance in a secondary panel. Long-form content keeps a comfortable measure independent of dense navigation. A project Library is available in its detail even when the global Library is not pinned.
+- Schedules: rows expose enabled/paused state, next trigger and last outcome. Detail provides the actual schedule editor, Task/Agent/Project relationships and history. Pause and stop-current-run are separate actions.
+- Chat: conversation and execution context stay legible above the composer; streaming content, attachments, approvals, tools and delivery references retain their real semantics. File and Git diff viewers use the shared inspector frame. Sources, traces and repeated metadata collapse into concise labelled sections; errors and approval decisions remain visible.
+- Settings, login, remote, onboarding, usage and market use the same typography, controls and frames. First use checks every supported CLI on this computer, suggests one that can start, adopts the choice as Mandala's runtime and hands off to the Mandala main chat (direct Chat and Agent creation stay available); it can be reopened from General settings. System Node version belongs in diagnostics, not the primary welcome flow. CLI names are choices, and detection/authentication/execution verification are distinct states. Remote primarily exposes Tasks and Chat under the existing capability policy.
+
+The component foundation must offer page heading/toolbar, list-detail frame, status with icon, structured metadata, empty/loading/error feedback, dialogs and searchable selectors. Preserve native form semantics and composition input. Public wrappers keep their current prop contracts while their internal primitives migrate.
+
+### Backend integration boundaries
+
+Reuse `chat-send.ts::submitChatInput`, Task/Run services, Config project/Agent identities, Asset versions/bindings, Memory scopes and Automation service. The known new capability is durable local drafts and pending submission recovery. Configuration edits retain revision conflict handling. Remote endpoints remain host-authorized; local route availability does not expand the remote API allowlist.
+
+Retain `/assets`, `/projects/:id/workbench`, `/projects/manage`, `/agents?agent=…`, `/mana?tab=memory`, `/mana?tab=organization`, `/mana?tab=automation` and `/tasks?rules=1` as compatible entry points. Preserve object IDs and version/project query parameters when normalizing a route. Migrate saved sidebar `assets` keys to `library` without discarding explicit pin order.
+
+- Capture creates a durable task but never starts a run. Preserve all real states, including waiting, review and cancelled; demo group labels are not backend state values.
+- Task reply names the destination Chat and Agent. One readable associated Chat can be preselected; multiple require a choice. No association requires an explicit prepare/link action. Never guess by Agent name.
+- Task and Chat use one submission path, including idempotency, queue/continue/interrupt, attachments and failure recovery. Ordinary running-task input queues; interrupt is explicit.
+- Drafts are scoped by Task and destination Chat. Offline saves locally; reconnect never submits. Unknown submit outcomes retain their recovery identity and must not create duplicates.
+- A finished Run is not an accepted Task. Activity labels report real event time and stale/offline state.
+- Shared assets keep IDs, versions, source and permissions. Existing URLs and saved pins must migrate compatibly. Existing data is never silently reassigned to match new navigation.
+- Backend changes are allowed when a coherent page workflow requires them; preserve authorization, concurrency, idempotency and compatibility. Document any schema change and rollback before applying it.
+
+## Visual contract
+
+Use approved compact preview as the reference: neutral white/gray and charcoal, Inter-first, restrained semantic state colors. No warm/yellow grounds. C logo is monochrome. Default controls ~30px desktop, task rows ~54px where content permits; touch layouts retain larger targets. Preserve explicit user appearance and layout preferences.
+
+All actual routes participate: settings, login, onboarding, remote, usage and market cannot remain visually unfinished. Shared frames own headings, toolbar placement, gutters, list rhythm and detail alignment. Icons use one library/stroke grammar. Sources/history/help use structured metadata or disclosure rather than stacked paragraphs; critical warnings remain visible. Dialogs, menus and portal layers inherit the active theme.
+
+## Acceptance
+
+Validate typecheck, relevant unit/integration suites, accessible controls and actual browser workflows at 1440/1024/768/390, light/dark, keyboard/IME, zoom, long bilingual content, empty/loading/error, permission denial and offline recovery. Use isolated real backend fixtures rather than screenshot-only mock pages. Inspect screenshots, do not equate overflow checks with visual acceptance. Recheck installation separately from source/build tests. Personal data and runtime screenshots stay outside Git.
+
+## Evidence log
+
+- Main synchronized; dedicated worktree and dependency install ready. Initial npm audit: 0 vulnerabilities.
+- Main rechecked during implementation at the user's request: origin/main advanced to `57160fded5b492a8b6ab698d938cb61f4954536e` with only `scripts/update-app-from-main.sh`. Merged as `7401dac`, with all in-progress page changes preserved. Latest main is an ancestor of the implementation branch; no frontend, backend or dependency conflicts occurred. Merge difference and shell syntax checks passed. Release still requires the full backup/data/installed-App gates below, independently of that script.
+- Gate 1 passed: route/service inventory and full page composition recorded; existing services support the main flows, durable drafts are an explicit gap.
+- Gate 2 passed: C geometry was corrected after independent review rejected the seedless original mark. Revised centered lower petal and mirrored lobes match the approved C; regenerated full/optical assets inspected at 16/24/32/64px in light/dark and in the actual application shell. Neutral tokens preserve saved custom appearance and mode. Theme/desktop preference checks passed; revised brand checks 3/3. Baseline full suite: 2460 passed, 3 platform skips; shared-control browser baseline 7/7; typecheck/build passed, audit 0 vulnerabilities. Legacy page arrangement remains gate 4 work.
+- Gate 3 passed: source-owned shadcn/Radix controls and Tailwind 4 use the existing saved semantic appearance; no global preflight reset. Catalog and business compositions passed 21 browser cases, light/dark at all four required widths, coarse-pointer targets and zoom. Independent review closed focus-only setting mutations, nested Escape ownership, portalled selection/focus and modal geometry regressions. Repeated nested Dialog/Select and menu keyboard cycles passed. Actual settings/command-palette integration: 21/21; market, Mermaid and execution inspection: 21/21. Full unit suite: 2461 passed, 3 platform skips; typecheck/build passed; dependency audit reported 0 vulnerabilities. `docs/ui-components.md` is the fixed handoff contract. These results cover the foundation, not completion of page integration or installation.
+- Implementation and acceptance evidence is appended per gate; this document is not itself a completion claim.
+
+## Phase 4.1 accepted integration
+
+The shell now separates Tasks, Projects and Agents. More exposes unpinned Library, Schedules and legacy global Memory; account actions remain separate. Saved Files (`assets`) pins and order migrate to Library without resetting other saved choices. New sidebar layouts start at 220px; existing widths remain authoritative.
+
+Project directories open canonical Overview, Tasks, Library, Agents and Settings paths. Existing workbench/manage/query paths remain accepted. Project membership still references existing Agent IDs. Agent details open with a read-first role/runtime/model/project overview, real associated assigned/participant Tasks and Chats, explicit profile editing, and Agent-scoped Memory. Exact memory selection and background job counts retain the Agent scope. Memory correction locks navigation and object actions until it is cancelled or saved.
+
+Focused source verification: `tests/e2e/compact-directories.spec.ts` covers real-server route/reload behavior, two-project shared identity, More discovery, Agent read mode and memory entry at 1440/1024/768/390 in both themes. Screenshots and synthetic fixture data are outside the repository. This candidate does not establish installed-App acceptance; Tasks/Chat, Library reader/editor, Schedules and remaining-route integration retain their subsequent gates.
+
+Independent gate passed: 32 rendered directory/detail scenarios across four widths and both themes; no script errors or horizontal overflow. Memory ownership, project filtering, editing/action locks, source-Chat navigation, old URLs, menu focus, creation cancellation and revision-conflict draft retention were independently verified. Focused route matrix passed 8/8; autosave/conflict/scope regressions, preference/command units, typecheck and production build passed. The actual Project overview prioritizes Tasks/Chats and the Agent overview separates reading from configuration.
+
+## Phase 4.2 draft and submission contract
+
+Local composer drafts live in the runtime HOME database, scoped by its stable device ID, authenticated owner, Task and destination Chat. New-Chat drafts additionally retain their Project/Agent context until a Chat is created. IndexedDB buffers edits while the local runtime cannot be reached; this is explicitly reported as browser-only buffering, not a durable save on the computer. Local attachment metadata survives reload; missing bytes require reselection for a new send. Checking an already submitted request does not require reuploading those attachments. Remote drafts retain file bytes in browser IndexedDB and are isolated by account, host and paired browser identity. Reconnection never initiates a send.
+
+The shared submission controller retains the original command key, body, action and monotonic stop/submission recovery flags before mutating execution. Unknown outcomes reconcile that original request without replaying it. Accepted requests first durably clear only the matching original draft fingerprint, preserving newer edits, and then clear the recovery record. A lost cleanup response must not make the old input sendable under a new key. New-Chat handoff atomically moves the draft and initial pending receipt before execution. These guarantees do not make the existing Chat-creation endpoint itself idempotent.
+
+Users can inspect Chat history and explicitly resolve an unconfirmed recovery record; this only clears recovery state and never sends or changes Task acceptance. If a Chat is unlinked from a Task, its authorized pending request remains discoverable for readback or explicit resolution. New sends and draft writes still require an active association. No recovery access bypasses Task ownership or Chat readability.
+
+### Additive storage migration and rollback
+
+`local_draft_device` and `local_composer_drafts` are created additively in the existing HOME SQLite database. Drafts and pending submissions have separate revisions; deletion retains revision tombstones. The existing first-owner claim transfers legacy local draft ownership alongside the other workspace-owned data. The HTTP endpoints remain local-only and do not expand remote or agent bearer capabilities. Existing Task, Chat, Agent, Project, Asset and Memory IDs are not rewritten.
+
+Back up the complete HOME before installing this version. Rolling the App back leaves these additive tables inert and does not require deleting them. Older versions cannot expose or resolve the new recovery records; reconcile outstanding sends before rollback, or restore the matching pre-install App and data backup while the runtime is stopped. Do not restore an old database over newer user work without explicitly accounting for that work. Browser buffers are not a substitute for the HOME backup.
+
+### Phase 4.2 acceptance
+
+Tasks now offer compact list/board views, non-executing quick capture and a focused detail/reply pane. Opening a detail uses a readable list at the side without changing the saved board preference. Reply selection identifies the actual Chat, Agent, CLI and execution state. Preparing an unassociated Chat requires a visible runtime choice and does not execute it.
+
+Independent fault injection verified lost pending-delete acknowledgments, failed draft cleanup, new text/files during acceptance, unknown and uncertain-stop resolution, unlinked Chat recovery, atomic first-Chat handoff and background completion while the destination is open. These cases retain the original request identity without duplicate submission. Background sends continue after ordinary navigation without taking over the current page; mounted destination state and attachment bytes remain synchronized. Real remote pairing verified offline text/file restoration without automatic sends; the full remote page remains a phase 4.5 visual gate.
+
+Independent backend/recovery review passed 53 focused unit tests and the new recovery browser cases. Tasks/Chat review covered 32 light/dark route/width scenarios and actual streamed output, including internal board scrolling and return-state preservation. Existing production-build Chat regressions passed 14/14, including approvals, stop/continue occupancy, delayed creation, attachments, model/effort settings, file access and theme retention. Full units passed 2484 with 3 platform skips; typecheck, build, diff check and dependency audit passed. Follow-up changes were verified with targeted background text/file recovery cases and independent repeat inspection. Old navigation tests were adapted to independent Projects/Agents while retaining shared-identity, autosave, conflict, history and lifecycle assertions. Source-mode Vite's unknown-path fallback was distinguished from the production server's verified 404 behavior; the security assertion remains intact.
+
+Phase 4.2 is accepted. Library, Schedules, remaining pages, whole-application review and installed-App acceptance are still required.
+
+## Phase 4.3 accepted Library integration
+
+Library now uses a compact full-width filter/list view and a readable list/detail composition. The selected sidebar keeps search visible and collapses secondary filters. Long documents retain usable reading width, with version and edit controls above the body. Project Library includes authorized bindings and execution provenance; removing a binding does not delete or transfer a resource. A pinned reference opens its exact version, and a reader explicitly showing another version distinguishes it from the Project reference. Historical source labels remain neutral when the selected version lacks sufficient provenance.
+
+Editors retain input after publication failure and revision conflict, require explicit latest-base review before rebasing, and guard navigation while dirty or busy. Permission revalidation clears revoked Wiki content and editing state. Wiki evidence is collapsed without hiding conflict warnings or changing immutable exports. Workspace link compatibility applies only to actual Markdown anchors; code samples and quoted source text stay unchanged. Non-Wiki documents no longer rely on a failed Wiki request for classification. See `docs/library.md` for the ownership, version and editing contracts.
+
+Independent functional review closed late-metadata editor remounting, stale access revisions, historical source misclassification, idle/editing Wiki permission refresh, narrow Project rows and settings grouping. Forty actual page/theme/width scenarios plus expanded creation, editing and settings states were inspected; the first reader layout was rejected and recomposed before acceptance. Fault checks covered lost publish acknowledgments, real head conflicts, association failure without duplicate imports, old-version byte preservation and source denial. The final production build passed 12/12 Library/reader/Wiki/Project-scope browser cases; existing Asset workflows passed 9/9 across the focused runs. Markdown security checks passed 31/31, including original code literals and the unchanged default Chat link policy. Typecheck, build, diff check and dependency audit passed. No data-schema migration was required.
+
+Phase 4.3 is accepted. Schedules, remaining pages, whole-application review and installed-App acceptance remain open.
+
+## Phase 4.4 accepted Schedules integration
+
+Schedules now use a compact selectable directory with a separate detail/editor and per-plan history. On narrow screens the detail replaces the list and its filters; Back restores the selected Project filter. The initial oversized rows were rejected and rebuilt. Each final row keeps its next trigger or recurrence and latest outcome visible before secondary identity text. Global history retains archived-plan occurrences, while Project overview and legacy schedule links open the canonical directory with their scope intact.
+
+Saving creates a paused rule and never executes it. Agent/runtime choices are explicit; changing the Project, Agent or runtime clears an incompatible Chat target. Pause affects future triggers, Stop affects the selected execution, and native completion remains separate from Task acceptance. Revision conflicts retain editing input and require reviewing the latest rule. Navigation guards protect open editors.
+
+Create receipts are stored with their rule and Task in one transaction in the additive `automation_create_receipts` table. Existing keyless callers remain compatible; reusing a key with another request conflicts. Archived rules are not resurrected by receipt replay. Manual Run checkpoints retain the original key across route changes and browser reload, scoped to browser origin and authenticated identity. The recovered action explicitly says **Check previous run**, and a late response cannot clear a newer key. This browser checkpoint does not promise recovery after clearing browser data or changing the runtime origin. New-rule input and its create key remain scoped to the open editor; an unconfirmed create requires checking saved rules before beginning another request. See `docs/schedules.md` for the contract and rollback boundary. Older applications leave the new receipt table inert; back up the complete HOME before installation.
+
+Independent backend review passed 29 tests and additional checks for receipt replay after archive/restart, stale revisions, owner isolation, cross-rule key conflicts, paused manual execution and remote denial. Independent browser review covered 24 list/detail/editor theme/width scenarios and four missed-occurrence views, plus actual approval, pause/stop, archived history, dirty navigation, conflict and lost-response recovery. A real scheduler tick recorded a missed fixture without starting a Chat. Parent production-build regressions passed 11/11; 38 focused unit checks passed. After the final layout corrections, the rebuilt production candidate passed both narrow/editor and restored-request follow-ups. Typecheck, build, diff check and full dependency audit passed.
+
+Phase 4.4 is accepted. Remaining pages, whole-application review and installed-App acceptance remain open.
+
+## Phase 4.5 remaining-entry integration
+
+Settings, first use, local identity and remote connection, Usage, Market and retained legacy Memory/Skill/document routes now share the compact neutral frame. The current five CLI adapters are explicit choices. First use progressively reveals connection and Agent/direct-Chat actions; startup detection does not claim native authentication, model access or quota. Explicit No-Agent handoff persists through the existing device preference contract, and an existing unsent draft stays reachable even when native CLI detection later fails. Saved fonts, density, radius zero, mode, background and navigation preferences remain authoritative.
+
+The desktop command is an explicit Settings action backed by bounded trusted-frame IPC. Registration uses bundled Node, authenticates dynamic service discovery and preserves explicit CLI invocation precedence. It never edits PATH or overwrites an existing different command; partial-write and publication-race checks verified that existing files survive. Web and unsupported platforms show their actual capability. See `cli-registration.md` and `desktop.md`; this source verification did not register or replace the user's current terminal command.
+
+Remote primarily exposes Tasks and Chat, intersects Task associations with readable Chats and requires an explicit target when several qualify. Configuration remains a limited read-only summary fetched when needed. Offline drafts retain browser-local text and available File bytes and require manual sending after reconnect. Missing file bytes block a new send; uncertain submissions retain their original readback identity. Chat detail must load before choosing queue or continue. Authorization loss invalidates pending reads and file operations as well as clearing protected content. Official connection remains the default remote choice and explicitly unavailable without a configured official service. This work does not deploy an official gateway or expand the host's remote allowlist. See `personal-connection.md`.
+
+Independent review found and closed a Market source-conflict overwrite, first-use draft concealment after reload, account-dialog focus restoration into an inert/hidden mobile sidebar, authorization-loss late-response repopulation, missing-attachment sends and incorrect queue choice before Chat detail arrived. The account dialog now restores a visible caller-supplied target through the existing Radix close autofocus lifecycle, after normal sidebar cleanup; no second focus trap or timer-based workaround was added. Legacy content retains real edit/adopt/delete, dirty guards and object ownership.
+
+Parent verification: the initial production suite passed 75/76; its remaining old assertion expected the now-hidden mobile User menu. The final rebuild passed all 33 affected cases, including visible focus restoration, real local authentication, self-hosted fields, durable No-Agent drafts, Settings and legacy routes. Shared controls passed 21/21, including nested Escape, focus, Chinese composition, touch and zoom. Full units passed 2502 with two timeout-only failures and three platform skips; both affected files then passed all 94 tests at bounded concurrency without changing assertions or timeouts (2504 distinct passing tests overall). Typecheck, build, whitespace and full dependency audit passed with zero vulnerabilities.
+
+Rendered inspection covered real backend and encrypted remote fixtures across both themes and all four required widths. Independent remote review additionally verified real disconnect, authorization revocation, delayed history/downloads, exact targets, keyboard approval and short-screen scrolling. Source detection retains two reviewed exceptions: the explicitly approved Inter typography and a semantic Markdown blockquote rule. Rendered mobile follow-up for Projects, Agents, Settings, Market and Usage returned no findings after correcting secondary text sizing and heading hierarchy. Whole-application review and installed-App acceptance remain separate gates.
+
+Phase 4.5 is accepted. Independent final closeout checked actual theme attributes across the last 32 views and reverified all affected interactions. Stage 5 whole-application review and stage 6 merge/build/installed-App acceptance remain open.
+
+## Stage 5 integrated review
+
+The final review found and repaired four interaction boundaries rather than relaxing their checks. Draft hydration now retains Files selected while the initial read is in flight, including separate files with identical metadata and different bytes. Explicit request reuse replaces the destination prepared draft through its current scope; it does not merge unrelated destination attachments or overwrite the source Chat draft and pending submission. Ordinary early input still merges with restored content. Existing request keys, receipts, ownership and permission checks are unchanged. Automatic draft saves and first-Chat handoff share the same per-scope write queue: a delayed save cannot manufacture a same-window revision conflict or resurrect the consumed snapshot. The offline buffer retains the newest local text and File bytes even while an older HTTP snapshot is being acknowledged. Independent checks still reject genuine external revisions without creating a queue item or pending receipt.
+
+Reader toolbar controls wrap according to the available pane width. Agent-scoped Usage links retain their actual API filter alongside Project selection. A Task without an Agent can retain a paused rule, while new execution and enabling remain unavailable until an Agent is assigned. Returning from a Project or Agent detail gives the visible directory a keyboard focus target. A Project creation name survives session navigation through its overview and settings; explicit Cancel and successful Create clear it, and browser-restart persistence is not promised. Canonical Agent links without a tab open Overview, while explicit tab links retain the same view after reload. Closing the terminal or inspector restores focus only while it remains inside the closing surface or on the document body, so a delayed callback cannot steal a user's newer focus.
+
+Independent deterministic checks covered both attachment bytes through real upload/download, late scope reads, unchanged source drafts and pending requests, one-time request reuse, and queued/continue/interrupt recovery. Focus review explicitly held and released the delayed animation frame to reproduce the previous race. Legacy Teams graph-only interactions were retired with that view; shared identities, membership changes, revisions, conflict drafts, permissions and actual Task/Run state assertions remain covered by the directory tests. No fixed sleeps or removed business assertions substitute for these checks.
+
+Native zoom acceptance uses Electron's page zoom at 100% and 125%, with actual pointer and keyboard operations and native pixel captures. Artificial HTML CSS zoom has different portal coordinates and is not claimed as supported system zoom. The component catalog is served separately for nested-control tests and is not shipped in the production bundle. Desktop smoke tests select the real theme controls and assert the rendered theme rather than assuming that a legacy storage key changed native appearance.
+
+The broad production run passed 317 of 320 cases. Its three failures exposed two test fixtures sharing a durable draft scope and the real autosave/handoff race described above. After fixing both and completing the directory lifecycle review, the final production rebuild passed all 210 affected and integrated cases, including the new deterministic concurrency checks, explicit Agent/runtime selection, legacy Project Memory access, permission boundaries, keyboard/IME and real encrypted remote drafts. Two native Electron zoom cases passed with the separate component catalog. Typecheck, build and whitespace checks passed; the dependency audit reported zero vulnerabilities. The final-source bounded-concurrency full unit suite passed 2504 tests with three platform skips. Generated review screenshots remain outside the committed change. Fixed-commit packaging and installed-App acceptance remain separate gates.
+
+Stage 5 is accepted: all identified blocking findings are closed and the final source fingerprint matches the verified production build. Stage 6 requires its own clean-main package, backup and installed-App evidence; local release receipts are kept outside Git.
+
+## Project Wiki authority correction (2026-10-29)
+
+New Wiki records explicit Project ownership rather than storing the maintaining Agent as Asset owner. The knowledge service keeps server-only principal bindings for the invocation Project; the empty Agent remains a constrained identity. The host records original Chat Project/Agent when issuing a token, and revalidates them and current membership on reads and mutation commits. A separate scoped Project service principal checks all source versions and recursive provenance without inheriting a maintainer's private access. Existing Agent Wiki remains unchanged.
+
+Creation is Project-first with an optional executor; details show ownership separately from maintenance and expose a revision-guarded executor selector. Missing execution capability disables generation and automatic controls, while preserving sources, reading and manual page editing. Explicit future-outcome sharing uses a new evidence marker; inherited Task or Memory-history contexts are fail-closed for new Project Wiki. This does not alter Agent Memory. Source, page, search, version and generic file reads remain coupled to current source authorization. Compatibility/rollback details: docs/library.md.

@@ -1,0 +1,14 @@
+// spec: specs/progress-acceptance-plan.md
+// seed: tests/e2e/seed.spec.ts
+import {test,expect} from '@playwright/test';
+import {acceptanceMessagePair} from './helpers/progress-acceptance';
+test.describe('Progress 用户目标验收',()=>{test('P24 busy or approving A queues a B reply without interrupting and consumes it exactly once after settlement',async({page,request})=>{
+
+ for(const mode of ['hold','approval']){
+  const {source,target,message}=await acceptanceMessagePair(request);await request.post('/api/conversations/'+source.id+'/messages',{data:{text:mode}});await expect.poll(async()=>(await(await request.get('/api/conversations/'+source.id)).json()).conversation.status).toBe(mode==='approval'?'approval':'running');await expect.poll(async()=>(await(await request.get('/api/conversations/'+source.id)).json()).conversation.turnId).toBeTruthy();const before=(await(await request.get('/api/conversations/'+source.id)).json()).conversation.turnId;
+  await request.post('/__test__/message-finish',{data:{messageId:message.id,text:'Controlled reply during '+mode}});await expect.poll(async()=>(await(await request.get('/api/agent-messages/'+message.id)).json()).replyState).toBe('queued');await page.goto('/?conversation='+source.id);await expect(page.locator('.queued-input').filter({hasText:'智能体 回复'})).toBeVisible();expect((await(await request.get('/api/conversations/'+source.id)).json()).conversation.turnId).toBe(before);
+  if(mode==='approval'){expect((await(await request.get('/api/conversations/'+source.id)).json()).approvals).toHaveLength(1);await page.getByRole('button',{name:'允许本次',exact:true}).click();}else expect((await request.post('/__test__/progress-native',{data:{id:source.id,outcome:'completed',text:'The current human request is finished'}})).ok()).toBe(true);
+  await expect.poll(async()=>(await(await request.get('/api/agent-messages/'+message.id)).json()).replyState).toBe('consumed');await page.reload();const reply=page.locator('.agent-message').filter({hasText:'智能体 回复'});await expect(reply).toContainText('已处理');const queue=await(await request.get('/api/conversations/'+source.id+'/queue')).json();expect(queue.filter((q:{agentMessage?:{id:string;direction:string}})=>q.agentMessage?.id===message.id&&q.agentMessage?.direction==='reply')).toHaveLength(1);expect(queue.find((q:{agentMessage?:{id:string;direction:string}})=>q.agentMessage?.id===message.id&&q.agentMessage?.direction==='reply').state).toBe('completed');const events=await(await request.get('/api/conversations/'+source.id+'/history')).json();const submitted=events.filter((e:{kind:string;data:{agentMessage?:{id:string;direction:string}}})=>e.kind==='user'&&e.data.agentMessage?.id===message.id&&e.data.agentMessage?.direction==='reply');expect(submitted).toHaveLength(1);expect(events.filter((e:{kind:string;data:{runId?:string;method?:string}})=>e.kind==='tool'&&e.data.runId===submitted[0].data.runId&&e.data.method==='turn/started')).toHaveLength(1);
+ }
+
+});});

@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+[ "$(git branch --show-current)" = main ] || exit 0
+release_home=$(git config --local --get mandala.releaseHome || git config --local --get openmana.releaseHome || true)
+[ -n "$release_home" ] || exit 0
+release_port=$(git config --local --get mandala.releasePort || git config --local --get openmana.releasePort || true)
+cd "$(git rev-parse --show-toplevel)"
+MANDALA_HOME="$release_home" MANDALA_PORT="${release_port:-4332}" npm run release:local

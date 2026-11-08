@@ -1,0 +1,9 @@
+# Frontend design authority
+
+The approved direction is Mandala Compact C (2026-10-29) with visual language v2 (2026-11-05): cool-neutral light and charcoal dark surfaces, a single indigo interaction accent, compact operational UI, Geist-first typography, and the monochrome six-petal open-space mark. Read `../DESIGN.md`, `../docs/ui-rebuild.md`, and `../docs/brand-c.md` before editing frontend code.
+
+- Root `DESIGN.md` and the implemented semantic tokens are authoritative. Do not restore superseded visual experiments, warm backgrounds, vermilion branding, oversized controls, or editorial type in application chrome.
+- Colors, typography, radii, spacing, and dimensions come from `themes.ts` and `ui/tokens.css`. ThemeProvider applies semantic roles on the document root, including portals. Shared control adapters use `ui/controls.css` and `ui/primitives.css`; new page compositions use `ui/WorkspacePage.tsx` and `ui/workspace.css`. Read `../docs/ui-components.md` for the shadcn/Radix contracts. Business CSS handles layout rather than creating competing component systems.
+- New users default to compact density, 13px UI text, and 8px control radius. Preserve explicitly saved fonts, size, density, radius (including zero), palette selection, custom palettes, mode, and backgrounds. Never reset preferences to make a screenshot match.
+- Build with the shared accessible components and Icon system. Preserve real actions, keyboard focus, loading/error/empty/offline states, and Chinese input. Compact desktop controls are not permission to shrink mobile touch targets or long-form content.
+- Inspect real rendered pages in light/dark themes and narrow widths; passing tests does not establish visual acceptance. Record worktree, HEAD, service source, and build time. Installed-app acceptance additionally checks packaged build metadata; stale screenshots are not current evidence.

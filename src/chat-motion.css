@@ -1,0 +1,18 @@
+/* Operate: bounded prose reveal and copy acknowledgment, using the Cursor roles. */
+.product-frame .messages:not([hidden]) { display: grid; grid-auto-rows: max-content; align-content: start; }
+.product-frame .is-new .messages { display: none; }
+.markdown-text p { orphans: 2; widows: 2; }
+.markdown-text :is(th, td), .turn-process-count, .run-metrics dd, .run-timeline-time, .run-timeline-axis { font-variant-numeric: tabular-nums; }
+.turn-process-time { display: inline-block; min-width: 10ch; font-variant-numeric: tabular-nums; }
+.markdown-text .source-link svg { align-self: baseline; position: relative; top: .125em; }
+button[data-copied] { position: relative; }
+.copy-feedback { position: absolute; inset-block-end: calc(100% + var(--space-1)); inset-inline-start: 0; z-index: 2; white-space: nowrap; pointer-events: none; padding: var(--space-1) var(--space-2); border: 1px solid var(--border); border-radius: var(--control-radius); background: var(--surface); color: var(--text); font: var(--control-font-size)/1.5 var(--font-ui); }
+.stream-character { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .stream-character { animation: stream-reveal 90ms ease-out backwards; }
+  button[data-copied] > svg, :is(.code-toolbar, .diff-toolbar) button[data-copied] > span > span { display: inline-block; animation: copy-acknowledge 240ms ease-out; }
+  .copy-feedback, .copy-feedback-inline { animation: copy-fade 2500ms ease-out both; }
+}
+@keyframes stream-reveal { from { opacity: 0; filter: blur(4px); } to { opacity: 1; filter: blur(0); } }
+@keyframes copy-acknowledge { 35% { transform: scale(1.05); } 70% { transform: scale(.95); } to { transform: scale(1); } }
+@keyframes copy-fade { 0%, 90% { opacity: 1; } 100% { opacity: 0; } }

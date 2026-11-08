@@ -1,0 +1,564 @@
+{
+  "schemaVersion": "mandala-runtime-fixtures-v1",
+  "evidenceClass": "synthetic_protocol",
+  "provenance": "Hand-authored arithmetic/recording fixtures only, no provider usage or model outputs. There were zero actual native model calls.",
+  "defaultActivationAllowed": false,
+  "tokenBenefitMeasured": false,
+  "fixtures": [
+    {
+      "id": "complete-cost-split",
+      "description": "Answer uses fewer tokens, but cold full lifecycle costs more; all counts are artificial protocol values.",
+      "lanes": [
+        {
+          "lane": "without_memory",
+          "observations": [
+            {
+              "executionId": "a-answer",
+              "stage": "answer",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 1100,
+                "outputTokens": 300,
+                "totalTokens": 1400,
+                "cachedInputTokens": 200,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 100
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            }
+          ],
+          "background": {
+            "unnecessaryBackgroundQuestions": 2,
+            "userRestatedBackgroundFacts": 2,
+            "necessaryCurrentStateQuestions": 0
+          },
+          "sourceReads": 3,
+          "taskSuccess": true,
+          "answerFacts": {
+            "color": "绿色"
+          },
+          "syntheticInitiatedCalls": 1,
+          "actualNativeCallsInitiated": 0
+        },
+        {
+          "lane": "with_memory",
+          "observations": [
+            {
+              "executionId": "b-extract",
+              "stage": "extract",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 500,
+                "outputTokens": 100,
+                "totalTokens": 600,
+                "cachedInputTokens": 100,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 20
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            },
+            {
+              "executionId": "b-conflict",
+              "stage": "conflict",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 100,
+                "outputTokens": 50,
+                "totalTokens": 150,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 10
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            },
+            {
+              "executionId": "b-scene",
+              "stage": "scene",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 200,
+                "outputTokens": 80,
+                "totalTokens": 280,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 20
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            },
+            {
+              "executionId": "b-profile",
+              "stage": "profile",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 100,
+                "outputTokens": 40,
+                "totalTokens": 140,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 10
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            },
+            {
+              "executionId": "b-verify",
+              "stage": "verify",
+              "reviewStage": "extract",
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 120,
+                "outputTokens": 50,
+                "totalTokens": 170,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 10
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            },
+            {
+              "executionId": "b-answer",
+              "stage": "answer",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 750,
+                "outputTokens": 260,
+                "totalTokens": 1010,
+                "cachedInputTokens": 150,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 80
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            }
+          ],
+          "background": {
+            "unnecessaryBackgroundQuestions": 0,
+            "userRestatedBackgroundFacts": 0,
+            "necessaryCurrentStateQuestions": 0
+          },
+          "sourceReads": 1,
+          "taskSuccess": true,
+          "answerFacts": {
+            "color": "绿色"
+          },
+          "syntheticInitiatedCalls": 6,
+          "actualNativeCallsInitiated": 0
+        }
+      ],
+      "expected": {
+        "without_memory": {
+          "memoryTokens": 0,
+          "answerTokens": 1400,
+          "totalTokens": 1400,
+          "reasoningOutputTokens": 100,
+          "cachedInputTokens": 200
+        },
+        "with_memory": {
+          "memoryTokens": 1340,
+          "answerTokens": 1010,
+          "totalTokens": 2350,
+          "reasoningOutputTokens": 150,
+          "cachedInputTokens": 250
+        },
+        "answerSavingFraction": 0.2785714285714286,
+        "lifecycleSavingFraction": -0.6785714285714286,
+        "unnecessaryBackgroundQuestionReductionFraction": 1,
+        "claimableRealBenefit": false,
+        "syntheticCostSaving": false,
+        "explanation": "Reasoning and cached inputs are subsets of output/input. Total is not 2350+150+250."
+      }
+    },
+    {
+      "id": "unknown-not-zero",
+      "description": "A failed synthetic initiation with unknown cost remains counted; known subtotal cannot be compared as a full total.",
+      "lanes": [
+        {
+          "lane": "without_memory",
+          "observations": [
+            {
+              "executionId": "a-answer",
+              "stage": "answer",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 1100,
+                "outputTokens": 300,
+                "totalTokens": 1400,
+                "cachedInputTokens": 200,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 100
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            }
+          ],
+          "background": {
+            "unnecessaryBackgroundQuestions": 2,
+            "userRestatedBackgroundFacts": 2,
+            "necessaryCurrentStateQuestions": 0
+          },
+          "sourceReads": 3,
+          "taskSuccess": true,
+          "answerFacts": {
+            "color": "绿色"
+          },
+          "syntheticInitiatedCalls": 1,
+          "actualNativeCallsInitiated": 0
+        },
+        {
+          "lane": "with_memory",
+          "observations": [
+            {
+              "executionId": "u-extract",
+              "stage": "extract",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 300,
+                "outputTokens": 100,
+                "totalTokens": 400,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 30
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            },
+            {
+              "executionId": "u-failed",
+              "stage": "verify",
+              "reviewStage": "extract",
+              "callKind": "repair",
+              "status": "failed",
+              "coverage": "unknown",
+              "totals": {
+                "inputTokens": null,
+                "outputTokens": null,
+                "totalTokens": null,
+                "cachedInputTokens": null,
+                "cacheWriteInputTokens": null,
+                "reasoningOutputTokens": null
+              },
+              "reasoningObservable": false,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": [
+                "synthetic_missing_provider_usage"
+              ]
+            },
+            {
+              "executionId": "u-answer",
+              "stage": "answer",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 450,
+                "outputTokens": 150,
+                "totalTokens": 600,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": null
+              },
+              "reasoningObservable": false,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            }
+          ],
+          "background": {
+            "unnecessaryBackgroundQuestions": 0,
+            "userRestatedBackgroundFacts": 0,
+            "necessaryCurrentStateQuestions": 0
+          },
+          "sourceReads": 1,
+          "taskSuccess": true,
+          "answerFacts": {
+            "color": "绿色"
+          },
+          "syntheticInitiatedCalls": 3,
+          "actualNativeCallsInitiated": 0
+        }
+      ],
+      "expected": {
+        "with_memory": {
+          "knownReportedSubtotal": 1000,
+          "totalTokens": null,
+          "reasoningKnownSubtotal": 30,
+          "reasoningOutputTokens": null,
+          "syntheticInitiatedCalls": 3,
+          "unknownCostCalls": 1,
+          "unknownReasoningCalls": 2,
+          "usageComplete": false
+        },
+        "lifecycleSavingFraction": null,
+        "claimableRealBenefit": false,
+        "syntheticCostSaving": null
+      }
+    },
+    {
+      "id": "reasoning-unobservable",
+      "description": "Known total without reasoning breakdown can support protocol total arithmetic, but cannot support a reasoning-saving claim.",
+      "lanes": [
+        {
+          "lane": "without_memory",
+          "observations": [
+            {
+              "executionId": "a-answer",
+              "stage": "answer",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 1100,
+                "outputTokens": 300,
+                "totalTokens": 1400,
+                "cachedInputTokens": 200,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 100
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            }
+          ],
+          "background": {
+            "unnecessaryBackgroundQuestions": 2,
+            "userRestatedBackgroundFacts": 2,
+            "necessaryCurrentStateQuestions": 0
+          },
+          "sourceReads": 3,
+          "taskSuccess": true,
+          "answerFacts": {
+            "color": "绿色"
+          },
+          "syntheticInitiatedCalls": 1,
+          "actualNativeCallsInitiated": 0
+        },
+        {
+          "lane": "with_memory",
+          "observations": [
+            {
+              "executionId": "r-answer",
+              "stage": "answer",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 900,
+                "outputTokens": 250,
+                "totalTokens": 1150,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": null
+              },
+              "reasoningObservable": false,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            }
+          ],
+          "background": {
+            "unnecessaryBackgroundQuestions": 0,
+            "userRestatedBackgroundFacts": 0,
+            "necessaryCurrentStateQuestions": 0
+          },
+          "sourceReads": 1,
+          "taskSuccess": true,
+          "answerFacts": {
+            "color": "绿色"
+          },
+          "syntheticInitiatedCalls": 1,
+          "actualNativeCallsInitiated": 0
+        }
+      ],
+      "expected": {
+        "with_memory": {
+          "totalTokens": 1150,
+          "reasoningOutputTokens": null,
+          "reasoningObservable": false,
+          "unknownTotalCostCalls": 0
+        },
+        "syntheticLifecycleSavingFraction": 0.17857142857142858,
+        "reasoningSavingFraction": null,
+        "claimableRealBenefit": false
+      }
+    },
+    {
+      "id": "duplicate-observation-no-double-count",
+      "description": "Replay of the same final execution totals must not add cost a second time. This fixture is a final-execution snapshot stream, not incremental token deltas.",
+      "lanes": [
+        {
+          "lane": "without_memory",
+          "observations": [
+            {
+              "executionId": "a-answer",
+              "stage": "answer",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 1100,
+                "outputTokens": 300,
+                "totalTokens": 1400,
+                "cachedInputTokens": 200,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 100
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            }
+          ],
+          "background": {
+            "unnecessaryBackgroundQuestions": 2,
+            "userRestatedBackgroundFacts": 2,
+            "necessaryCurrentStateQuestions": 0
+          },
+          "sourceReads": 3,
+          "taskSuccess": true,
+          "answerFacts": {
+            "color": "绿色"
+          },
+          "syntheticInitiatedCalls": 1,
+          "actualNativeCallsInitiated": 0
+        },
+        {
+          "lane": "with_memory",
+          "observations": [
+            {
+              "executionId": "d-answer",
+              "stage": "answer",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 900,
+                "outputTokens": 250,
+                "totalTokens": 1150,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 70
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            },
+            {
+              "executionId": "d-answer",
+              "stage": "answer",
+              "reviewStage": null,
+              "callKind": "initial",
+              "status": "completed",
+              "coverage": "observed",
+              "totals": {
+                "inputTokens": 900,
+                "outputTokens": 250,
+                "totalTokens": 1150,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "reasoningOutputTokens": 70
+              },
+              "reasoningObservable": true,
+              "durationMs": null,
+              "model": "synthetic-counter-fixture",
+              "measurementKind": "hand_authored_protocol_counter",
+              "reasons": []
+            }
+          ],
+          "background": {
+            "unnecessaryBackgroundQuestions": 0,
+            "userRestatedBackgroundFacts": 0,
+            "necessaryCurrentStateQuestions": 0
+          },
+          "sourceReads": 1,
+          "taskSuccess": true,
+          "answerFacts": {
+            "color": "绿色"
+          },
+          "syntheticInitiatedCalls": 1,
+          "actualNativeCallsInitiated": 0
+        }
+      ],
+      "expected": {
+        "with_memory": {
+          "totalTokens": 1150,
+          "reasoningOutputTokens": 70,
+          "uniqueExecutions": 1,
+          "duplicateSnapshots": 1
+        },
+        "claimableRealBenefit": false
+      }
+    }
+  ]
+}

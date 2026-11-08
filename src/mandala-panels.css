@@ -1,0 +1,137 @@
+.mandala-panels { display:flex; flex-direction:column; min-height:0; }
+.mandala-panels > .ui-tabs-root { flex-shrink:0; border-bottom:1px solid var(--border-soft); }
+.mandala-panels .ui-tabs { padding:8px 48px 0 16px; min-height:44px; }
+.mandala-panel-body { padding:0 20px; overflow:auto; flex:1; min-height:0; }
+.mandala-panel-summary,.mandala-panel-hint,.mandala-row-meta { color:var(--muted); font-size:var(--type-meta); }
+.mandala-panel-summary { margin:0 0 8px; }
+.mandala-panel-hint { margin:0; padding:12px 20px; border-top:1px solid var(--border-soft); }
+.mandala-panels .ui-disclosure { border:0; background:transparent; padding:0; margin:0; }
+.mandala-panels .ui-disclosure-title { display:flex; align-items:center; gap:8px; min-width:0; overflow-wrap:anywhere; }
+.mandala-panels .ui-disclosure-title > svg { flex-shrink:0; }
+.mandala-panels .ui-disclosure-content { padding:12px 0 0; }
+.mandala-row-meta { display:flex; gap:8px; align-items:center; justify-content:space-between; margin-top:8px; }
+.mandala-row-meta > strong { color:var(--text); }
+.mandala-reference { flex-shrink:0; }
+@media(max-width:600px),(pointer:coarse) { .mandala-panels button,.mandala-panels summary { min-height:44px; } }
+
+.mandala-task-toolbar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:16px; }
+.mandala-task-toolbar .progress-search { flex-basis:100%; border:1px solid var(--border); border-radius:var(--control-radius); background:var(--surface); padding-left:8px; }
+.mandala-task-toolbar .progress-search input { font-size:var(--type-ui); padding:5px 9px 5px 0; }
+.mandala-task-toolbar + .mandala-panel-summary { margin:12px 0; }
+.mandala-panels .task-board { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(248px,1fr); overflow:auto; gap:16px; }
+.mandala-panels .task-group { margin:0; padding:0; border:0; background:none; }
+.mandala-panels .task-group > h2,.mandala-panels .progress-lane > h2 { font-size:var(--type-meta); color:var(--muted); font-weight:500; }
+.mandala-panels .task-board-card { padding:0; margin:0 0 8px; border:0; background:none; }
+.mandala-panels .task-work-related > summary { padding:6px 0 6px 26px; }
+.mandala-panels .task-work-heading .mandala-reference span { display:none; }
+
+.mandala-task-scope { display:flex; gap:4px; margin-top:16px; }
+.mandala-task-scope > button { min-width:0; border:0; background:transparent; color:var(--muted); font-size:var(--type-meta); }
+.mandala-task-scope > button[aria-pressed=true] { background:var(--raised); color:var(--text); }
+.mandala-task-toolbar { margin:12px 0; }
+.mandala-all-tasks { display:flex; align-items:center; justify-content:center; gap:8px; min-height:44px; margin:12px 0; color:var(--text); font-size:var(--type-meta); text-decoration:none; }
+.mandala-all-tasks:hover { text-decoration:underline; text-underline-offset:3px; }
+.mandala-all-tasks:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+.mandala-panels .task-work-related > summary { padding:4px 0 4px 24px; }
+
+.mandala-panels .task-board-card { margin:0 -8px 2px; }
+.mandala-panels .task-work-heading > .mandala-reference { width:24px; min-width:24px; height:24px; min-height:24px; padding:0; border:0; background:transparent; color:var(--muted); opacity:0; }
+.mandala-panels .task-work-heading > .mandala-reference:hover { background:var(--accent-bg); color:var(--text); }
+@media(pointer:coarse) { .mandala-panels .task-work-heading > .mandala-reference { opacity:1; width:44px; min-width:44px; height:44px; } }
+.mandala-panels .task-work-related .execution-chats { margin:0 -8px; border-top:0; }
+.mandala-panels .execution-chats a { min-height:32px; padding:4px 8px; gap:8px; font-size:var(--type-meta); border-radius:var(--control-radius); }
+.mandala-panels .execution-chats .execution-chat-agent,.mandala-panels .execution-chats .execution-chat-title > svg { display:none; }
+.mandala-panels .execution-chats .execution-chat-title { color:var(--text); }
+.mandala-panels .execution-chats > li + li { border-top:0; }
+.mandala-task-toolbar .progress-search { flex:1 1 0; min-width:0; }
+.mandala-task-toolbar .task-expand-all { flex:none; display:inline-grid; place-items:center; width:32px; height:32px; padding:0; border:0; background:transparent; color:var(--muted); border-radius:var(--control-radius); }
+.mandala-task-toolbar .task-expand-all:hover, .mandala-task-toolbar .task-expand-all[aria-pressed=true] { background:var(--raised); color:var(--text); }
+
+/* Shared scope chips: count is quieter than the label. */
+.mandala-task-scope > button { gap:6px; }
+.mandala-scope-count { font-variant-numeric:tabular-nums; opacity:.7; }
+.mandala-task-scope > button[aria-pressed=true] .mandala-scope-count { opacity:.85; }
+
+/* Hover-only reference, same rule as task rows. */
+.mandala-panels .mandala-reference.mandala-reference { width:24px; min-width:24px; height:24px; min-height:24px; padding:0; border:0; background:transparent; color:var(--muted); opacity:0; }
+.mandala-panels .mandala-reference > span { display:none; }
+.mandala-panels .mandala-reference:hover { background:var(--accent-bg); color:var(--text); }
+.mandala-panels .mandala-reference:focus-visible { opacity:1; }
+@media(hover:none),(pointer:coarse) { .mandala-panels .mandala-reference.mandala-reference { opacity:1; width:44px; min-width:44px; height:44px; } }
+
+/* Agents tab: Project = quiet group label (like task lanes), Agent = primary row (like task rows). */
+.mandala-team { position:relative; margin:0 0 8px; }
+.mandala-team > .mandala-team-group > summary { min-height:32px; padding:4px 36px 4px 0; gap:6px; font-size:var(--type-meta); font-weight:500; color:var(--muted); background:none; }
+.mandala-team > .mandala-team-group > summary:hover { background:none; color:var(--text); }
+.mandala-team > .mandala-team-group > summary .ui-disclosure-title { gap:6px; }
+.mandala-team > .mandala-team-group > summary .ui-disclosure-chevron { order:-1; margin:0; width:14px; height:14px; }
+.mandala-team-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.mandala-team-count { flex:none; font-variant-numeric:tabular-nums; opacity:.8; font-weight:400; }
+.mandala-panels .mandala-team > .mandala-team-group > .ui-disclosure-content { padding:0; }
+.mandala-team-heading { position:absolute; right:0; top:4px; }
+.mandala-team-heading:is(:hover,:focus-within) .mandala-reference,
+.mandala-team:has(> .mandala-team-group > summary:is(:hover,:focus-visible)) > .mandala-team-heading .mandala-reference { opacity:1; }
+.mandala-team-empty { margin:0; padding:4px 0 8px 20px; color:var(--muted); font-size:var(--type-meta); }
+
+.mandala-team-agent { display:grid; grid-template-columns:24px minmax(0,1fr) auto; column-gap:8px; align-items:center; margin:0 -8px 2px; padding:8px; border-radius:var(--control-radius); }
+.mandala-team-agent:hover { background:var(--raised); }
+.mandala-team-agent > .identity-avatar,.mandala-team-agent > :first-child { grid-row:1 / span 2; align-self:start; margin-top:2px; }
+.mandala-panels button.mandala-team-agent-name { grid-column:2; display:block; width:100%; height:auto; min-height:0; justify-content:flex-start; min-width:0; padding:0; border:0; background:none; color:var(--text); font:inherit; font-size:var(--theme-font-size); font-weight:var(--weight-heading); line-height:20px; text-align:left; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mandala-team-agent-name:hover { text-decoration:underline; text-underline-offset:3px; }
+.mandala-team-agent-name:focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:4px; }
+.mandala-team-agent > .mandala-reference { grid-column:3; grid-row:1; }
+.mandala-team-agent:is(:hover,:focus-within) > .mandala-reference { opacity:1; }
+.mandala-team-agent-status { grid-column:2; display:flex; align-items:center; gap:6px; min-width:0; min-height:24px; margin-top:2px; color:var(--muted); font-size:var(--type-meta); }
+.mandala-team-agent-status > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mandala-team-agent-status .status-mark { flex:none; width:14px; height:14px; }
+.mandala-team-agent[data-tone=active] .mandala-team-agent-status { color:var(--text); }
+.mandala-team-agent[data-tone=active] .status-mark { color:var(--status-running); }
+.mandala-team-agent[data-tone=warning] .status-mark { color:var(--warning); }
+.mandala-team-agent[data-tone=danger] .status-mark { color:var(--danger); }
+.mandala-idle-dot { flex:none; width:6px; height:6px; margin:0 4px; border-radius:50%; background:var(--border); }
+.mandala-idle-dot[data-recent] { background:var(--muted); }
+.mandala-team-agent > .task-work-related { grid-column:3; grid-row:2; align-self:end; margin:2px 0 0; border:0; padding:0; background:none; }
+.mandala-team-agent > .task-work-related[open] { grid-column:2 / -1; grid-row:3; }
+.mandala-team-agent > .task-work-related > summary { padding:2px 4px; min-height:24px; gap:4px; }
+.mandala-team-agent > .task-work-related[open] > summary { width:auto; margin-left:auto; }
+.mandala-team-agent > .task-work-related > .ui-disclosure-content { padding:4px 0 0; }
+
+/* Scheduled tab: one rule = one row, same rhythm as task rows. */
+.mandala-rule-list { display:grid; gap:2px; }
+.mandala-rule { display:grid; grid-template-columns:minmax(0,1fr) auto; grid-auto-flow:row dense; column-gap:8px; margin:0 -8px; padding:8px; border-radius:var(--control-radius); }
+.mandala-rule:hover { background:var(--raised); }
+.mandala-rule > * { grid-column:1 / -1; }
+.mandala-rule-heading { display:flex; align-items:flex-start; gap:8px; }
+.mandala-panels button.mandala-rule-title { display:block; height:auto; min-height:0; justify-content:flex-start; flex:1; min-width:0; padding:0; border:0; background:none; color:var(--text); font:inherit; font-size:var(--theme-font-size); font-weight:var(--weight-heading); line-height:20px; text-align:left; cursor:pointer; }
+.mandala-rule-title > span { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
+.mandala-rule-title:hover > span { text-decoration:underline; text-underline-offset:3px; }
+.mandala-rule-title:focus-visible,.mandala-rule-last:focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:4px; }
+.mandala-rule-state { flex:none; display:inline-flex; align-items:center; gap:6px; margin-top:1px; color:var(--muted); font-size:var(--type-meta); white-space:nowrap; }
+.mandala-rule-state > i { width:6px; height:6px; border-radius:50%; background:var(--border); }
+.mandala-rule[data-enabled=true] .mandala-rule-state > i { background:var(--success); }
+.mandala-rule[data-enabled=false] .mandala-rule-title { color:var(--muted); }
+.mandala-rule-meta { display:flex; align-items:flex-start; gap:6px; margin:4px 0 0; color:var(--muted); font-size:var(--type-meta); line-height:18px; }
+.mandala-rule-meta > svg { flex:none; margin-top:2px; }
+.mandala-rule-last { display:inline-flex; align-items:center; gap:6px; justify-self:start; max-width:100%; min-height:24px; margin:4px 0 0; color:var(--muted); font-size:var(--type-meta); text-decoration:none; }
+.mandala-rule-last > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mandala-rule-last > svg:last-child { flex:none; opacity:0; }
+a.mandala-rule-last:hover { color:var(--text); }
+a.mandala-rule-last:hover > svg:last-child,.mandala-rule:focus-within a.mandala-rule-last > svg:last-child { opacity:1; }
+.mandala-rule-last .status-mark { flex:none; width:14px; height:14px; }
+.mandala-rule-last[data-tone=success] .status-mark { color:var(--success); }
+.mandala-rule-last[data-tone=active] .status-mark { color:var(--status-running); }
+.mandala-rule-last[data-tone=warning] .status-mark { color:var(--warning); }
+.mandala-rule-last[data-tone=danger] .status-mark { color:var(--danger); }
+.mandala-rule-last[data-tone=neutral] .status-mark { color:var(--muted); }
+.mandala-rule > .mandala-rule-instructions { grid-column:2; align-self:end; margin:4px 0 0; border:0; padding:0; background:none; }
+.mandala-rule > [data-tail] { grid-column:1; }
+.mandala-rule > .mandala-rule-instructions > summary { padding:2px 4px; min-height:24px; gap:4px; }
+.mandala-rule > .mandala-rule-instructions[open] { grid-column:1 / -1; }
+.mandala-rule > .mandala-rule-instructions[open] > summary { width:auto; margin-left:auto; }
+.mandala-rule-instructions .ui-disclosure-content p { margin:0; padding:8px 10px; border-radius:var(--control-radius); background:var(--surface); color:var(--text); font-size:var(--type-meta); line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
+@media(pointer:coarse) { .mandala-team-agent-name,.mandala-rule-title,.mandala-rule-last { min-height:44px; } }
+.mandala-team-working { display:inline-flex; align-items:center; gap:5px; flex:none; color:var(--status-running); font-weight:400; }
+.mandala-team-working > i { width:6px; height:6px; border-radius:50%; background:currentColor; }
+@media(prefers-reduced-motion:no-preference) { .mandala-team-working > i { animation:mandala-working-pulse 1.6s ease-in-out infinite; } }
+@keyframes mandala-working-pulse { 50% { opacity:.35; } }
+.mandala-team-agent > .task-work-related[open] > summary,.mandala-rule > .mandala-rule-instructions[open] > summary { width:fit-content; margin-left:auto; }

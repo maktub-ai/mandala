@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "mandala-paired-recording-v1",
+  "evidenceClass": "synthetic_protocol",
+  "taskId": "correction-zh",
+  "repeat": 0,
+  "lanes": [
+    {
+      "lane": "without_memory",
+      "answer": {
+        "color": "绿色"
+      },
+      "answerOrigin": "hand_authored_stub",
+      "recalledMemoryIds": [],
+      "sourceReads": [
+        "s4",
+        "s5"
+      ],
+      "unnecessaryBackgroundQuestions": 0,
+      "userRestatedBackgroundFacts": 0,
+      "nativeCallsInitiated": 0,
+      "nativeCallsCompleted": 0,
+      "observations": [
+        {
+          "executionId": "example-recording-only",
+          "stage": "answer",
+          "reviewStage": null,
+          "callKind": "initial",
+          "status": "not_run",
+          "coverage": "unknown",
+          "inputTokens": null,
+          "outputTokens": null,
+          "totalTokens": null,
+          "cachedInputTokens": null,
+          "cacheWriteInputTokens": null,
+          "reasoningOutputTokens": null,
+          "reasoningObservable": false,
+          "durationMs": null,
+          "model": null,
+          "promptHash": null,
+          "responseHash": null,
+          "reasons": [
+            "offline_fixture_no_model_call"
+          ]
+        }
+      ],
+      "localMetrics": {
+        "retrievalMs": null,
+        "lookupMs": null,
+        "embeddingCalls": 0,
+        "embeddingProvider": "disabled"
+      },
+      "usageCompleteness": "not_measured",
+      "taskSuccess": true
+    },
+    {
+      "lane": "with_memory",
+      "answer": {
+        "color": "绿色"
+      },
+      "answerOrigin": "hand_authored_stub",
+      "recalledMemoryIds": [
+        "m5"
+      ],
+      "sourceReads": [
+        "s5"
+      ],
+      "unnecessaryBackgroundQuestions": 0,
+      "userRestatedBackgroundFacts": 0,
+      "nativeCallsInitiated": 0,
+      "nativeCallsCompleted": 0,
+      "observations": [
+        {
+          "executionId": "example-recording-only",
+          "stage": "answer",
+          "reviewStage": null,
+          "callKind": "initial",
+          "status": "not_run",
+          "coverage": "unknown",
+          "inputTokens": null,
+          "outputTokens": null,
+          "totalTokens": null,
+          "cachedInputTokens": null,
+          "cacheWriteInputTokens": null,
+          "reasoningOutputTokens": null,
+          "reasoningObservable": false,
+          "durationMs": null,
+          "model": null,
+          "promptHash": null,
+          "responseHash": null,
+          "reasons": [
+            "offline_fixture_no_model_call"
+          ]
+        }
+      ],
+      "localMetrics": {
+        "retrievalMs": null,
+        "lookupMs": null,
+        "embeddingCalls": 0,
+        "embeddingProvider": "disabled"
+      },
+      "usageCompleteness": "not_measured",
+      "taskSuccess": true
+    }
+  ],
+  "claimableBenefits": []
+}

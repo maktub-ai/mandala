@@ -1,0 +1,106 @@
+[
+  {
+    "file": "omp.svg",
+    "source": "https://omp.sh/favicon.svg",
+    "sha256": "9419975a0c24961341221c4cec18703db26a989fa037768f92cda74e3769fe05",
+    "brandReference": "https://omp.sh"
+  },
+  {
+    "file": "gemini.png",
+    "source": "https://geminicli.com/icon.png",
+    "sha256": "351e9f5b1bf863d738cd7be4ed040a625a1419450ae7fc490143e4042b7c2438",
+    "brandReference": "https://geminicli.com"
+  },
+  {
+    "file": "opencode.svg",
+    "source": "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/console/app/src/asset/brand/opencode-logo-light.svg",
+    "sha256": "b47a4fecc77599382e238868e74064bbe92307b0e253a32f0b1a026517a2d2a6",
+    "brandReference": "https://opencode.ai/brand"
+  },
+  {
+    "file": "opencode-dark.svg",
+    "source": "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/console/app/src/asset/brand/opencode-logo-dark.svg",
+    "sha256": "5dd4abb4de60204510edf140bbe74b3580d07ebdda79fdb0081cd45acb53d44b",
+    "brandReference": "https://opencode.ai/brand"
+  },
+  {
+    "file": "codex.svg",
+    "source": "https://raw.githubusercontent.com/twbs/icons/main/icons/openai.svg",
+    "sha256": "8e9ef0e10e03913f44672a49c3fc89c95aa4df7a88e354bbabb678425ceef092",
+    "brandReference": "https://openai.com/brand/"
+  },
+  {
+    "file": "claude.svg",
+    "source": "https://raw.githubusercontent.com/twbs/icons/main/icons/claude.svg",
+    "sha256": "2cf5b556308657b7c315a3956968459ab199d967513d8a23e19a30af3acbfc8f",
+    "brandReference": "https://claude.com",
+    "adaptation": "Original mark path; fill changed from currentColor to the Claude brand color #D97757."
+  },
+  {
+    "file": "LICENSE-bootstrap.txt",
+    "source": "https://raw.githubusercontent.com/twbs/icons/main/LICENSE",
+    "sha256": "0fb3e11bd57e896c5a512afd64864d28a37de45d19835016c87ca1ad19ead969"
+  },
+  {
+    "file": "codebuddy.svg",
+    "source": "https://codebuddy-1328495429.cos.accelerate.myqcloud.com/web/ide/logo.svg",
+    "sha256": "149baa45b9f9370c15f20d599afe381aa138e4fc13acf503f435c571ac93ecf5",
+    "brandReference": "https://www.codebuddy.ai/"
+  },
+  {
+    "file": "pi.svg",
+    "source": "https://pi.dev/logo-auto.svg",
+    "sha256": "245d4af6f0c6f2f413052534456357c8e57e01fc775aa98255c941d809c2a72f",
+    "brandReference": "https://pi.dev/",
+    "adaptation": "Cropped the viewBox to the official mark bounds for small UI sizes; paths and colors unchanged."
+  },
+  {
+    "file": "cursor.svg",
+    "source": "https://ptht05hbb1ssoooe.public.blob.vercel-storage.com/assets/brand/cursor-brand-assets.zip",
+    "sha256": "c483c02f78eb2619778fdd959e72a9adfac4844854472cd2653d4cbfd60e4d71",
+    "brandReference": "https://cursor.com/brand",
+    "archivePath": "General Logos/Cube/SVG/CUBE_2D_LIGHT.svg"
+  },
+  {
+    "file": "cursor-dark.svg",
+    "source": "https://ptht05hbb1ssoooe.public.blob.vercel-storage.com/assets/brand/cursor-brand-assets.zip",
+    "sha256": "cd0e3e5d8991a4cdd4577f8896cd063105207665165c73e25a1ff918dd367eb7",
+    "brandReference": "https://cursor.com/brand",
+    "archivePath": "General Logos/Cube/SVG/CUBE_2D_DARK.svg"
+  },
+  {
+    "file": "kimi.svg",
+    "source": "https://raw.githubusercontent.com/MoonshotAI/kimi-code/main/apps/vscode/resources/kimi-icon.svg",
+    "sha256": "60685e25b2db869030290485a35eed8ca77e535d2c6b7731374df49edbfa98c8",
+    "brandReference": "https://github.com/MoonshotAI/kimi-code"
+  },
+  {
+    "file": "dsh.svg",
+    "source": "https://www.deepseek.com/harness/favicon.svg",
+    "sha256": "f6a5725f504abe66da376ad5438d3a0be11b8fd880966d2c23f16254e1688cd6",
+    "brandReference": "https://www.deepseek.com/en/harness/",
+    "adaptation": "Replaced browser color-scheme styling with black paths, inverted by the App in dark mode; geometry unchanged."
+  },
+  {
+    "file": "antigravity.svg",
+    "source": "https://antigravity.google/assets/image/brand/antigravity-icon__full-color.svg",
+    "sha256": "d775965ea1f8060538c15f758a3e22487317211fcb6051333b5e023f35aa726f",
+    "brandReference": "https://antigravity.google/press"
+  },
+  {
+    "file": "grok.svg",
+    "source": "https://registry.npmmirror.com/@lobehub/icons-static-svg/1.101.0/files/icons/grok.svg",
+    "sha256": "9175fc90c22655160231976c849f25a03b888d7cc0e04c5f1b987b659bb07c95",
+    "brandReference": "https://icons.lobehub.com/components/grok"
+  },
+  {
+    "file": "LICENSE-lobe-icons.txt",
+    "source": "https://raw.githubusercontent.com/lobehub/lobe-icons/master/LICENSE",
+    "sha256": "add9d7531d1b21646317a8958e38fc727506fa39d24bdecb44154d943c82753a"
+  },
+  {
+    "file": "LICENSE-kimi-code.txt",
+    "source": "https://raw.githubusercontent.com/MoonshotAI/kimi-code/main/LICENSE",
+    "sha256": "23cc68e17992e0b512ae2e80afc5787d7d8e0fbfbdb4fff54ec0245508fa400e"
+  }
+]

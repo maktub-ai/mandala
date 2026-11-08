@@ -1,0 +1,8 @@
+import { createHash } from 'node:crypto';
+const hash = (raw: string) => createHash('sha256').update(raw).digest('hex');
+export const arabicPayload = JSON.stringify({ format: 'mandala-language', version: 1, locale: 'ar', name: 'العربية', direction: 'rtl', messages: { '市场': 'السوق', '快捷键': 'اختصارات', '项目': 'المشاريع' } });
+export const arabicManifest = { format: 'mandala-plugin', schemaVersion: 1, execution: 'data', id: 'arabic-starter', name: 'العربية', description: 'Synthetic Arabic language plugin', version: '1.0.1', minAppVersion: '0.1.2', contributes: { languagePacks: [{ id: 'arabic-starter', path: 'packages/ar.mandala-language.json', sha256: hash(arabicPayload) }] } };
+export const arabicFiles: Record<string, string> = { 'packages/ar.mandala-language.json': arabicPayload, 'plugins/arabic-starter/mandala-plugin.json': JSON.stringify(arabicManifest) };
+export const arabicEntry = { id: arabicManifest.id, name: arabicManifest.name, description: arabicManifest.description, version: arabicManifest.version, minAppVersion: arabicManifest.minAppVersion, publisher: 'Example', kinds: ['language'], package: { repository: 'maktub-ai/mandala-plugins', revision: 'd'.repeat(40), path: 'plugins/arabic-starter/mandala-plugin.json', sha256: hash(arabicFiles['plugins/arabic-starter/mandala-plugin.json']) } };
+export const legacyArabicEntry = { id: 'arabic-starter', name: 'العربية', description: 'Synthetic Arabic language pack', version: '1.0.1', minAppVersion: '0.1.1', publisher: 'Example', package: { ...arabicEntry.package, path: 'packages/ar.mandala-language.json', sha256: hash(arabicPayload) } };
+export const legacyArabicCatalog = { format: 'mandala-catalog', version: 1, kind: 'language', items: [legacyArabicEntry] };

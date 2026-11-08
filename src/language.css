@@ -1,0 +1,5 @@
+/* Language packs change writing direction, not navigation, control order or drawer placement. */
+html[dir="rtl"] body { direction:ltr; text-align:left; }
+/* Resolve prose from its own text so Arabic and English fallback keep their reading order. */
+html[dir="rtl"] :is(p, h1, h2, h3, h4, label, button, a, span, li, dt, dd, th, td, input, textarea) { unicode-bidi:plaintext; }
+html[dir="rtl"] :is(pre, code, .xterm, input[type="url"], input[type="email"]) { direction:ltr; unicode-bidi:isolate; text-align:left; }

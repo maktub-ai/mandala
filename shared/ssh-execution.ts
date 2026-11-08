@@ -1,0 +1,10 @@
+import type {Cli} from './types';
+export const SSH_PROTOCOL_VERSION = 1;
+export const SSH_MIN_NODE = '22.23.2';
+export const SSH_TRANSFER_LIMIT = 20 * 1024 * 1024;
+export const SSH_FRAME_LIMIT = 32 * 1024 * 1024;
+export type SshRequest = {id:string;method:string;params:any};
+export type SshEvent = {sequence:number;runtimeId?:string;kind:'event'|'approval'|'exit'|'business';payload:any};
+export type SshFrame = {id:string;result?:any;error?:{message:string;code?:string;status?:number}} | {event:SshEvent} | {checkpoint:number};
+export type SshProbe = {platform:string;nodeVersion:string;runtimes:{id:Cli;installed:boolean}[]};
+export type SshSkill = {name:string;content:string;resources:{path:string;data:string;executable:boolean}[]};

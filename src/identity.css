@@ -1,0 +1,5 @@
+.identity-avatar { display:inline-grid; place-items:center; flex-shrink:0; vertical-align:middle; border-radius:50%; overflow:hidden; }
+.identity-emoji { display:inline-grid; place-items:center; flex-shrink:0; line-height:1; font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif; }
+.project-marker.identity-emoji { vertical-align:middle; }
+.project-icon-picker { min-width: 132px; }
+.project-icon-picker .ui-select { margin-top: 5px; }

@@ -1,0 +1,9 @@
+.agent-approval-settings { margin:var(--space-5) 0; padding:var(--space-5) 0; border-top:1px solid var(--border-soft); border-bottom:1px solid var(--border-soft); min-width:0; }
+.agent-approval-settings > h3 { margin:0 0 var(--space-4); font-size:16px; font-weight:var(--weight-heading); }
+.product-frame .agent-approval-settings .settings-form-row { grid-template-columns:1fr; gap:var(--space-2); }
+.agent-approval-settings > .field-hint { max-width:70ch; margin:var(--space-2) 0 0; line-height:1.65; }
+.agent-approval-effective { display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-2) var(--space-3); margin-top:var(--space-4); padding:var(--space-4); border-radius:var(--panel-radius); background:var(--raised); font-size:var(--type-body); }
+.agent-approval-effective > div { display:flex; flex-wrap:wrap; gap:var(--space-2); align-items:baseline; }
+.agent-approval-effective strong { font-weight:var(--weight-medium); }
+.agent-approval-effective > p { flex-basis:100%; margin:0; color:var(--muted); font-size:var(--type-meta); line-height:1.6; }
+.agent-approval-effective > button { margin-top:var(--space-1); background:var(--surface); }

@@ -1,0 +1,21 @@
+.terminal-pane { flex:1; min-height:0; display:flex; flex-direction:column; position:relative; background:var(--surface); color:var(--text); min-width:0; overflow:hidden; }
+.terminal-toolbar { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px 4px; min-height:36px; flex-shrink:0; }
+.terminal-heading,.terminal-actions { display:flex; align-items:center; gap:8px; min-width:0; font-size:var(--type-meta); }
+.terminal-heading { font-weight:var(--weight-heading); white-space:nowrap; }
+.terminal-status { color:var(--muted); font-size:var(--type-meta); font-weight:400; }
+.terminal-status.is-ready::before { content:''; display:inline-block; width:5px; height:5px; background:var(--success,#52a879); border-radius:50%; margin-right:5px; }
+.terminal-actions button { display:flex; align-items:center; gap:5px; padding:5px 7px; border:0; background:transparent; color:var(--muted); font-size:var(--type-meta); white-space:nowrap; }
+.terminal-actions button:hover:not(:disabled) { color:var(--text); background:var(--raised); }
+.terminal-location { padding:0 14px 7px; font:12px/1.5 var(--font-mono); color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex-shrink:0; }
+.terminal-surface { min-height:0; min-width:0; flex:1; padding:0 12px 8px; overflow:hidden; }
+.terminal-surface .xterm { height:100%; }
+.terminal-surface .xterm-viewport { scrollbar-width:thin; background:transparent !important; }
+.terminal-surface .xterm-helper-textarea { min-height:0; min-width:0; padding:0; border:0; border-radius:0; }
+.terminal-error,.terminal-reconnect { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:5px 14px; font-size:var(--type-meta); flex-shrink:0; }
+.terminal-error { color:var(--danger); }.terminal-error span { overflow-wrap:anywhere; min-width:0; }
+.terminal-error button,.terminal-reconnect button { font-size:var(--type-meta); padding:3px 6px; flex-shrink:0; }
+.terminal-reconnect { color:var(--muted); }
+@media(max-width:600px) { .terminal-toolbar { padding:7px 9px 3px; }.terminal-heading,.terminal-actions { gap:4px; }.terminal-actions button { padding:6px 5px; }.terminal-location { padding:0 10px 6px; }.terminal-surface { padding:0 9px 7px; } }
+.terminal-tabs-host { flex:1; min-height:0; min-width:0; display:flex; flex-direction:column; }
+.terminal-tabs .open-file-tab > button:first-child { display:inline-flex; align-items:center; gap:6px; }
+.terminal-tabs > .icon-button { padding:6px 10px; }

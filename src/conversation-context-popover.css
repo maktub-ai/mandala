@@ -1,0 +1,38 @@
+/* Chat context popover: a glance at workspace, moving work and sources; tools open the side panel. */
+.context-popover-trigger { display:inline-flex; align-items:center; gap:6px; height:32px; padding:0 8px; border:0; border-radius:var(--control-radius); background:transparent; color:var(--muted); font:inherit; font-size:var(--type-meta); cursor:pointer; white-space:nowrap; }
+.context-popover-trigger:hover, .context-popover-trigger[aria-expanded=true] { background:var(--raised); color:var(--text); }
+.context-popover-trigger:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
+.context-popover-diff, .context-popover-aside { font-variant-numeric:tabular-nums; }
+.context-popover-trigger .status-dot { margin-left:2px; }
+
+.context-popover[data-slot=popover-content] { width:320px; max-width:calc(100vw - 24px); max-height:min(560px, calc(100dvh - 80px)); overflow-y:auto; gap:0; padding:6px; border-radius:12px; background:var(--surface); color:var(--text); box-shadow:var(--overlay-shadow); font-size:var(--type-ui); }
+.context-popover section { padding:4px 0; }
+.context-popover section + section { border-top:1px solid var(--border-soft); }
+.context-popover h3 { margin:0; padding:6px 10px 2px; color:var(--muted); font-size:var(--type-meta); font-weight:var(--weight-medium); }
+.context-popover-row { display:flex; align-items:center; gap:10px; width:100%; min-height:32px; padding:5px 10px; border:0; border-radius:8px; background:transparent; color:var(--text); font:inherit; font-size:var(--type-ui); text-align:left; text-decoration:none; cursor:pointer; }
+.context-popover-row:hover, .context-popover-row:focus-visible { background:var(--raised); outline:none; }
+.context-popover-row > svg:first-child { flex:none; color:var(--muted); }
+.context-popover-name { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.context-popover-aside, .context-popover-state { flex:none; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:var(--type-meta); }
+.context-popover-aside.mono { font-family:var(--font-mono); }
+.context-popover-state[data-state=running] { color:var(--status-running); }
+.context-popover-state[data-state=waiting], .context-popover-state[data-state=review] { color:var(--status-pending); }
+.context-popover-chevron { flex:none; color:var(--muted); }
+.context-popover-more .context-popover-name { color:var(--muted); }
+.context-popover-note { margin:0; padding:5px 10px; color:var(--muted); font-size:var(--type-meta); }
+.context-popover-tools { display:grid; grid-template-columns:repeat(auto-fit, minmax(0, 1fr)); gap:4px; }
+.context-popover-tools button { display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px 4px; border:0; border-radius:8px; background:transparent; color:var(--muted); font:inherit; font-size:var(--type-meta); cursor:pointer; }
+.context-popover-tools button:hover, .context-popover-tools button:focus-visible { background:var(--raised); color:var(--text); outline:none; }
+@media (prefers-reduced-motion:reduce) { .context-popover[data-slot=popover-content] { animation:none; } }
+
+/* Web layout: the trigger closes the chat bar; in the desktop app it sits in the titlebar. */
+.product-frame .topbar > .context-popover-trigger { flex:none; }
+
+.context-popover-sources { max-height:240px; overflow-y:auto; }
+.context-popover-row.is-static { cursor:default; }
+.context-popover-row.is-static:hover { background:transparent; }
+.context-popover-name.mono { font-family:var(--font-mono); font-size:var(--type-meta); }
+.context-popover-aside[data-tone=muted] { opacity:.75; }
+
+.context-popover-note.mono { font-family:var(--font-mono); overflow-wrap:anywhere; }
+.context-popover-machine { max-width:14ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

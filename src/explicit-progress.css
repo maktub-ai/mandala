@@ -1,0 +1,30 @@
+.explicit-progress { min-width:0; font-size:var(--font-size-small,12px); }
+.explicit-progress-meta { display:flex; align-items:center; gap:var(--space-2,8px); color:var(--muted); }
+.explicit-progress-meta time { white-space:nowrap; font-variant-numeric:tabular-nums; }
+.explicit-progress > p { margin:8px 0; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--text); font-size:var(--type-body); line-height:1.6; }
+.explicit-progress[data-compact="true"] > p { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:3; overflow:hidden; }
+.explicit-progress-steps { margin:0; padding:0; list-style:none; display:grid; gap:8px; }
+.explicit-progress-steps li { display:flex; align-items:baseline; gap:8px; }
+.explicit-progress-steps li > span { flex:1; min-width:0; overflow-wrap:anywhere; }
+.explicit-progress-steps small { color:var(--muted); white-space:nowrap; }
+.run-process-timeline { list-style:none; padding:0; margin:12px 0; display:grid; gap:12px; }
+.run-process-timeline > li { min-width:0; }
+.run-process-timeline .execution-overview { display:none; }
+.run-process-timeline .execution-trace { margin:0; }
+.turn-process .explicit-progress > .ui-disclosure > summary { min-height:28px; padding:4px 0; font-size:var(--type-meta); }
+.turn-process .explicit-progress-steps { font-size:var(--type-meta); }
+.run-event-error { color:var(--danger); white-space:pre-wrap; overflow-wrap:anywhere; }
+.progress-latest-summary { min-width:0; margin:8px 0; }
+.progress-latest-source { display:block; color:var(--muted); font-size:var(--type-meta); margin-bottom:4px; overflow-wrap:anywhere; }
+.task-conversation-progress { display:grid; gap:12px; min-width:0; }
+.task-conversation-progress .task-progress-chat a { color:var(--text); }
+.task-conversation-progress .ui-disclosure-title { min-width:0; overflow-wrap:anywhere; }
+
+@media (pointer:coarse) { .turn-process .explicit-progress > .ui-disclosure > summary { min-height:44px; } }
+/* Commentary is the Agent narrating, not a chat message: a small dot that breathes while the turn runs. */
+.progress-dot { display:inline-block; flex:none; width:6px; height:6px; border-radius:50%; background:var(--muted); opacity:.7; }
+.progress-dot[data-live] { background:var(--accent); opacity:1; animation:progress-dot-breathe 1.6s ease-in-out infinite; }
+.explicit-progress-meta .progress-dot { margin:0 3px 0 4px; }
+.run-commentary-label { width:16px; justify-content:center; }
+@keyframes progress-dot-breathe { 0%,100% { opacity:1; transform:scale(1); } 50% { opacity:.35; transform:scale(.75); } }
+@media (prefers-reduced-motion:reduce) { .progress-dot[data-live] { animation:none; } }

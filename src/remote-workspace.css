@@ -1,0 +1,99 @@
+.remote-workspace { height:100dvh; min-height:0; overflow:hidden; background:var(--bg); color:var(--text); display:flex; flex-direction:column; font-size:var(--theme-font-size); }
+.remote-header,.remote-tabs,.remote-actions,.remote-read-status { display:flex; align-items:center; gap:8px; }
+.remote-header { min-height:52px; padding:8px 20px; justify-content:space-between; border-bottom:1px solid var(--border-soft); flex:none; }
+.remote-computer { flex:1; min-width:0; display:grid; gap:3px; }
+.remote-computer strong { font-weight:var(--weight-heading); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.remote-computer > span { font-size:var(--type-meta); color:var(--muted); }
+.remote-workspace .remote-icon-button { display:grid; place-items:center; width:32px; min-height:32px; padding:0; background:transparent; }
+.remote-workspace .remote-icon-button:hover { background:var(--raised); }
+.remote-tabs { padding:0 20px; border-bottom:1px solid var(--border-soft); flex:none; }
+.remote-tabs button { display:flex; align-items:center; gap:6px; padding:8px 12px; border:0; border-radius:0; border-bottom:2px solid transparent; background:transparent; color:var(--muted); }
+.remote-tabs button[aria-current] { color:var(--text); border-bottom-color:var(--text); }
+.remote-read-status { padding:6px 20px; min-height:40px; flex:none; border-bottom:1px solid var(--border-soft); font-size:var(--type-meta); flex-wrap:wrap; }
+.remote-read-status > span:not(.workspace-status) { color:var(--muted); }
+.remote-read-status > button { margin-left:auto; display:inline-flex; gap:6px; align-items:center; }
+.remote-chat-layout { display:grid; grid-template-columns:236px minmax(0,1fr); flex:1; min-height:0; }
+.remote-chat-list { border-right:1px solid var(--border-soft); padding:12px; display:flex; flex-direction:column; gap:4px; background:var(--panel); overflow:auto; }
+.remote-chat-list button { display:grid; text-align:left; gap:4px; min-width:0; background:transparent; padding:8px; min-height:52px; border:0; }
+.remote-chat-list button:hover,.remote-chat-list button[aria-current] { background:var(--raised); }
+.remote-chat-list > button:first-child { border:1px solid var(--border); margin-bottom:8px; min-height:32px; display:flex; align-items:center; gap:8px; }
+.remote-chat-list strong { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500; }
+.remote-chat-list small,.remote-muted,.remote-message > small { color:var(--muted); }
+.remote-chat-main { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:auto; }
+.remote-chat-heading { border-bottom:1px solid var(--border-soft); flex:none; padding-bottom:10px; }
+.remote-chat-heading .workspace-page-header { border:0; padding:12px 20px 8px; }
+.remote-chat-heading h1 { font-size:15px; overflow-wrap:anywhere; }
+.remote-chat-heading .workspace-metadata { display:flex; gap:16px; padding:0 20px; margin:0; flex-wrap:wrap; }
+.remote-chat-heading .workspace-metadata > div { display:flex; gap:6px; font-size:var(--type-meta); }
+.remote-messages { width:100%; max-width:850px; margin:0 auto; padding:20px; flex:1; min-height:80px; overflow:auto; box-sizing:border-box; }
+.remote-message { margin-bottom:20px; overflow-wrap:anywhere; font-size:calc(var(--theme-font-size) + 1px); line-height:1.65; }
+.remote-message > small { font-size:var(--type-meta); }
+.remote-message p { margin:8px 0; }
+.remote-message.user { background:var(--panel); padding:10px 12px; border-radius:var(--control-radius); margin-left:auto; width:fit-content; max-width:90%; }
+.remote-message.error { color:var(--danger); }
+.remote-message pre,.remote-approval pre { overflow:auto; max-width:100%; font-size:var(--code-font-size); padding:12px; background:var(--panel); }
+.remote-message table { display:block; overflow-x:auto; }
+.remote-message a { color:var(--link); }
+.remote-attachment { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:6px 0; font-size:var(--type-ui); overflow-wrap:anywhere; }
+.remote-attachment > span { flex:1; min-width:0; }
+.remote-composer { margin:12px auto 20px; width:calc(100% - 40px); max-width:800px; display:grid; gap:8px; padding:10px; border:1px solid var(--border); background:var(--panel); border-radius:var(--panel-radius); flex:none; box-sizing:border-box; }
+.remote-composer > label { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip-path:inset(50%); }
+.remote-composer textarea { width:100%; min-height:80px; resize:vertical; font:inherit; border:0; background:transparent; padding:6px; }
+.remote-actions { flex-wrap:wrap; }
+.remote-actions > button { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+.remote-actions > .primary:last-child { margin-left:auto; }
+.remote-create { width:100%; max-width:560px; padding:0 20px 24px; margin:0 auto; display:grid; gap:12px; box-sizing:border-box; }
+.remote-create .workspace-page-header { padding:20px 0 8px; border:0; }
+.remote-create p { margin:0; line-height:1.6; }
+.remote-create label,.remote-approval label { display:grid; gap:6px; }
+.remote-create .workspace-metadata { margin:0; }
+.remote-content { width:100%; min-width:0; overflow:auto; flex:1; }
+.remote-content .workspace-page-header .workspace-page-toolbar input { max-width:400px; }
+.remote-content > p,.remote-content > .workspace-detail-section { margin:0 20px; }
+.remote-content > p { padding-top:12px; font-size:var(--type-ui); line-height:1.6; }
+.remote-content .workspace-metadata { margin:0; }
+.remote-row { display:grid; grid-template-columns:minmax(120px,1fr) minmax(0,2fr); padding:12px 0; gap:8px 20px; border-bottom:1px solid var(--border-soft); overflow-wrap:anywhere; }
+.remote-row > strong { font-weight:500; }
+.remote-row > span { font-size:var(--type-meta); color:var(--muted); }
+.remote-task-list { padding:0 20px; }
+.remote-task { padding:14px 0; border-bottom:1px solid var(--border-soft); display:grid; gap:8px; min-width:0; }
+.remote-task-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.remote-task h2 { font-size:var(--type-ui); line-height:1.5; margin:0; font-weight:var(--weight-heading); overflow-wrap:anywhere; }
+.remote-task-heading .workspace-status { flex:none; }
+.remote-task-meta { display:flex; flex-wrap:wrap; gap:8px 16px; color:var(--muted); font-size:var(--type-meta); }
+.remote-task-chat { display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-width:0; }
+.remote-task-chat > .ui-select { min-width:0; width:280px; max-width:100%; }
+.remote-task-chat > span { display:inline-flex; align-items:center; gap:6px; font-size:var(--type-meta); min-width:0; overflow-wrap:anywhere; }
+.remote-task-chat button { display:inline-flex; gap:6px; align-items:center; }
+.remote-task p { white-space:pre-wrap; line-height:1.6; }
+.remote-approval { margin:8px 20px; padding:12px; border:1px solid var(--border); border-radius:var(--panel-radius); display:grid; gap:12px; max-height:40dvh; overflow:auto; flex:none; }
+.remote-approval h2 { margin:0; font-size:var(--type-body); }
+.remote-approval form { display:grid; gap:12px; }
+.remote-notice { margin:8px 20px; padding:10px 12px; color:var(--danger); border:1px solid var(--border); border-radius:var(--control-radius); max-height:24dvh; overflow:auto; flex:none; font-size:var(--type-ui); }
+.remote-notice p { margin:0 0 8px; line-height:1.6; overflow-wrap:anywhere; }
+.remote-image-preview.ui-dialog { width:min(900px,calc(100vw - 32px)); height:min(800px,calc(100dvh - 32px)); background:var(--bg); padding:16px; display:flex; flex-direction:column; gap:16px; align-items:center; }
+.remote-image-preview img { max-width:100%; min-height:0; object-fit:contain; flex:1; }
+.remote-header .remote-menu-button { display:none; }
+@media(max-width:768px) {
+ .remote-header { padding:8px 16px; }.remote-header .remote-menu-button { display:grid; }
+ .remote-workspace .remote-icon-button { width:40px; min-height:40px; }
+ .remote-tabs { padding:0 16px; justify-content:space-between; }.remote-tabs button { min-height:40px; padding-inline:10px; }
+ .remote-read-status { padding:6px 16px; gap:6px 8px; }.remote-read-status > span:not(.workspace-status) { flex-basis:100%; order:3; }
+ .remote-chat-layout { display:flex; flex-direction:column; }.remote-chat-list { display:none; border-right:0; border-bottom:1px solid var(--border-soft); max-height:240px; flex:none; }.remote-chat-list.is-open { display:flex; }
+ .remote-chat-heading .workspace-page-header { padding-inline:16px; }.remote-chat-heading .workspace-metadata { padding-inline:16px; }
+ .remote-messages { padding:16px; }.remote-create { padding-inline:16px; }
+ .remote-composer { width:calc(100% - 32px); margin:8px 16px max(16px,env(safe-area-inset-bottom)); }
+ .remote-approval,.remote-notice { margin-inline:16px; }.remote-task-list { padding-inline:16px; }
+ .remote-content > p,.remote-content > .workspace-detail-section { margin-inline:16px; }
+ .remote-row { grid-template-columns:minmax(0,1fr); gap:6px; }.remote-task-chat > .ui-select { width:100%; }
+}
+/* Chat titles wrap with their icon; navigation selection changes immediately. */
+.remote-tabs button { transition:none; }
+.remote-chat-heading .workspace-page-heading { display:grid; grid-template-columns:20px minmax(0,1fr) auto; align-items:start; gap:8px; }
+.remote-chat-heading .workspace-page-heading h1 { min-width:0; }
+.remote-message h1 { font-size:20px; line-height:1.35; margin:16px 0 12px; }
+.remote-message h2 { font-size:16px; line-height:1.4; }
+.remote-message h3 { font-size:15px; line-height:1.4; }
+@media(max-width:768px) { .remote-chat-heading .workspace-page-heading { grid-template-columns:20px minmax(0,1fr); }.remote-chat-heading .workspace-page-context { grid-column:2; } }
+.remote-chat-list > button:not(:first-child) { justify-content:stretch; justify-items:start; }
+.remote-chat-list > button:not(:first-child) > strong,.remote-chat-list > button:not(:first-child) > small { width:100%; }

@@ -1,0 +1,52 @@
+import {expect,test} from '@playwright/test';
+import {chooseOption} from '../e2e/helpers/select';
+for(const mode of ['light','dark'] as const)for(const width of [1440,390])test(`interval rule creation and summaries ${mode} ${width}`,async({page,request},testInfo)=>{
+ await request.post('/__test__/mandala-panels');
+ const current=await(await request.get('/api/config')).json(),config=current.config??current;
+ const agent=config.agents.find((a:{systemRole?:string})=>!a.systemRole);
+ await page.addInitScript(mode=>{localStorage.setItem('mana-theme',mode);localStorage.setItem('mana-language','en');},mode);
+ await page.setViewportSize({width,height:1000});await page.goto('/schedules');await expect(page.locator('html')).toHaveAttribute('data-theme',mode);
+ await page.getByRole('button',{name:'New schedule',exact:true}).click();
+ const form=page.getByRole('form',{name:'New scheduled task',exact:true});
+ await form.getByLabel('Task name',{exact:true}).fill('Synthetic interval '+mode+' '+width);
+ await form.getByLabel('Task request',{exact:true}).fill('Check synthetic state');
+ await chooseOption(page,form.getByRole('combobox',{name:'Agent',exact:true}),agent.id);
+ await chooseOption(page,form.getByRole('combobox',{name:'Repeat',exact:true}),'interval');
+ await form.getByLabel('Interval (minutes)',{exact:true}).fill('15');
+ await chooseOption(page,form.getByRole('combobox',{name:'Overlapping checks',exact:true}),'coalesce');
+ await expect(form.getByRole('combobox',{name:'Missed runs',exact:true})).toHaveAttribute('data-value','latest');
+ await page.screenshot({path:testInfo.outputPath('interval-editor.png'),fullPage:true});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await form.getByRole('button',{name:'Save schedule',exact:true}).click();
+ const plan=page.getByRole('article',{name:'Synthetic interval '+mode+' '+width,exact:true});
+ await expect(plan).toContainText('Every 15 minutes');await expect(plan).toContainText('Latest missed run only');await expect(plan).toContainText('Merge state checks');await expect(plan).toContainText('Paused');
+ await plan.getByRole('button',{name:'Enable schedule',exact:true}).click();await expect(plan).toContainText('Next run:');
+ await page.reload();await expect(plan).toContainText('Every 15 minutes');
+ await page.screenshot({path:testInfo.outputPath('interval-saved.png'),fullPage:true});
+});
+
+test('owned goal schedule keeps its goal link and appears in Task and Mandala panels',async({page,request},testInfo)=>{
+ const fixture=await(await request.post('/__test__/mandala-panels')).json();
+ const current=await(await request.get('/api/config')).json(),config=current.config??current;
+ const created=await request.post('/api/automations',{data:{goalId:fixture.goalId,name:'Goal interval monitor',instructions:'Synthetic goal monitor',projectId:fixture.projectId,agentId:config.mandala.agentId,cli:'codex',enabled:false,schedule:{kind:'interval',minutes:30,anchor:new Date().toISOString()},missedPolicy:'latest',overlapPolicy:'coalesce'}});
+ expect(created.ok()).toBe(true);const rule=await created.json();
+ await page.addInitScript(()=>localStorage.setItem('mana-language','en'));
+ await page.goto('/schedules?schedule='+rule.id);const plan=page.getByRole('article',{name:'Goal interval monitor',exact:true});
+ await expect(plan.getByRole('link',{name:'Goal interval monitor',exact:true})).toHaveAttribute('href','/tasks/'+fixture.goalId);
+ await plan.getByRole('button',{name:'Edit',exact:true}).click();await page.getByRole('button',{name:'Save schedule',exact:true}).click();await expect(plan).toBeVisible();
+ expect((await(await request.get('/api/automations')).json()).automations.find((a:{id:string})=>a.id===rule.id)).toMatchObject({goalId:fixture.goalId,agentId:config.mandala.agentId});
+ await page.goto('/tasks/'+fixture.goalId);await page.locator('summary').filter({hasText:/^Schedule$/}).click();await expect(page.locator('.task-rule-schedule').getByText('Every 30 minutes',{exact:true})).toBeVisible();
+ await page.goto('/mandala');
+ const panels=page.locator('.mandala-panels'),scheduled=panels.getByRole('tab',{name:'Scheduled',exact:true}),tasks=panels.getByRole('tab',{name:'Tasks',exact:true});
+ await scheduled.click();await expect(panels.getByText('Goal interval monitor',{exact:true})).toBeVisible();
+ await expect(scheduled).toHaveAttribute('aria-selected','true');await expect(tasks).toHaveAttribute('aria-selected','false');
+ await expect(panels.getByRole('tabpanel')).toHaveAttribute('aria-labelledby','mandala-panel-scheduled');
+ await expect(scheduled).toBeFocused();
+ // Selected semantics update before the shared tabs' box-shadow transition finishes.
+ await panels.evaluate(async root=>{await Promise.all(Array.from(root.querySelectorAll('[role="tab"]')).flatMap(tab=>tab.getAnimations()).map(animation=>animation.finished));});
+ await expect(tasks).toHaveCSS('box-shadow','none');
+ const selectedColor=await scheduled.evaluate(tab=>getComputedStyle(tab).color);
+ await expect(scheduled).toHaveCSS('box-shadow',`${selectedColor} 0px -1px 0px 0px inset`);
+ await testInfo.attach('settled-tab-indicators',{body:JSON.stringify(await panels.getByRole('tab').evaluateAll(tabs=>tabs.map(tab=>({label:tab.textContent,selected:tab.getAttribute('aria-selected'),focused:tab===document.activeElement,shadow:getComputedStyle(tab).boxShadow}))),null,2),contentType:'application/json'});
+ await page.screenshot({path:testInfo.outputPath('goal-scheduled-panel.png'),fullPage:true,animations:'disabled'});
+});

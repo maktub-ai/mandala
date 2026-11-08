@@ -1,0 +1,9 @@
+.keyboard-shortcuts { width:min(480px,calc(100vw - 32px)); padding:var(--space-5); }
+.keyboard-shortcuts header { display:flex; align-items:center; justify-content:space-between; gap:var(--space-3); }
+.keyboard-shortcuts h2 { margin:0; font-size:16px; }
+.keyboard-shortcuts dl { margin:var(--space-4) 0; }
+.keyboard-shortcuts dl > div { display:flex; justify-content:space-between; align-items:center; gap:var(--space-3); padding:var(--space-2) 0; }
+.keyboard-shortcuts dd { flex:none; margin:0; }
+.keyboard-shortcuts p { color:var(--muted); font-size:var(--type-meta); line-height:1.6; }
+.shortcut-key, .keyboard-shortcuts kbd { flex:none; margin-left:auto; white-space:nowrap; color:var(--muted); font-family:var(--font-mono); font-size:var(--type-meta); }
+.sidebar-user-menu button.sidebar-destination { justify-content:flex-start; }

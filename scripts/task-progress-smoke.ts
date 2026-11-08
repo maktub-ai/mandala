@@ -1,0 +1,30 @@
+import { productEnv } from "../cli/product-env.mjs";
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {readConfig,writeConfig} from '../server/config';
+import {openStore} from '../server/store';
+import {createSessionManager} from '../server/sessions';
+import {createSystemTasks} from '../server/system-tasks';
+const cli=productEnv('SMOKE_CLI')==='omp'?'omp':'codex',home=await mkdtemp(join(tmpdir(),'mana-progress-smoke-'));
+const initial=await readConfig(home);
+await writeConfig(home,{...initial.config,system:{cli,automaticTitles:false,memoryCapture:false},agents:[{id:'sample',name:'Synthetic sample',defaultCli:cli,instructions:'Use no tools. Only answer the requested synthetic text.',models:{},skills:[],mcp:[]}]},initial.revision);
+const store=openStore(home),load=async()=>(await readConfig(home)).config;
+const manager=createSessionManager(store,load,undefined,undefined,home,(id,round)=>{void system.onSettled(id,round).catch(()=>{});});
+const system=createSystemTasks({home,store,loadConfig:load,tasks:manager.taskService});
+const p={userId:'local'},wait=async(predicate:()=>boolean,label:string)=>{const end=Date.now()+180000;while(!predicate()){if(Date.now()>end)throw Error('Timed out: '+label);await new Promise(r=>setTimeout(r,100));}};
+try{
+ const chat=await manager.create('','sample',undefined,cli,{workspaceId:null});
+ const task=manager.taskService.createTask(p,{goal:'The assistant has stated exactly the synthetic answer PROGRESS_NATIVE_OK to the user.'},'sample-goal');
+ manager.taskService.attachExecution(p,task.id,task.revision,chat.id,'sample-execution');
+ const unlinked=manager.taskService.createTask(p,{goal:'The assistant has stated exactly the synthetic answer PROGRESS_NATIVE_OK to the user.'},'unlinked');
+ await manager.send(chat.id,'Do not use tools. Reply exactly: PROGRESS_NATIVE_OK');
+ await wait(()=>!['running','approval'].includes(store.getConversation(chat.id)!.status),'ordinary native reply');
+ await wait(()=>system.status(chat.id).history.some(e=>(e.data as any).systemTask==='taskProgress'&&['completed','failed'].includes((e.data as any).status)),'native background assessment');
+ const diagnostics=system.status(chat.id).history.map(e=>e.data as any).filter(e=>e.systemTask==='taskProgress');
+ const latest=diagnostics.at(-1),result=manager.taskService.getTask(p,task.id);
+ if(latest.status!=='completed'||result.state!=='review'||result.completion!==null)throw Error('Native evaluation mismatch: '+JSON.stringify({diagnostics,state:result.state}));
+ if(manager.taskService.getTask(p,unlinked.id).state!=='todo')throw Error('Unlinked Task was changed');
+ console.log(JSON.stringify({cli,ordinaryTurn:store.getConversation(chat.id)!.status,task:result.state,completion:result.completion,unlinked:'todo',sourceEventId:latest.sourceEventId,applied:latest.applied}));
+ console.log('PASS actual ordinary native final answer -> restricted native background Task review; unlinked Task unchanged; no automatic completion');
+}finally{system.close();await manager.close();store.close();await rm(home,{recursive:true,force:true});}

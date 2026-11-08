@@ -1,0 +1,43 @@
+/* Bubbles are Mandala-only: many Agents report into one chat, so speakers and reply boundaries must read at a glance. Ordinary one-to-one chats keep the document layout. */
+.product-frame .mandala-messages {
+ --chat-bubble-radius:min(24px,calc(var(--panel-radius) * 4));
+ --chat-reply-background:color-mix(in srgb,var(--raised) 80%,var(--surface));
+ --chat-user-background:var(--accent-bg);
+ --chat-user-text:var(--text);
+ -webkit-font-smoothing:antialiased;
+}
+.product-frame .mandala-messages .message.user { position:relative; display:block; width:fit-content; max-width:86%; margin:0 0 48px auto; }
+.product-frame .mandala-messages .message.user > .message-avatar { display:none; }
+.product-frame .mandala-messages .message.user .message-content { min-width:0; background:var(--chat-user-background); color:var(--chat-user-text); border-radius:var(--chat-bubble-radius); }
+.product-frame .mandala-messages .message.user .message-text :is(a,strong,em) { color:inherit; }
+.product-frame .mandala-messages .message.user .message-text :not(pre) > code { background:color-mix(in srgb,var(--chat-user-text) 16%,transparent); color:inherit; }
+.product-frame .mandala-messages .message.user .message-content ::selection { background:color-mix(in srgb,var(--chat-user-text) 32%,transparent); color:inherit; }
+.product-frame .mandala-messages .message.user > .message-name { position:absolute; top:100%; right:0; margin:0; padding-top:4px; }
+.product-frame .mandala-messages .agent-reply { width:fit-content; max-width:92%; margin:0 auto 24px 0; }
+.product-frame .mandala-messages .chat-reply-bubble { width:fit-content; max-width:92%; margin:0 auto 24px 0; padding:12px 16px; border:0; border-radius:var(--chat-bubble-radius); background:var(--chat-reply-background); overflow-wrap:anywhere; }
+.product-frame .mandala-messages .agent-reply-header { flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+.product-frame .mandala-messages .agent-reply-header .message-name { margin:0; min-height:0; color:var(--text); font-size:var(--type-meta); }
+.product-frame .mandala-messages .agent-reply-header .message-avatar { width:24px; height:24px; min-width:24px; }
+.product-frame .mandala-messages .agent-reply-header .message-avatar > .identity-avatar { width:24px; height:24px; }
+.product-frame .mandala-messages .agent-reply > .chat-reply-bubble { max-width:100%; margin:0 0 8px; }
+.product-frame .mandala-messages .agent-reply > .message { width:100%; margin-left:0; }
+.product-frame .mandala-messages .execution-result { padding:0; border:0; background:transparent; }
+.product-frame .mandala-messages .agent-reply > .operation-card { margin-left:0; }
+.product-frame .mandala-messages .agent-reply :is(.turn-process,.turn-footer) { margin-left:0; }
+.product-frame .mandala-messages .agent-reply .turn-process { margin-top:0; margin-bottom:8px; }
+.product-frame .mandala-messages .agent-reply .turn-footer { margin-top:8px; margin-bottom:0; }
+.product-frame .mandala-messages .chat-reply-source { color:var(--muted); font-size:var(--type-meta); }
+.product-frame .mandala-messages .agent-message-reply > :is(.ui-disclosure,p,a) { margin-top:10px; }
+.product-frame .mandala-messages .agent-message-reply > a { display:inline-flex; align-items:center; gap:6px; font-size:var(--type-meta); }
+.product-frame .mandala-messages .execution-result-heading { font-size:var(--type-meta); color:var(--muted); }
+/* The title sits in the sender's column: its icon centres under the 24px avatar and the text starts where the name does. */
+.product-frame .mandala-messages .execution-result-heading > svg { box-sizing:content-box; padding-inline:5px; }
+.product-frame .mandala-messages .execution-result-body .markdown-text { font-size:calc(var(--theme-font-size) + 1px); line-height:calc((var(--theme-font-size) + 1px)*1.57); }
+@media (max-width:700px) {
+ .product-frame .mandala-messages .message.user { max-width:91%; }
+ .product-frame .mandala-messages :is(.agent-reply,.chat-reply-bubble) { max-width:96%; }
+ .product-frame .mandala-messages .chat-reply-bubble { padding:12px 14px; }
+ .product-frame .mandala-messages .agent-reply > .chat-reply-bubble { max-width:100%; }
+}
+/* A structured reply (heading, list, code, table) is a document: it drops the bubble fill and reads like an ordinary chat answer. Short replies keep the bubble. */
+.product-frame .mandala-messages .chat-reply-bubble:has(.markdown-text :is(h1,h2,h3,h4,ol,ul,pre,table)) { width:100%; padding:0; background:transparent; }

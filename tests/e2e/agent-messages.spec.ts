@@ -1,0 +1,53 @@
+import {expect,test,type APIRequestContext} from '@playwright/test';
+import {mkdirSync} from 'node:fs';
+const artifacts='.superpowers/agent-messages/screenshots';
+async function setup(request:APIRequestContext,suffix:string){
+ const {config,revision}=await(await request.get('/api/config')).json(),projectId='messages-'+suffix,agentId=projectId+'-a',targetAgentId=projectId+'-b';
+ const agents=[agentId,targetAgentId].map(id=>({id,name:id===agentId?'Planner A':'Reviewer B',instructions:'Help',defaultCli:'codex',models:{},mcp:[],skills:[]}));
+ const saved=await request.put('/api/config',{data:{revision,config:{...config,agents:[...config.agents,...agents],projects:[...config.projects,{id:projectId,name:'Message confirmation',cwd:'/tmp',agentIds:[agentId,targetAgentId],resources:[],mcp:[],skills:[]}]}}});expect(saved.ok()).toBe(true);
+ const made=await request.post('/api/conversations',{data:{projectId,agentId,workspaceId:null}});expect(made.ok()).toBe(true);const source=await made.json();
+ expect((await request.post('/api/conversations/'+source.id+'/messages',{data:{text:'Confirm the parameter before planning'}})).ok()).toBe(true);
+ await expect.poll(async()=>(await(await request.get('/api/conversations/'+source.id)).json()).conversation.status).toBe('idle');
+ const response=await request.post('/api/agent-messages',{data:{sourceConversationId:source.id,targetAgentId,text:'message-hold: Is the parameter optional?',commandKey:'message-'+suffix}});expect(response.ok(),await response.text()).toBe(true);const message=await response.json();
+ await expect.poll(async()=>(await(await request.get('/api/agent-messages/'+message.id)).json()).state).toBe('running');
+ return {source,message,url:'/?project='+projectId+'&agent='+agentId+'&conversation='+source.id,projectId};
+}
+test('lightweight confirmation returns to A, remains outside Task lists and renders on desktop/mobile',async({page,request})=>{
+ const {message,url,projectId}=await setup(request,'resume');await page.goto(url);
+ await expect(page.getByRole('region',{name:'消息委派与回报',exact:true})).toContainText('消息委派');
+ expect((await(await request.get('/api/v2/tasks?projectId='+projectId)).json())).toHaveLength(0);
+ expect((await request.post('/__test__/message-finish',{data:{messageId:message.id,text:'The parameter is optional.'}})).ok()).toBe(true);
+ await expect.poll(async()=>(await(await request.get('/api/agent-messages/'+message.id)).json()).replyState).toBe('consumed');
+ const reply=page.getByRole('article',{name:'Reviewer B · 智能体回复',exact:true});await expect(reply).toContainText('已接续处理');await expect(reply.getByText('The parameter is optional.',{exact:true})).toBeVisible();
+ mkdirSync(artifacts,{recursive:true});await page.screenshot({path:artifacts+'/resume-light.png',fullPage:true});
+ await page.evaluate(()=>{localStorage.setItem('mana-theme','dark');document.documentElement.dataset.theme='dark';});await page.screenshot({path:artifacts+'/resume-dark.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.screenshot({path:artifacts+'/resume-mobile.png',fullPage:true});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ expect((await(await request.get('/api/v2/tasks?projectId='+projectId)).json())).toHaveLength(0);
+ await page.setViewportSize({width:1280,height:850});await reply.getByRole('link',{name:'查看接收对话',exact:true}).click();
+ const inquiry=page.getByRole('region',{name:'消息委派与回报',exact:true});await expect(inquiry).toContainText('收到智能体询问');await expect(page.locator('.message.user')).toHaveCount(0);
+ await inquiry.locator(':scope > details > summary').click();await page.screenshot({path:artifacts+'/recipient.png',fullPage:true});
+ await page.getByRole('link',{name:'查看来源对话',exact:true}).click();await expect(page.getByRole('article',{name:'Reviewer B · 智能体回复',exact:true})).toContainText('已接续处理');
+});
+test('stopping waiting A keeps late reply visible after refresh without resuming it',async({page,request})=>{
+ const {source,message,url}=await setup(request,'stop');await page.goto(url);
+ await expect(page.getByRole('button',{name:'停止执行',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'取消等待协作',exact:true})).toBeVisible();
+ await expect.poll(()=>page.getByRole('button',{name:'取消等待协作',exact:true}).evaluate(button=>button.clientWidth>=button.scrollWidth)).toBe(true);
+ mkdirSync(artifacts,{recursive:true});await page.screenshot({path:artifacts+'/waiting-collaboration.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});await expect.poll(()=>page.getByRole('button',{name:'取消等待协作',exact:true}).evaluate(button=>button.clientWidth>=button.scrollWidth)).toBe(true);await page.screenshot({path:artifacts+'/waiting-mobile.png',fullPage:true});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.evaluate(()=>{localStorage.setItem('mana-language','en');localStorage.setItem('mana-theme','dark');});await page.reload();
+ await expect(page.getByRole('button',{name:'Cancel collaboration wait',exact:true})).toBeVisible();await expect.poll(()=>page.getByRole('button',{name:'Cancel collaboration wait',exact:true}).evaluate(button=>button.clientWidth>=button.scrollWidth)).toBe(true);await page.screenshot({path:artifacts+'/waiting-mobile-dark-en.png',fullPage:true});
+ await page.setViewportSize({width:1280,height:850});await page.screenshot({path:artifacts+'/waiting-desktop-dark-en.png',fullPage:true});
+ await page.evaluate(()=>{localStorage.setItem('mana-language','zh-CN');localStorage.setItem('mana-theme','light');});await page.reload();await page.getByRole('button',{name:'取消等待协作',exact:true}).click();
+ const topic='停止等待后，聊另一个话题';
+ await page.getByRole('textbox',{name:'消息',exact:true}).fill(topic);await page.getByRole('button',{name:'发送消息',exact:true}).click();
+ await expect.poll(async()=>{const events=await(await request.get('/api/conversations/'+source.id+'/history')).json();return events.some((event:{kind:string;data:{text?:string}})=>event.kind==='user'&&event.data.text===topic);}).toBe(true);
+ await expect.poll(async()=>(await(await request.get('/api/conversations/'+source.id)).json()).conversation.status).toBe('idle');
+ await expect(page.getByRole('article',{name:'Reviewer B · 智能体回复',exact:true})).toHaveCount(0);
+ expect((await request.post('/__test__/message-finish',{data:{messageId:message.id,text:'Late saved confirmation.'}})).ok()).toBe(true);
+ await expect.poll(async()=>(await(await request.get('/api/agent-messages/'+message.id)).json()).replyState).toBe('parked');
+ await page.reload();const reply=page.getByRole('article',{name:'Reviewer B · 智能体回复',exact:true});await expect(reply).toContainText('回复已保存，未自动接续');await expect(reply.getByText('Late saved confirmation.',{exact:true})).toBeVisible();
+ const human=page.locator('.message.user').filter({hasText:topic});await expect(human).toBeVisible();
+ expect(await reply.evaluate((node,text)=>{const input=[...document.querySelectorAll('.message.user')].find(item=>item.textContent?.includes(text));return !!input&&!!(input.compareDocumentPosition(node)&Node.DOCUMENT_POSITION_FOLLOWING);},topic)).toBe(true);
+ const events=await(await request.get('/api/conversations/'+source.id+'/history')).json();expect(JSON.stringify(events)).not.toContain('Original request (data)');
+ mkdirSync(artifacts,{recursive:true});await page.screenshot({path:artifacts+'/stopped-saved.png',fullPage:true});await expect(page.getByRole('button',{name:'停止执行',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'取消等待协作',exact:true})).toHaveCount(0);
+});

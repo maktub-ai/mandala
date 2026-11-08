@@ -1,0 +1,45 @@
+/* Source-owned shadcn primitives share Mandala dimensions and live theme roles. */
+[data-slot="button"] { min-height:var(--control-height); height:auto; border-radius:var(--control-radius); font:inherit; font-size:var(--control-font-size); line-height:1.4; }
+[data-slot="button"][data-size^="icon"] { width:var(--control-height); height:var(--control-height); padding:0; }
+[data-slot="input"], [data-slot="textarea"] { background:var(--surface); color:var(--text); border-radius:var(--control-radius); border:1px solid var(--border); font:inherit; font-size:var(--input-font-size); line-height:1.5; }
+[data-slot="input"] { min-height:var(--control-height); height:auto; }
+[data-slot="textarea"] { field-sizing:fixed; resize:vertical; }
+[data-slot="label"].ui-field { display:block; line-height:1.5; font-size:inherit; font-weight:inherit; }
+[data-slot] > svg { stroke-width:1.8; }
+input:is([type="checkbox"],[type="radio"],[type="range"]) { accent-color:var(--accent); }
+:is([data-slot="button"],[data-slot="input"],[data-slot="textarea"]):focus-visible { outline:2px solid var(--focus); outline-offset:2px; box-shadow:none; }
+:is([data-slot="input"],[data-slot="textarea"])[aria-invalid="true"] { box-shadow:none; border-color:var(--danger); }
+:is([data-slot="input"],[data-slot="textarea"])::placeholder { color:var(--muted); opacity:1; }
+[data-slot="badge"] { border-radius:var(--control-radius); font-size:var(--type-meta); line-height:1.4; }
+[data-slot="tooltip-content"] { z-index:1700; max-width:min(280px,calc(100vw - 24px)); padding:6px 9px; background:var(--text); color:var(--bg); font-size:var(--type-meta); border-radius:var(--control-radius); }
+[data-slot="dropdown-menu-content"], [data-slot="dropdown-menu-sub-content"] { z-index:1600; max-height:var(--radix-dropdown-menu-content-available-height); background:var(--surface); color:var(--text); border-radius:var(--control-radius); box-shadow:var(--overlay-shadow); }
+[data-slot="dropdown-menu-item"] { font-size:var(--control-font-size); min-height:30px; }
+[data-slot="dropdown-menu-item"]:focus { background:var(--raised); outline:none; }
+.ui-busy-icon { flex:none; animation:ui-busy-spin 1s linear infinite; }
+.ui-empty { display:flex; align-items:flex-start; gap:12px; padding:24px 16px; }
+.ui-empty > svg { flex:none; margin-top:2px; color:var(--muted); }
+.ui-empty-copy { min-width:0; max-width:65ch; overflow-wrap:anywhere; }
+.ui-empty-action { display:block; margin-top:12px; }
+.ui-notice { display:flex; align-items:flex-start; gap:8px; font-size:var(--control-font-size); line-height:1.5; }
+.ui-notice > svg { flex:none; margin-top:2px; }
+.ui-notice[data-tone="info"] { color:var(--muted); }
+.ui-loading .ui-loading-row { display:flex; align-items:center; gap:12px; padding:12px 16px; border:0; border-bottom:1px solid var(--border-soft); background:transparent; border-radius:0; }
+.ui-loading-symbol { flex:none; width:24px; height:24px; }
+.ui-loading-lines { flex:1; min-width:0; display:grid; gap:8px; }
+.ui-loading-lines > [data-slot="skeleton"] { height:10px; width:min(65%,420px); }
+.ui-loading-lines > [data-slot="skeleton"]:last-child { width:min(42%,280px); }
+@keyframes ui-busy-spin { to { transform:rotate(360deg); } }
+@media (pointer:coarse) {
+  [data-slot="button"], [data-slot="input"], [data-slot="dropdown-menu-item"],
+  .ui-select-trigger, .ui-select-option, .ui-tabs > button, .ui-segmented button { min-height:40px; }
+}
+@media (prefers-reduced-motion:reduce) { [data-slot], .ui-busy-icon { animation:none!important; transition:none!important; } }
+/* State patterns (DESIGN.md §7). EmptyState is the page and list form: muted icon beside a title,
+   a one-line explanation and an optional action, left aligned on the content edge. */
+.ui-empty-copy > strong { display:block; color:var(--text); font-size:var(--type-ui); font-weight:var(--weight-medium); line-height:1.5; }
+.ui-empty-copy > p { margin:2px 0 0; color:var(--muted); font-size:var(--type-meta); line-height:1.6; }
+.ui-empty > svg { width:20px; height:20px; }
+/* Narrow panels (popovers, inspectors) centre the same parts. */
+:is(.notification-inbox-empty, .content-empty) > svg { width:20px; height:20px; color:var(--muted); }
+:is(.notification-inbox-empty, .content-empty) :is(strong, p:first-of-type) { color:var(--text); font-size:var(--type-ui); font-weight:var(--weight-medium); }
+:is(.notification-inbox-empty, .content-empty) :is(span, p + p, strong + p) { color:var(--muted); font-size:var(--type-meta); font-weight:400; }

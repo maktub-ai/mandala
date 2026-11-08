@@ -1,0 +1,51 @@
+.conversation-library { display: flex; flex: 1; flex-direction: column; min-height: 0; padding-top: 12px; }
+.library-views .ui-select-trigger { min-height: 28px; width: auto; border-color: transparent; background: transparent; color: var(--muted); padding: 4px 8px; gap: 4px; font-size: var(--type-meta); }
+.library-search-field { display: flex; align-items: center; gap: 8px; padding-left: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: var(--control-radius); background: var(--surface); }
+.library-search-field:hover { background: var(--raised); }
+.library-search-field:focus-within { border-color: var(--border); background: var(--bg); outline: 2px solid var(--focus); outline-offset: 2px; }
+.library-search-field > svg { flex-shrink: 0; }
+.library-search-field .library-search { width: 100%; min-width: 0; border: 0; outline: 0; box-shadow: none; font-size: var(--type-meta); background: transparent; padding: 8px 8px 8px 0; }
+.library-toolbar { display: flex; flex:none; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 2px 4px; }
+.library-toolbar > .ui-select { width:auto; max-width:calc(50% - 4px); }
+.library-toolbar .ui-select-trigger { max-width:100%; }
+/* The sidebar is too narrow for both labels: sort keeps its icon (and title tooltip), the view keeps its words. */
+.library-toolbar > .library-views { max-width:none; min-width:0; }
+.library-sort .ui-select-trigger > span { display:none; }
+.library-group-heading > span:last-child { color: var(--muted); font-size: var(--type-meta); font-variant-numeric: tabular-nums; }
+.library-sort .ui-select-trigger { min-height: 28px; width: auto; border-color: transparent; background: transparent; color: var(--muted); padding: 4px 8px; gap: 4px; font-size: var(--type-meta); }
+.library-list { flex: 1; overflow: auto; min-height: 0; scrollbar-width: thin; padding-bottom: 12px; }
+.library-list ul { list-style: none; padding: 0; margin: 0; }
+.library-item { position: relative; display: flex; border-radius: var(--control-radius); margin: 3px 0; align-items: center; }
+.library-item:hover { background: var(--raised); }
+.library-item.active { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.conversation-library .library-open { display: flex; flex: 1; min-width: 0; width: auto; margin: 0; flex-direction: row; align-items: flex-start; text-align: left; gap: 8px; border: 0; padding: 8px 8px; background: transparent; }
+.conversation-library .library-open:hover { background: transparent; }
+.library-avatar-slot { flex-shrink: 0; display: inline-flex; margin-top: 1px; }
+.library-avatar-placeholder { display: grid; place-items: center; width: 24px; height: 24px; color: var(--muted); border: 1px solid var(--border); border-radius: var(--control-radius); font-size: var(--type-meta); }
+.library-row-content { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.library-item-heading { display: flex; align-items: center; gap: 8px; }
+.conversation-library .library-item-heading strong { flex: 1; min-width: 0; font-size: var(--type-meta); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-item-heading time { flex-shrink: 0; color: var(--muted); font-size: var(--type-meta); }
+.library-status-icon { display: inline-flex; flex-shrink: 0; color: var(--accent); }
+.library-status-icon.error { color: var(--danger); }
+.library-status-icon.approval { color: var(--warning, #d7a24c); }
+.library-context { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: var(--type-meta); min-width: 0; }
+.library-context-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-project-marker { display: inline-flex; flex-shrink: 0; }
+.library-accessible-context { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.library-more { position: absolute; right: 4px; top: 8px; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 4px; border: 0; border-radius: var(--control-radius); color: var(--muted); background: var(--panel); opacity: 0; pointer-events: none; }
+.library-item:hover .library-more, .library-item:focus-within .library-more, .library-more[aria-expanded="true"] { opacity: 1; pointer-events: auto; }
+.library-item:hover .library-item-heading time, .library-item:focus-within .library-item-heading time, .library-item:has(.library-more[aria-expanded="true"]) time { opacity: 0; }
+.library-item:hover .library-more { background: var(--raised); }
+.library-more:hover, .library-more:focus-visible { color: var(--text); }
+.library-action-menu { position: fixed; z-index: 150; width: 192px; padding: 4px; border: 1px solid var(--border); border-radius: var(--control-radius); background: var(--surface); box-shadow: var(--overlay-shadow); }
+.library-action-menu > button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px; border: 0; text-align: left; border-radius: var(--control-radius); font-size: var(--type-meta); }
+.library-action-menu > button:focus-visible { outline: 0; background: var(--raised); }
+@media (max-width: 760px), (hover: none) { .library-more { opacity: .65; pointer-events: auto; background: transparent; } .library-item-heading { padding-right: 24px; } .library-item-heading time { display: none; } }
+.library-group-heading { display: flex; align-items: center; width: 100%; gap: 8px; padding: 12px 4px 8px; border: 0; text-align: left; color: var(--muted); font-size: var(--type-meta); }
+.library-group-heading strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--weight-medium); }
+.library-draft { display: flex; align-items: flex-start; gap: 8px; padding: 8px; margin: 3px 0 7px; border: 1px solid transparent; border-radius: var(--control-radius); background: color-mix(in srgb, var(--text) 4%, transparent); }
+.library-draft strong { font-size: var(--type-meta); font-weight: var(--weight-medium); }
+.library-draft span, .library-draft small, .library-empty { color: var(--muted); font-size: var(--type-meta); overflow-wrap: anywhere; }
+.library-empty { padding: 12px 8px; line-height: 1.6; }
+button.library-draft { width: 100%; text-align: left; }

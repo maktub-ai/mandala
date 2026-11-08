@@ -1,0 +1,1061 @@
+{
+  "schemaVersion": "mandala-paired-task-v1",
+  "provenance": "Entirely fictional personal hobby/household examples authored for offline protocol evaluation. No real personal history, company documents, production sources, secrets, or model outputs. Not human reviewed.",
+  "measurementLimits": [
+    "Seeded gold memory checks retrieval and lifecycle protocol only.",
+    "No model calls: cannot measure extraction quality, real answer improvement, or native token saving.",
+    "12 cases are a smoke corpus, not 12 independent sufficient benchmark topics."
+  ],
+  "cases": [
+    {
+      "id": "personal-preference-zh",
+      "category": "repeat_background",
+      "language": "zh",
+      "scope": {
+        "userId": "synthetic-user",
+        "projectId": "home",
+        "agentId": "helper"
+      },
+      "evaluatedAt": "2026-10-13T00:00:00Z",
+      "sourceHistory": [
+        {
+          "id": "p1",
+          "revision": 1,
+          "projectId": null,
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "以后安排练琴时，我偏好晚饭后20:00开始，每次30分钟，所有项目都适用。",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "user_preference"
+        }
+      ],
+      "seedMemory": [
+        {
+          "id": "m1",
+          "revision": 1,
+          "projectId": null,
+          "agentId": null,
+          "scope": "user",
+          "layer": "L1",
+          "contentType": "preference",
+          "text": "用户偏好20:00开始练琴，每次30分钟。",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "p1",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        }
+      ],
+      "task": {
+        "request": "请继续给我安排明天的练琴时间。",
+        "availableSourceIds": [
+          "p1"
+        ],
+        "sourceAccessRule": "Same source history and source tools in both lanes; memory lane adds only validated recalled context."
+      },
+      "gold": {
+        "requiredMemoryIds": [
+          "m1"
+        ],
+        "allowedMemoryIds": [
+          "m1"
+        ],
+        "forbiddenMemoryIds": [],
+        "answerFacts": {
+          "start": "20:00",
+          "minutes": 30
+        },
+        "forbiddenAnswerClaims": [],
+        "backgroundFactsAlreadySupplied": 2,
+        "acceptableClarificationCount": 0,
+        "acceptedAliases": {}
+      },
+      "generationProvenance": "Hand-authored valid memory fixture; extraction quality NOT measured."
+    },
+    {
+      "id": "scope-project-zh",
+      "category": "scope",
+      "language": "zh",
+      "scope": {
+        "userId": "synthetic-user",
+        "projectId": "album",
+        "agentId": "helper"
+      },
+      "evaluatedAt": "2026-10-13T00:00:00Z",
+      "sourceHistory": [
+        {
+          "id": "s2",
+          "revision": 1,
+          "projectId": "album",
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "画册项目封面尺寸是210×210毫米。",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        },
+        {
+          "id": "s3",
+          "revision": 1,
+          "projectId": "diary",
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "日记项目封面尺寸是148×210毫米。",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        }
+      ],
+      "seedMemory": [
+        {
+          "id": "m2",
+          "revision": 1,
+          "projectId": "album",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "画册封面尺寸210×210毫米。",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s2",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        },
+        {
+          "id": "m3",
+          "revision": 1,
+          "projectId": "diary",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "日记封面尺寸148×210毫米。",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s3",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        }
+      ],
+      "task": {
+        "request": "按画册项目的约定输出封面尺寸。",
+        "availableSourceIds": [
+          "s2"
+        ],
+        "sourceAccessRule": "Same source history and source tools in both lanes; memory lane adds only validated recalled context."
+      },
+      "gold": {
+        "requiredMemoryIds": [
+          "m2"
+        ],
+        "allowedMemoryIds": [
+          "m2"
+        ],
+        "forbiddenMemoryIds": [
+          "m3"
+        ],
+        "answerFacts": {
+          "widthMm": 210,
+          "heightMm": 210
+        },
+        "forbiddenAnswerClaims": [
+          "148×210毫米"
+        ],
+        "backgroundFactsAlreadySupplied": 2,
+        "acceptableClarificationCount": 0,
+        "acceptedAliases": {}
+      },
+      "generationProvenance": "Hand-authored valid memory fixture; extraction quality NOT measured."
+    },
+    {
+      "id": "correction-zh",
+      "category": "correction",
+      "language": "zh",
+      "scope": {
+        "userId": "synthetic-user",
+        "projectId": "home",
+        "agentId": "helper"
+      },
+      "evaluatedAt": "2026-10-13T00:00:00Z",
+      "sourceHistory": [
+        {
+          "id": "s4",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "花盆标签颜色是蓝色。",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        },
+        {
+          "id": "s5",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "更正：现在花盆标签改为绿色。",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        }
+      ],
+      "seedMemory": [
+        {
+          "id": "m4",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "花盆标签蓝色。",
+          "status": "superseded",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s4",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        },
+        {
+          "id": "m5",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "花盆标签绿色。",
+          "status": "active",
+          "verification": "user_correction",
+          "sourceRefs": [
+            {
+              "sourceId": "s5",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        }
+      ],
+      "task": {
+        "request": "目前花盆标签颜色是什么？",
+        "availableSourceIds": [
+          "s4",
+          "s5"
+        ],
+        "sourceAccessRule": "Same source history and source tools in both lanes; memory lane adds only validated recalled context."
+      },
+      "gold": {
+        "requiredMemoryIds": [
+          "m5"
+        ],
+        "allowedMemoryIds": [
+          "m5"
+        ],
+        "forbiddenMemoryIds": [
+          "m4"
+        ],
+        "answerFacts": {
+          "color": "绿色"
+        },
+        "forbiddenAnswerClaims": [
+          "蓝色"
+        ],
+        "backgroundFactsAlreadySupplied": 1,
+        "acceptableClarificationCount": 0,
+        "acceptedAliases": {}
+      },
+      "generationProvenance": "Hand-authored valid memory fixture; extraction quality NOT measured."
+    },
+    {
+      "id": "expiration-zh",
+      "category": "expiry",
+      "language": "zh",
+      "scope": {
+        "userId": "synthetic-user",
+        "projectId": "home",
+        "agentId": "helper"
+      },
+      "evaluatedAt": "2026-10-13T00:00:00Z",
+      "sourceHistory": [
+        {
+          "id": "s6",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "临时钥匙放在玄关盒子，安排只有效到10月2日。",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        }
+      ],
+      "seedMemory": [
+        {
+          "id": "m6",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "临时钥匙放在玄关盒子。",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s6",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": "2026-10-02T00:00:00Z"
+        }
+      ],
+      "task": {
+        "request": "现在临时钥匙放在哪里？",
+        "availableSourceIds": [
+          "s6"
+        ],
+        "sourceAccessRule": "Same source history and source tools in both lanes; memory lane adds only validated recalled context."
+      },
+      "gold": {
+        "requiredMemoryIds": [],
+        "allowedMemoryIds": [],
+        "forbiddenMemoryIds": [
+          "m6"
+        ],
+        "answerFacts": {
+          "state": "unknown",
+          "mustVerifyCurrent": true
+        },
+        "forbiddenAnswerClaims": [
+          "当前在玄关盒子",
+          "目前在玄关盒子"
+        ],
+        "backgroundFactsAlreadySupplied": 0,
+        "acceptableClarificationCount": 1,
+        "acceptedAliases": {}
+      },
+      "generationProvenance": "Hand-authored valid memory fixture; extraction quality NOT measured."
+    },
+    {
+      "id": "assistant-claim-zh",
+      "category": "unsupported",
+      "language": "zh",
+      "scope": {
+        "userId": "synthetic-user",
+        "projectId": "home",
+        "agentId": "helper"
+      },
+      "evaluatedAt": "2026-10-13T00:00:00Z",
+      "sourceHistory": [
+        {
+          "id": "s7",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "请分析机器人拼图的完成计划。",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        },
+        {
+          "id": "s8",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": "helper",
+          "eventKind": "assistant",
+          "text": "机器人拼图已完成。",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        }
+      ],
+      "seedMemory": [
+        {
+          "id": "m7",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "机器人拼图已完成。",
+          "status": "proposed",
+          "verification": "unverified",
+          "sourceRefs": [
+            {
+              "sourceId": "s8",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        }
+      ],
+      "task": {
+        "request": "机器人拼图目前完成了吗？",
+        "availableSourceIds": [
+          "s7",
+          "s8"
+        ],
+        "sourceAccessRule": "Same source history and source tools in both lanes; memory lane adds only validated recalled context."
+      },
+      "gold": {
+        "requiredMemoryIds": [],
+        "allowedMemoryIds": [],
+        "forbiddenMemoryIds": [
+          "m7"
+        ],
+        "answerFacts": {
+          "completion": "unknown"
+        },
+        "forbiddenAnswerClaims": [
+          "已经完成",
+          "已完成"
+        ],
+        "backgroundFactsAlreadySupplied": 0,
+        "acceptableClarificationCount": 1,
+        "acceptedAliases": {}
+      },
+      "generationProvenance": "Hand-authored valid memory fixture; extraction quality NOT measured."
+    },
+    {
+      "id": "unanswerable-overlap-zh",
+      "category": "negative",
+      "language": "zh",
+      "scope": {
+        "userId": "synthetic-user",
+        "projectId": "home",
+        "agentId": "helper"
+      },
+      "evaluatedAt": "2026-10-13T00:00:00Z",
+      "sourceHistory": [
+        {
+          "id": "s9",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "我的阅读计划是每月读两本书。",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        }
+      ],
+      "seedMemory": [
+        {
+          "id": "m9",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "每月阅读两本书。",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s9",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        }
+      ],
+      "task": {
+        "request": "我的月度书店消费是多少？",
+        "availableSourceIds": [
+          "s9"
+        ],
+        "sourceAccessRule": "Same source history and source tools in both lanes; memory lane adds only validated recalled context."
+      },
+      "gold": {
+        "requiredMemoryIds": [],
+        "allowedMemoryIds": [],
+        "forbiddenMemoryIds": [
+          "m9"
+        ],
+        "answerFacts": {
+          "spend": "unknown"
+        },
+        "forbiddenAnswerClaims": [
+          "消费200元",
+          "消费400元"
+        ],
+        "backgroundFactsAlreadySupplied": 0,
+        "acceptableClarificationCount": 1,
+        "acceptedAliases": {}
+      },
+      "generationProvenance": "Hand-authored valid memory fixture; extraction quality NOT measured."
+    },
+    {
+      "id": "paraphrase-en",
+      "category": "paraphrase",
+      "language": "en",
+      "scope": {
+        "userId": "synthetic-user",
+        "projectId": "pottery",
+        "agentId": "helper"
+      },
+      "evaluatedAt": "2026-10-13T00:00:00Z",
+      "sourceHistory": [
+        {
+          "id": "s10",
+          "revision": 1,
+          "projectId": "pottery",
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "Pottery class begins at 18:30; the walk takes 20 minutes.",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        }
+      ],
+      "seedMemory": [
+        {
+          "id": "m10",
+          "revision": 1,
+          "projectId": "pottery",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "Pottery starts at 18:30; walking there takes 20 minutes.",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s10",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        }
+      ],
+      "task": {
+        "request": "When should I leave to get to pottery class?",
+        "availableSourceIds": [
+          "s10"
+        ],
+        "sourceAccessRule": "Same source history and source tools in both lanes; memory lane adds only validated recalled context."
+      },
+      "gold": {
+        "requiredMemoryIds": [
+          "m10"
+        ],
+        "allowedMemoryIds": [
+          "m10"
+        ],
+        "forbiddenMemoryIds": [],
+        "answerFacts": {
+          "leaveBy": "18:10"
+        },
+        "forbiddenAnswerClaims": [],
+        "backgroundFactsAlreadySupplied": 2,
+        "acceptableClarificationCount": 0,
+        "acceptedAliases": {}
+      },
+      "generationProvenance": "Hand-authored valid memory fixture; extraction quality NOT measured."
+    },
+    {
+      "id": "exact-identifier-en",
+      "category": "exact",
+      "language": "en",
+      "scope": {
+        "userId": "synthetic-user",
+        "projectId": "notes",
+        "agentId": "helper"
+      },
+      "evaluatedAt": "2026-10-13T00:00:00Z",
+      "sourceHistory": [
+        {
+          "id": "s11",
+          "revision": 1,
+          "projectId": "notes",
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "NOTE-007 is titled Lantern Sketches. NOTE-070 is titled River Sketches.",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        }
+      ],
+      "seedMemory": [
+        {
+          "id": "m11",
+          "revision": 1,
+          "projectId": "notes",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "NOTE-007: Lantern Sketches.",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s11",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        },
+        {
+          "id": "m12",
+          "revision": 1,
+          "projectId": "notes",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "NOTE-070: River Sketches.",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s11",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        }
+      ],
+      "task": {
+        "request": "What is the title attached to NOTE-007?",
+        "availableSourceIds": [
+          "s11"
+        ],
+        "sourceAccessRule": "Same source history and source tools in both lanes; memory lane adds only validated recalled context."
+      },
+      "gold": {
+        "requiredMemoryIds": [
+          "m11"
+        ],
+        "allowedMemoryIds": [
+          "m11"
+        ],
+        "forbiddenMemoryIds": [
+          "m12"
+        ],
+        "answerFacts": {
+          "title": "Lantern Sketches"
+        },
+        "forbiddenAnswerClaims": [
+          "River Sketches"
+        ],
+        "backgroundFactsAlreadySupplied": 1,
+        "acceptableClarificationCount": 0,
+        "acceptedAliases": {}
+      },
+      "generationProvenance": "Hand-authored valid memory fixture; extraction quality NOT measured."
+    },
+    {
+      "id": "source-revocation-zh",
+      "category": "source_retraction",
+      "language": "zh",
+      "scope": {
+        "userId": "synthetic-user",
+        "projectId": "home",
+        "agentId": "helper"
+      },
+      "evaluatedAt": "2026-10-13T00:00:00Z",
+      "sourceHistory": [
+        {
+          "id": "s12",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "野餐带蓝色餐具。",
+          "status": "retracted",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        }
+      ],
+      "seedMemory": [
+        {
+          "id": "m13",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "野餐带蓝色餐具。",
+          "status": "stale",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s12",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        },
+        {
+          "id": "m14",
+          "revision": 1,
+          "projectId": "home",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L2",
+          "contentType": "fact",
+          "text": "野餐准备：蓝色餐具。",
+          "status": "stale",
+          "verification": "layer_summary",
+          "sourceRefs": [
+            {
+              "sourceId": "s12",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [
+            {
+              "recordId": "m13",
+              "revision": 1
+            }
+          ],
+          "validUntil": null
+        }
+      ],
+      "task": {
+        "request": "目前野餐准备清单包括哪种餐具？",
+        "availableSourceIds": [],
+        "sourceAccessRule": "Same source history and source tools in both lanes; memory lane adds only validated recalled context."
+      },
+      "gold": {
+        "requiredMemoryIds": [],
+        "allowedMemoryIds": [],
+        "forbiddenMemoryIds": [
+          "m13",
+          "m14"
+        ],
+        "answerFacts": {
+          "cutlery": "unknown"
+        },
+        "forbiddenAnswerClaims": [
+          "蓝色餐具"
+        ],
+        "backgroundFactsAlreadySupplied": 0,
+        "acceptableClarificationCount": 1,
+        "acceptedAliases": {}
+      },
+      "generationProvenance": "Hand-authored valid memory fixture; extraction quality NOT measured."
+    },
+    {
+      "id": "shared-project-en",
+      "category": "shared_project",
+      "language": "en",
+      "scope": {
+        "userId": "synthetic-user",
+        "projectId": "scrapbook",
+        "agentId": "helper-B"
+      },
+      "evaluatedAt": "2026-10-13T00:00:00Z",
+      "sourceHistory": [
+        {
+          "id": "s13",
+          "revision": 1,
+          "projectId": "scrapbook",
+          "agentId": "helper-A",
+          "eventKind": "user",
+          "text": "This scrapbook project uses 120 gsm paper.",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        }
+      ],
+      "seedMemory": [
+        {
+          "id": "m15",
+          "revision": 1,
+          "projectId": "scrapbook",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "Scrapbook paper: 120 gsm.",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s13",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        }
+      ],
+      "task": {
+        "request": "Which paper stock should this project use?",
+        "availableSourceIds": [
+          "s13"
+        ],
+        "sourceAccessRule": "Same source history and source tools in both lanes; memory lane adds only validated recalled context."
+      },
+      "gold": {
+        "requiredMemoryIds": [
+          "m15"
+        ],
+        "allowedMemoryIds": [
+          "m15"
+        ],
+        "forbiddenMemoryIds": [],
+        "answerFacts": {
+          "gsm": 120
+        },
+        "forbiddenAnswerClaims": [],
+        "backgroundFactsAlreadySupplied": 1,
+        "acceptableClarificationCount": 0,
+        "acceptedAliases": {}
+      },
+      "generationProvenance": "Hand-authored valid memory fixture; extraction quality NOT measured."
+    },
+    {
+      "id": "private-agent-en",
+      "category": "private_agent",
+      "language": "en",
+      "scope": {
+        "userId": "synthetic-user",
+        "projectId": "scrapbook",
+        "agentId": "helper-B"
+      },
+      "evaluatedAt": "2026-10-13T00:00:00Z",
+      "sourceHistory": [
+        {
+          "id": "s14",
+          "revision": 1,
+          "projectId": "scrapbook",
+          "agentId": "helper-A",
+          "eventKind": "user",
+          "text": "For me only: helper-A drafts use 80 gsm paper.",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "agent_private"
+        },
+        {
+          "id": "s15",
+          "revision": 1,
+          "projectId": "scrapbook",
+          "agentId": "helper-B",
+          "eventKind": "user",
+          "text": "This scrapbook project uses 120 gsm paper.",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        }
+      ],
+      "seedMemory": [
+        {
+          "id": "m16",
+          "revision": 1,
+          "projectId": null,
+          "agentId": "helper-A",
+          "scope": "agent",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "Helper-A private draft paper: 80 gsm.",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s14",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        },
+        {
+          "id": "m17",
+          "revision": 1,
+          "projectId": "scrapbook",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "Scrapbook paper: 120 gsm.",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s15",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        }
+      ],
+      "task": {
+        "request": "What is the shared scrapbook paper stock?",
+        "availableSourceIds": [
+          "s15"
+        ],
+        "sourceAccessRule": "Same source history and source tools in both lanes; memory lane adds only validated recalled context."
+      },
+      "gold": {
+        "requiredMemoryIds": [
+          "m17"
+        ],
+        "allowedMemoryIds": [
+          "m17"
+        ],
+        "forbiddenMemoryIds": [
+          "m16"
+        ],
+        "answerFacts": {
+          "gsm": 120
+        },
+        "forbiddenAnswerClaims": [
+          "80 gsm"
+        ],
+        "backgroundFactsAlreadySupplied": 1,
+        "acceptableClarificationCount": 0,
+        "acceptedAliases": {}
+      },
+      "generationProvenance": "Hand-authored valid memory fixture; extraction quality NOT measured."
+    },
+    {
+      "id": "distractor-zh",
+      "category": "interference",
+      "language": "zh",
+      "scope": {
+        "userId": "synthetic-user",
+        "projectId": "garden",
+        "agentId": "helper"
+      },
+      "evaluatedAt": "2026-10-13T00:00:00Z",
+      "sourceHistory": [
+        {
+          "id": "s16",
+          "revision": 1,
+          "projectId": "garden",
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "小苗每周二上午09:00浇水。",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        },
+        {
+          "id": "s17",
+          "revision": 1,
+          "projectId": "garden",
+          "agentId": "helper",
+          "eventKind": "user",
+          "text": "大苗每周四晚上19:00浇水。",
+          "status": "ready",
+          "observedAt": "2026-10-01T00:00:00Z",
+          "visibility": "project_shared"
+        }
+      ],
+      "seedMemory": [
+        {
+          "id": "m18",
+          "revision": 1,
+          "projectId": "garden",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "小苗：每周二09:00浇水。",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s16",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        },
+        {
+          "id": "m19",
+          "revision": 1,
+          "projectId": "garden",
+          "agentId": null,
+          "scope": "project",
+          "layer": "L1",
+          "contentType": "fact",
+          "text": "大苗：每周四19:00浇水。",
+          "status": "active",
+          "verification": "evidence_extract",
+          "sourceRefs": [
+            {
+              "sourceId": "s17",
+              "sourceRevision": 1
+            }
+          ],
+          "dependencies": [],
+          "validUntil": null
+        }
+      ],
+      "task": {
+        "request": "为小苗继续安排浇水提醒。",
+        "availableSourceIds": [
+          "s16",
+          "s17"
+        ],
+        "sourceAccessRule": "Same source history and source tools in both lanes; memory lane adds only validated recalled context."
+      },
+      "gold": {
+        "requiredMemoryIds": [
+          "m18"
+        ],
+        "allowedMemoryIds": [
+          "m18"
+        ],
+        "forbiddenMemoryIds": [
+          "m19"
+        ],
+        "answerFacts": {
+          "weekday": "周二",
+          "time": "09:00"
+        },
+        "forbiddenAnswerClaims": [
+          "周四",
+          "19:00"
+        ],
+        "backgroundFactsAlreadySupplied": 2,
+        "acceptableClarificationCount": 0,
+        "acceptedAliases": {}
+      },
+      "generationProvenance": "Hand-authored valid memory fixture; extraction quality NOT measured."
+    }
+  ]
+}

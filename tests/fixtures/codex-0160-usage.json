@@ -1,0 +1,149 @@
+{
+  "version": "0.160.0",
+  "capturedAt": "2026-10-09",
+  "evidence": "locally captured synthetic native CLI run; identifiers replaced; no prompt/reply content",
+  "events": [
+    {
+      "phase": "first-turn",
+      "method": "turn/started",
+      "threadId": "probe-threadId-0",
+      "turnId": "probe-turnId-1",
+      "status": "inProgress"
+    },
+    {
+      "phase": "first-turn",
+      "method": "thread/tokenUsage/updated",
+      "threadId": "probe-threadId-0",
+      "turnId": "probe-turnId-1",
+      "tokenUsage": {
+        "total": {
+          "totalTokens": 26675,
+          "inputTokens": 26670,
+          "cachedInputTokens": 7168,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5,
+          "reasoningOutputTokens": 0
+        },
+        "last": {
+          "totalTokens": 26675,
+          "inputTokens": 26670,
+          "cachedInputTokens": 7168,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5,
+          "reasoningOutputTokens": 0
+        },
+        "modelContextWindow": 258400
+      }
+    },
+    {
+      "phase": "first-turn",
+      "method": "turn/completed",
+      "threadId": "probe-threadId-0",
+      "turnId": "probe-turnId-1",
+      "status": "completed"
+    },
+    {
+      "phase": "second-turn",
+      "method": "turn/started",
+      "threadId": "probe-threadId-0",
+      "turnId": "probe-turnId-2",
+      "status": "inProgress"
+    },
+    {
+      "phase": "second-turn",
+      "method": "thread/tokenUsage/updated",
+      "threadId": "probe-threadId-0",
+      "turnId": "probe-turnId-2",
+      "tokenUsage": {
+        "total": {
+          "totalTokens": 53376,
+          "inputTokens": 53366,
+          "cachedInputTokens": 33664,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 10,
+          "reasoningOutputTokens": 0
+        },
+        "last": {
+          "totalTokens": 26701,
+          "inputTokens": 26696,
+          "cachedInputTokens": 26496,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5,
+          "reasoningOutputTokens": 0
+        },
+        "modelContextWindow": 258400
+      }
+    },
+    {
+      "phase": "second-turn",
+      "method": "turn/completed",
+      "threadId": "probe-threadId-0",
+      "turnId": "probe-turnId-2",
+      "status": "completed"
+    },
+    {
+      "phase": "resume",
+      "method": "thread/tokenUsage/updated",
+      "threadId": "probe-threadId-0",
+      "turnId": "probe-turnId-2",
+      "tokenUsage": {
+        "total": {
+          "totalTokens": 53376,
+          "inputTokens": 53366,
+          "cachedInputTokens": 33664,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 10,
+          "reasoningOutputTokens": 0
+        },
+        "last": {
+          "totalTokens": 26701,
+          "inputTokens": 26696,
+          "cachedInputTokens": 26496,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5,
+          "reasoningOutputTokens": 0
+        },
+        "modelContextWindow": 258400
+      }
+    },
+    {
+      "phase": "resumed-turn",
+      "method": "turn/started",
+      "threadId": "probe-threadId-0",
+      "turnId": "probe-turnId-3",
+      "status": "inProgress"
+    },
+    {
+      "phase": "resumed-turn",
+      "method": "thread/tokenUsage/updated",
+      "threadId": "probe-threadId-0",
+      "turnId": "probe-turnId-3",
+      "tokenUsage": {
+        "total": {
+          "totalTokens": 80679,
+          "inputTokens": 80664,
+          "cachedInputTokens": 60160,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 15,
+          "reasoningOutputTokens": 0
+        },
+        "last": {
+          "totalTokens": 27303,
+          "inputTokens": 27298,
+          "cachedInputTokens": 26496,
+          "cacheWriteInputTokens": 0,
+          "outputTokens": 5,
+          "reasoningOutputTokens": 0
+        },
+        "modelContextWindow": 258400
+      }
+    },
+    {
+      "phase": "resumed-turn",
+      "method": "turn/completed",
+      "threadId": "probe-threadId-0",
+      "turnId": "probe-turnId-3",
+      "status": "completed"
+    }
+  ]
+}

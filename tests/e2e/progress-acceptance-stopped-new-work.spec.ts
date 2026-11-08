@@ -1,0 +1,11 @@
+// spec: specs/progress-acceptance-plan.md
+// seed: tests/e2e/seed.spec.ts
+import {test,expect} from '@playwright/test';
+import {acceptanceMessagePair} from './helpers/progress-acceptance';
+test.describe('Progress 用户目标验收',()=>{test('P26 stopped A keeps a late B reply parked while a newer human turn continues unchanged',async({page,request})=>{
+
+ const {source,target,message}=await acceptanceMessagePair(request);await page.goto('/?conversation='+source.id);await page.getByRole('button',{name:'取消等待协作',exact:true}).click();await page.getByRole('textbox',{name:'消息',exact:true}).fill('message-hold: genuinely newer human request');await page.getByRole('button',{name:'发送消息',exact:true}).click();await expect.poll(async()=>(await(await request.get('/api/conversations/'+source.id)).json()).conversation.status).toBe('running');await expect.poll(async()=>(await(await request.get('/api/conversations/'+source.id)).json()).conversation.turnId).toBeTruthy();const before=(await(await request.get('/api/conversations/'+source.id)).json()).conversation.turnId;
+ await request.post('/__test__/message-finish',{data:{messageId:message.id,text:'Obsolete answer must be saved'}});await expect.poll(async()=>(await(await request.get('/api/agent-messages/'+message.id)).json()).replyState).toBe('parked');await page.reload();await expect(page.locator('.agent-message').filter({hasText:'智能体 回复'})).toContainText('已保存，未自动接续');const after=(await(await request.get('/api/conversations/'+source.id)).json()).conversation;expect(after.turnId).toBe(before);expect(after.status).toBe('running');
+ expect((await request.post('/__test__/progress-native',{data:{id:source.id,outcome:'completed',text:'New request done'}})).ok()).toBe(true);await expect.poll(async()=>(await(await request.get('/api/conversations/'+source.id)).json()).conversation.status).toBe('idle');expect((await(await request.get('/api/agent-messages/'+message.id)).json()).replyState).toBe('parked');const history=await(await request.get('/api/conversations/'+source.id+'/history')).json();expect(history.filter((e:{kind:string;data:{text?:string}})=>e.kind==='user'&&e.data.text?.startsWith('Continue the original request using this reply.'))).toHaveLength(0);
+
+});});

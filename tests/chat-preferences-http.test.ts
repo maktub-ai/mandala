@@ -1,0 +1,40 @@
+import { afterEach, beforeEach, expect, test } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import type { Server } from 'node:http';
+import { openStore, type Store } from '../server/store';
+import { readConfig, writeConfig } from '../server/config';
+import { createSessionManager, type SessionManager } from '../server/sessions';
+import { createHttpServer } from '../server/http';
+let home: string, store: Store, manager: SessionManager, server: Server, url: string;
+beforeEach(async () => {
+  home = mkdtempSync(join(tmpdir(), 'chat-approval-http-')); store = openStore(home);
+  const config = await readConfig(home);
+  await writeConfig(home, { ...config.config, runtimes: ['codex'], projects: [], agents: [{ id: 'writer', name: 'Writer', instructions: '', defaultCli: 'codex', models: {}, mcp: [], skills: [] }] }, config.revision);
+  manager = createSessionManager(store, async () => (await readConfig(home)).config);
+  server = createHttpServer({ home, store, manager, requireIdentity: false }); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  url = 'http://127.0.0.1:' + (server.address() as { port: number }).port;
+});
+afterEach(async () => { await manager.close(); server.closeAllConnections(); await new Promise<void>(done => server.close(() => done())); store.close(); rmSync(home, { recursive: true, force: true }); });
+const patch = (body: unknown, headers = {}) => fetch(url + '/api/chat-preferences/approval', { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+test('persists local approval preference and snapshots it only into new chats', async () => {
+  const create = async () => (await (await fetch(url + '/api/conversations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agentId: 'writer', cli: 'codex' }) })).json());
+  const before = await create();
+  expect((await patch({ agentId: 'writer', cli: 'codex', approvalMode: 'auto' })).status).toBe(200);
+  expect(await (await fetch(url + '/api/chat-preferences/approval?agentId=writer&cli=codex')).json()).toEqual({ approvalMode: 'auto' });
+  const after = await create(); expect(after.approvalMode).toBe('auto');
+  expect(store.getConversation(before.id)?.approvalMode ?? null).toBeNull();
+  expect((await patch({ agentId: 'writer', cli: 'codex', approvalMode: null })).status).toBe(200);
+  expect((await create()).approvalMode ?? null).toBeNull();
+});
+test('rejects cross-origin, invocation tokens, unknown fields and invalid scopes', async () => {
+  const input = { agentId: 'writer', cli: 'codex', approvalMode: 'auto' };
+  expect((await patch(input, { Origin: 'https://foreign.example' })).status).toBe(403);
+  expect((await patch(input, { Authorization: 'Bearer untrusted-invocation' })).status).toBe(403);
+  expect((await patch({ ...input, owner: 'another-user' })).status).toBe(422);
+  expect((await patch({ ...input, approvalMode: 'invalid' })).status).toBe(400);
+  expect((await patch({ ...input, agentId: 'missing' })).status).toBe(404);
+  expect((await fetch(url + '/api/chat-preferences/approval?agentId=writer&cli=codex&cli=omp')).status).toBe(422);
+});

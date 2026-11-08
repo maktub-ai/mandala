@@ -1,0 +1,20 @@
+{
+  "name": "mandala-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mandala personal desktop application",
+  "author": "MaktubCN",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .app",
+    "pack": "electron-builder --config electron-builder.cjs --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.9.3",
+    "electron-builder": "26.15.3",
+    "esbuild": "0.28.2"
+  },
+  "overrides": {
+    "global-agent": "4.1.3"
+  }
+}
