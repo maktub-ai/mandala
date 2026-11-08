@@ -16,7 +16,7 @@ test('mobile browser pairs directly with host and uses encrypted chats, files, q
   try {
     await signIn(computer, fixture.localUrl);
     await expect(computer.locator('html')).toHaveAttribute('data-palette', 'mandala-light');
-    await expect(computer.locator('body')).toHaveCSS('background-color', 'rgb(252, 252, 252)');
+    await expect(computer.locator('body')).toHaveCSS('background-color', 'rgb(247, 248, 250)');
     await expect(computer.locator('.sidebar-account')).toBeVisible();
     await computer.evaluate(async()=>{const {config,revision}=await(await fetch('/api/config')).json();const response=await fetch('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({revision,config:{...config,agents:[...config.agents,{id:'remote-explicit-agent',name:'Remote explicit Agent',instructions:'Synthetic remote review',defaultCli:'codex',models:{},mcp:[],skills:[]}]}})});if(!response.ok)throw Error('Synthetic Agent setup failed');});
     await openAccountConnection(computer);
@@ -34,6 +34,8 @@ test('mobile browser pairs directly with host and uses encrypted chats, files, q
     await expect(page.getByRole('heading', { name: '配对这台电脑' })).toBeVisible();
     expect(await page.locator('.remote-workspace').count()).toBe(0);
     await page.getByLabel('电脑配对码', { exact: true }).fill(pairingCode!); await page.getByRole('button', { name: '确认配对', exact: true }).click();
+    await expect(page.getByRole('heading', {name:'Mandala',exact:true})).toBeVisible();
+    await page.getByRole('button', {name:'对话',exact:true}).click();
     await expect(page.getByRole('heading', {name:'新对话',exact:true})).toBeVisible();
     await expect(page.getByRole('button',{name:'创建对话',exact:true})).toBeDisabled();
     await expect(page.locator('.remote-header .brand-logo')).toHaveCount(0);
@@ -46,7 +48,7 @@ test('mobile browser pairs directly with host and uses encrypted chats, files, q
     await page.getByRole('button',{name:'对话列表',exact:true}).click(); await page.getByRole('button', { name: /手机端合成对话/ }).click(); await expect(page.getByText('History remains on this computer.', { exact: true })).toBeVisible();
     const output = page.waitForEvent('download'); await page.getByRole('button', { name: '接收交付文件', exact: true }).click(); expect((await output).suggestedFilename()).toBe('synthetic-output.txt');
     const send = async (message: string) => { await page.getByLabel('消息', { exact: true }).fill(message); await page.getByRole('button', { name: '发送', exact: true }).click(); };
-    await send('hello encrypted mobile'); await expect(page.getByText('Fixture reply: hello encrypted mobile', { exact: true })).toBeVisible(); await expect(page.getByRole('button',{name:'发送',exact:true})).toHaveCSS('background-color','rgb(48, 48, 54)');
+    await send('hello encrypted mobile'); await expect(page.getByText('Fixture reply: hello encrypted mobile', { exact: true })).toBeVisible(); await expect(page.getByRole('button',{name:'发送',exact:true})).toHaveCSS('background-color','rgb(79, 90, 230)');
     await expect(page.getByLabel('消息',{exact:true})).toBeInViewport();
     await page.screenshot({ path: testInfo.outputPath('remote-mobile-compact.png') });
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAQ0lEQVR4nGMwqYjBir76MWBFpKonWcOoBaMWDIAF1DIIl/pRC0YtGAoWUMsgXOpHLRi1YChYQC2DcKkftWDUgiFgAQCnUJY9LcLcYgAAAABJRU5ErkJggg==', 'base64');
@@ -89,7 +91,7 @@ test('mobile browser pairs directly with host and uses encrypted chats, files, q
     await page.getByRole('button',{name:'结束本次恢复',exact:true}).click();await page.getByRole('checkbox',{name:'我已检查对话历史',exact:true}).check();await page.getByRole('button',{name:'保留草稿并结束',exact:true}).click();await expect(page.locator('.composer-recovery-notice')).toHaveCount(0);expect(cancelledPosts).toBe(1);
     await send('after cancelled receipt'); await expect(page.getByText('Fixture reply: after cancelled receipt', { exact: true })).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath('remote-mobile-chat.png'), fullPage: true });
-    await page.getByRole('button', { name: '切换为深色', exact: true }).click(); await expect(page.locator('html')).toHaveAttribute('data-palette', 'mandala-dark'); await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(25, 25, 28)'); await page.screenshot({ path: testInfo.outputPath('remote-mobile-dark.png'), fullPage: true }); await page.getByRole('button', { name: '切换为浅色', exact: true }).click(); await expect(page.locator('html')).toHaveAttribute('data-palette', 'mandala-light');
+    await page.getByRole('button', { name: '切换为深色', exact: true }).click(); await expect(page.locator('html')).toHaveAttribute('data-palette', 'mandala-dark'); await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(18, 19, 23)'); await page.screenshot({ path: testInfo.outputPath('remote-mobile-dark.png'), fullPage: true }); await page.getByRole('button', { name: '切换为浅色', exact: true }).click(); await expect(page.locator('html')).toHaveAttribute('data-palette', 'mandala-light');
     await page.getByRole('button', { name: '任务', exact: true }).click(); await expect(page.getByRole('heading', { name: '合成持久任务' })).toBeVisible(); await page.getByRole('button', { name: '停止任务', exact: true }).click(); await expect.poll(() => fixture.manager.taskService.getTask(fixture.principal, fixture.task.id).waitingReason).toBe('interrupted'); await expect(page.locator('.remote-task').getByText('已停止', { exact: true })).toBeVisible(); await expect(page.getByRole('button', { name: '停止任务', exact: true })).toHaveCount(0);
     await page.getByRole('button', { name: '配置概览', exact: true }).click(); await expect(page.getByText('配置修改在电脑上完成；这里只展示获准读取的概览。')).toBeVisible(); expect(await page.locator('input,textarea').count()).toBe(0);
     expect((await page.request.get(fixture.relayUrl + '/api/config')).status()).toBe(403);

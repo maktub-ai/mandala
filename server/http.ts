@@ -124,6 +124,14 @@ export function createHttpServer({
     identity: access.remoteIdentity, peer: access.remotePeer, replayFile: resolve(home, 'remote-replays.json'),
     async dispatch(req, inner, signal) {
       if (inner.path === '/api/remote/config') return Response.json(remoteConfigSummary((await readConfig(home)).config));
+      if (inner.path === '/api/remote/mandala') {
+        // Projection of GET /api/mandala: the primary chat identity only, never soul or settings.
+        const local = await fetch(`http://${req.headers.host}/api/mandala`, { headers: { ...inner.headers, ...access.remoteLocalHeaders() }, signal, redirect: 'error' });
+        if (!local.ok) return new Response(local.body, { status: local.status, headers: { 'Content-Type': 'application/json' } });
+        const value = await local.json() as { config?: { mandala?: { agentId: string }; agents?: { id: string; name: string }[] }; conversation?: { id: string } | null };
+        const agentId = value.config?.mandala?.agentId ?? null;
+        return Response.json({ agentId, name: value.config?.agents?.find(agent => agent.id === agentId)?.name ?? null, conversationId: value.conversation?.id ?? null });
+      }
       return fetch(`http://${req.headers.host}${inner.path}`, { method: inner.method, headers: { ...inner.headers, ...access.remoteLocalHeaders() }, body: ['GET','HEAD'].includes(inner.method) ? undefined : Buffer.from(inner.body), signal, redirect: 'error' });
     },
   }) : undefined;

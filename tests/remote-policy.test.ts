@@ -23,6 +23,20 @@ it('allows chat, attachment, approval, question and individual stop workflows', 
   expect(allowed('POST', '/api/v2/tasks/task-1/stop', {expectedRevision: 3})).toBe(true);
 });
 
+it('allows the Mandala primary chat, owned goals and in-chat proposal decisions only', () => {
+  for (const path of ['/api/remote/mandala', '/api/mandala/goals']) {
+    expect(allowed('GET', path), path).toBe(true);
+    expect(allowed('GET', path + '?scope=all'), path).toBe(false);
+    for (const method of ['POST', 'PUT', 'DELETE']) expect(allowed(method, path, {}), method + path).toBe(false);
+  }
+  expect(allowed('POST', '/api/mandala/proposals/proposal-1', {version: 'v1', decision: 'approve'})).toBe(true);
+  expect(allowed('POST', '/api/mandala/proposals/proposal-1', {version: 'v1', decision: 'reject'})).toBe(true);
+  for (const body of [{version: 'v1', decision: 'apply'}, {decision: 'approve'}, {version: '', decision: 'approve'}, {version: 'v1', decision: 'approve', values: {}}, {version: 1, decision: 'approve'}])
+    expect(allowed('POST', '/api/mandala/proposals/proposal-1', body), JSON.stringify(body)).toBe(false);
+  expect(allowed('GET', '/api/mandala/proposals/proposal-1')).toBe(false);
+  for (const method of ['GET', 'PUT', 'POST']) for (const path of ['/api/mandala', '/api/mandala/proposals', '/api/mandala/proposals?conversationId=chat-1']) expect(allowed(method, path, {}), method + path).toBe(false);
+});
+
 it('denies administration, secret-bearing configuration, shell and filesystem APIs by default', () => {
   for (const path of ['/api/config', '/api/cli/config/agents/upsert', '/api/cli/invoke', '/api/task-tools', '/api/capabilities', '/api/effective', '/api/folders', '/api/market', '/api/automations', '/api/system-tasks/chat-1/title/run', '/api/conversations/chat-1/terminal', '/api/conversations/chat-1/workspace', '/api/conversations/chat-1/local-file', '/api/v2/tasks/task-1', '/api/conversations/chat-1/references', '/api/skill-learning', '/api/skills/skill-1', '/api/skills/skill-1/suggestions/suggestion-1/accept', '/api/v2/knowledge-bases', '/api/projects/project-1/workspaces/workspace-1/code-graph', '/api/projects/project-1/workspaces/workspace-1/code-graph/refresh', '/api/unknown-future-endpoint'])
     for (const method of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) expect(allowed(method, path, {}), method + path).toBe(false);
@@ -44,6 +58,7 @@ it('projects safe config with no paths, instructions, secrets or future fields',
   expect(policy, 'host remote policy must exist').not.toBeNull();
   const config = {version: 2, agents: [{id: 'a', name: 'Agent', defaultCli: 'codex', models: {codex: 'model'}, instructions: 'SECRET', runtime: {codex: {env: {TOKEN: 'SECRET'}}}, futureSecret: 'SECRET'}], projects: [{id: 'p', name: 'Project', agentIds: ['a'], cwd: '/SECRET', background: 'SECRET', mcp: [{url: 'https://SECRET'}]}], connections: [{env: {TOKEN: 'SECRET'}}], system: {futureSecret: 'SECRET'}} as unknown as Config;
   const summary = policy.remoteConfigSummary(config);
-  expect(summary).toEqual({agents: [{id: 'a', name: 'Agent', defaultCli: 'codex', models: {codex: 'model'}}], projects: [{id: 'p', name: 'Project', agentIds: ['a']}], settings: {localExecution: true, remoteConfiguration: 'read-only'}});
+  expect(summary).toEqual({agents: [{id: 'a', name: 'Agent', defaultCli: 'codex', models: {codex: 'model'}}], projects: [{id: 'p', name: 'Project', agentIds: ['a']}], mandala: null, settings: {localExecution: true, remoteConfiguration: 'read-only'}});
   expect(JSON.stringify(summary)).not.toContain('SECRET');
+  expect(policy.remoteConfigSummary({...config, mandala: {agentId: 'a', soul: 'SECRET', maxParallel: 3}}).mandala).toEqual({agentId: 'a'});
 });

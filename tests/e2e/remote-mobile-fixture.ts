@@ -39,7 +39,7 @@ export async function remoteMobileFixture() {
   const local = createHttpServer({ home, store, manager, requireIdentity: true }), relay = createControlServer({ home: relayHome, dist: resolve('dist') });
   local.listen(0, '127.0.0.1'); relay.listen(0, '127.0.0.1'); await Promise.all([once(local, 'listening'), once(relay, 'listening')]);
   const localUrl = `http://127.0.0.1:${(local.address() as { port: number }).port}`, relayUrl = `http://127.0.0.1:${(relay.address() as { port: number }).port}`;
-  return { localUrl, relayUrl, password, conversation, manager, store, principal, task, inspectRequest(wire: string) {
+  return { home, localUrl, relayUrl, password, conversation, manager, store, principal, task, inspectRequest(wire: string) {
     const state = JSON.parse(readFileSync(join(home, 'remote-access.json'), 'utf8'));
     const peer = Object.values(state.grants)[0] as string; const request = openRemote(wire, peer, state.identity.secretKey);
     return { method: request.method as string, path: request.path as string, body: request.body ? Buffer.from(fromBase64(request.body)).toString('utf8') : '' };

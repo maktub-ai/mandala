@@ -4,6 +4,7 @@ import type { Config } from '../shared/types';
 const id = '[a-zA-Z0-9_-]{1,100}';
 const conversation = new RegExp(`^/api/conversations/(${id})(?:/([^/]+)(?:/(${id}))?)?$`);
 const task = new RegExp(`^/api/v2/tasks/${id}/(control|stop)$`);
+const mandalaProposal = new RegExp(`^/api/mandala/proposals/(${id})$`);
 const assetFile = new RegExp(`^/api/v2/assets/${id}/versions/${id}/files/${id}$`);
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const only = (value: unknown, fields: string[]) => record(value) && Object.keys(value).every(key => fields.includes(key));
@@ -19,7 +20,11 @@ export function remoteRequestAllowed(method: string, target: string, body?: unkn
   try { url = new URL(target, 'http://local.invalid'); } catch { return false; }
   const path = url.pathname;
   if (path !== pathname) return false;
-  if (path === '/api/remote/config') return method === 'GET' && queryOnly(url, []);
+  if (path === '/api/remote/config' || path === '/api/remote/mandala' || path === '/api/mandala/goals') return method === 'GET' && queryOnly(url, []);
+  const proposal = mandalaProposal.exec(path);
+  if (proposal) return method === 'POST' && queryOnly(url, []) && only(body, ['version', 'decision']) &&
+    typeof (body as Record<string, unknown>).version === 'string' && String((body as Record<string, unknown>).version).length > 0 && String((body as Record<string, unknown>).version).length <= 200 &&
+    ['approve', 'reject'].includes(String((body as Record<string, unknown>).decision));
   if (path === '/api/conversations') {
     if (method === 'GET') return queryOnly(url, ['projectId', 'agentId']);
     return method === 'POST' && queryOnly(url, []) && only(body, ['agentId', 'projectId', 'model']) &&
@@ -64,6 +69,7 @@ export function remoteConfigSummary(config: Config) {
   return {
     agents: config.agents.map(agent => ({id: agent.id, name: agent.name, defaultCli: agent.defaultCli, models: Object.fromEntries(Object.entries(agent.models).filter(([cli, model]) => isCli(cli) && typeof model === 'string'))})),
     projects: config.projects.map(project => ({id: project.id, name: project.name, agentIds: [...project.agentIds]})),
+    mandala: config.mandala ? {agentId: config.mandala.agentId} : null,
     settings: {localExecution: true as const, remoteConfiguration: 'read-only' as const},
   };
 }
