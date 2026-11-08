@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/design/brand/assets/logo-on-dark-256.png">
-  <img src="docs/design/brand/assets/logo-on-light-256.png" alt="Mandala" width="64" height="64">
+  <source media="(prefers-color-scheme: dark)" srcset="src/assets/logo-on-dark.svg">
+  <img src="src/assets/logo-on-light.svg" alt="Mandala" width="64" height="64">
 </picture>
 
 # Mandala
@@ -14,10 +14,10 @@
 
 [![License](https://img.shields.io/badge/license-source--available-7c86ff?style=flat-square)](LICENSE)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Web-1f2126?style=flat-square)](#快速开始)
-[![Status](https://img.shields.io/badge/status-preview-e2ac4c?style=flat-square)](docs/roadmap.md)
-[![GitHub stars](https://img.shields.io/github/stars/MaktubCN/open-mana?style=flat-square&color=7c86ff)](https://github.com/MaktubCN/open-mana/stargazers)
+[![Release](https://img.shields.io/badge/release-v1.0.0-4ccb85?style=flat-square)](https://github.com/maktub-ai/mandala-releases/releases)
+[![GitHub stars](https://img.shields.io/github/stars/maktub-ai/mandala?style=flat-square&color=7c86ff)](https://github.com/maktub-ai/mandala/stargazers)
 
-[快速开始](#快速开始) · [执行端](#执行端) · [文档](#文档) · [架构](#架构) · [下载](https://github.com/MaktubCN/open-mana/releases)
+[快速开始](#快速开始) · [执行端](#执行端) · [文档](#文档) · [架构](#架构) · [下载](https://github.com/maktub-ai/mandala-releases/releases)
 
 [English](README.md) · **简体中文**
 
@@ -86,7 +86,7 @@ Mandala 运行在你的电脑上，数据也留在那里。出门在外时，用
 
 <img src="docs/assets/readme/themes.png" alt="Mandala 工作台的四种主题" width="100%">
 
-Mandala 是开源的，围绕它的一切也是。主题、语言包和 Mandala 宠物都来自 GitHub 上的社区目录，在 App 内的 Market 里安装。宠物住在 Mandala 侧栏里，会随 Agent 的工作状态变化，也可以弹出到桌面上。
+Mandala 的源码是公开的，围绕它的一切也是。主题、语言包和 Mandala 宠物都来自 GitHub 上的社区目录，在 App 内的 Market 里安装。宠物住在 Mandala 侧栏里，会随 Agent 的工作状态变化，也可以弹出到桌面上。
 
 | 我想要… | 从这里开始 |
 |---|---|
@@ -101,13 +101,13 @@ Mandala 是开源的，围绕它的一切也是。主题、语言包和 Mandala 
 
 ## 快速开始
 
-**桌面版。** 有可用的预览版时，可从 [Releases](https://github.com/MaktubCN/open-mana/releases) 下载 macOS（`.dmg`）或 Windows（`.exe`）版本。预览版尚未签名，首次打开时系统会要求你确认。
+**桌面版。** 从 [Releases](https://github.com/maktub-ai/mandala-releases/releases) 下载 macOS（`.dmg`，Apple Silicon）或 Windows（`.exe`）安装包。安装包暂未做代码签名：macOS 首次打开请右键 Mandala.app 选择「打开」；Windows 在 SmartScreen 提示中选择「更多信息 → 仍要运行」。下载后可用 `SHA256SUMS.txt` 校验。
 
 **从源码运行。** 需要 Node.js 22.23.2 或更高版本，以及至少一个已在终端里能正常使用的受支持 CLI。
 
 ```bash
-git clone https://github.com/MaktubCN/open-mana.git
-cd open-mana
+git clone https://github.com/maktub-ai/mandala.git
+cd mandala
 npm ci && npm run build && npm start
 # 打开 http://127.0.0.1:4317
 ```

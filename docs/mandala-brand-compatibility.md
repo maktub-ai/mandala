@@ -11,7 +11,7 @@ The remaining legacy references are deliberate compatibility or historical ident
 | Old cookies, internal HTTP headers, usage events, disabled task MCP names | Mixed-version authentication and protocol compatibility. Current names are primary; old inputs remain accepted. |
 | Existing Project/Agent IDs and historical conversation/memory text | Stable identity and source evidence; renaming display branding does not rewrite IDs, quotations or evidence. |
 | Native Codex/OMP session names or history containing the old data path | Native history stays at its original location. The legacy directory alias keeps old absolute file references usable. |
-| GitHub `MaktubCN/open-mana` and repository checkout folder names | Existing external repository identity, including the installer download link; not a product label or a data-home default. No external repository rename is performed. |
+| Repository checkout folder names such as `open-mana` | Local folder names are not product labels or data-home defaults. The source repository is `maktub-ai/mandala`; installers are published from `maktub-ai/mandala-releases`. |
 | Dated audit records, fixture names, archived installers and source snapshots | Historical evidence remains accurate and reproducible. Active instructions and current release manifests use current paths. |
 
 The inventory covers active `server`, `shared`, `src`, `desktop`, `cli`, `scripts`, public assets, package metadata, Git hooks/CI, README and operational documentation. Legacy protocol and path compatibility is tested separately from canonical behavior. No global string replacement is used.

@@ -77,6 +77,8 @@ Desktop appearance is saved in `desktop-appearance.json` under the selected data
 
 On the first launch with no document, the App migrates the current origin's saved appearance. Preferences belonging to older ephemeral origins are left intact; an upgrade must recover the known previous live origin's choice before switching origins if it has not yet been migrated. Do not select an arbitrary historical origin or copy another profile's preferences.
 
+The full window lifecycle smoke signs in through an isolated, locally started account service, then checks the sandboxed window, second launch, background work after normal quit, renderer-crash recovery, reopen and **Stop runtime and quit…**. Build `mandala-service/account-service` first, then run `MANDALA_ACCOUNT_SERVICE_SOURCE=/path/to/mandala-service/account-service NODE_OPTIONS='--import tsx' node scripts/desktop-window-smoke.mjs`. Without the private service, `node scripts/desktop-window-smoke.mjs --gate-only` checks only the signed-out gate (workspace APIs rejected, sandbox and context isolation) and is not a lifecycle pass.
+
 `node scripts/desktop-appearance-smoke.mjs /absolute/path/Mandala.app` verifies UI-selected light/dark palettes and their computed colors across three real cold starts in an isolated HOME, occupying the first port to force an origin change. It does not modify personal preferences.
 
 ## Background and quit behavior

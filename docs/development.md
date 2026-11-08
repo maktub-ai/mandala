@@ -105,7 +105,7 @@ MANDALA_HOME="$HOME/.mandala" MANDALA_PORT=4332 npm start
 
 更名兼容：`mandala` 是主命令，`openmana` 仍为兼容入口。所有 `MANDALA_*` 变量优先于同名 `OPEN_MANA_*`。新安装使用 `.mandala`、`.mandala-account-service` 和 `.mandala-releases`；旧目录可通过显式离线迁移命令转移，完整原目录作为备份，并保留旧路径链接。迁移后 CLI 与桌面统一选择新版目录；两套独立数据目录并存时拒绝猜测。详见[迁移说明](desktop.md)。显式 HOME、已有登录、电脑批准、自动化与历史正文保留；新旧 Cookie 和内部请求头兼容独立升级的服务。Git Hook 优先读 `mandala.releaseHome/releasePort`，保留旧 `openmana` 配置回退。
 
-源码仓库为 `maktub-ai/mandala`，保持 private；公开安装包与版本说明发布到 `maktub-ai/mandala-releases`。官网和 App 更新检查使用公开安装包仓库，不能把源码历史推送到该仓库。本地已有 checkout 只需将 origin 更新为新地址，无需移动数据目录。
+源码仓库为 `maktub-ai/mandala`（公开；旧开发历史已归档在私有的 `maktub-ai/mandala-archive`，不再接受合并）；公开安装包与版本说明发布到 `maktub-ai/mandala-releases`。官网和 App 更新检查使用公开安装包仓库，不能把源码历史推送到该仓库。本地已有 checkout 只需将 origin 更新为新地址，无需移动数据目录。
 
 日常数据与测试数据应使用不同目录。停止服务可能中断正在执行的工作；关闭浏览器窗口不会停止独立运行的服务。
 

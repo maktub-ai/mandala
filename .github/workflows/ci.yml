@@ -55,7 +55,8 @@ jobs:
       - run: npm audit --prefix desktop
       - run: npm run desktop:build
       - run: node scripts/desktop-smoke.mjs
-      - run: node scripts/desktop-window-smoke.mjs
+      # The account service is private; the full signed-in lifecycle runs locally (see docs/desktop.md).
+      - run: node scripts/desktop-window-smoke.mjs --gate-only
         timeout-minutes: 5
       - uses: actions/upload-artifact@v7
         if: always()

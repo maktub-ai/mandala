@@ -1,29 +1,84 @@
-import { _electron as electron, expect } from '@playwright/test';
+import { _electron as electron, chromium, expect } from '@playwright/test';
 import { mkdtemp, mkdir, writeFile, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
 import assert from 'node:assert/strict';
+// Full lifecycle: signs in through an isolated account service (MANDALA_ACCOUNT_SERVICE_SOURCE
+// pointing at mandala-service/account-service, built, loaded with NODE_OPTIONS='--import tsx').
+// --gate-only checks only the signed-out gate when that private service is unavailable (public CI).
+const args = process.argv.slice(2), gateOnly = args.includes('--gate-only'), appArgument = args.find(value => !value.startsWith('--'));
 const folders = await readdir('release/desktop');
 const folder = process.platform === 'win32' ? 'win-unpacked' : folders.find(name => /^mac(?:-|$)/.test(name));
-const appPath = resolve(process.argv[2] ?? (process.platform === 'win32' ? join('release/desktop', folder) : join('release/desktop', folder, 'Mandala.app')));
+const appPath = resolve(appArgument ?? (process.platform === 'win32' ? join('release/desktop', folder) : join('release/desktop', folder, 'Mandala.app')));
 const executablePath = process.platform === 'win32' ? join(appPath, 'Mandala.exe') : join(appPath, 'Contents/MacOS/Mandala');
 const home = join(await mkdtemp(join(process.platform === 'win32' ? tmpdir() : '/tmp', 'mandala-window-smoke-')), 'data');
 const artifactDirectory = process.env.MANDALA_SMOKE_OUTPUT ?? join(process.platform === 'win32' ? tmpdir() : '/tmp', 'mandala-window-smoke-' + Date.now());
-let application = await electron.launch({ executablePath, env: { ...process.env, MANDALA_HOME: home, OPEN_MANA_HOME: home }, timeout: 30000 });
+const email = 'window-smoke@example.com';
+let cloud = null, cloudOrigin = 'http://127.0.0.1:9', verificationCode = '';
+if (!gateOnly) {
+  if (!process.env.MANDALA_ACCOUNT_SERVICE_SOURCE) throw new Error("Full desktop smoke needs MANDALA_ACCOUNT_SERVICE_SOURCE=<mandala-service>/account-service and NODE_OPTIONS='--import tsx'; pass --gate-only to check only the signed-out gate.");
+  const { createControlServer } = await import('../tests/helpers/account-service.ts');
+  cloud = createControlServer({ home: join(dirname(home), 'control'), dist: 'dist', auth: { sendCode: async (_email, value) => { verificationCode = value; } } });
+  await new Promise(done => cloud.listen(0, '127.0.0.1', done));
+  cloudOrigin = `http://127.0.0.1:${cloud.address().port}`;
+}
+// Electron must not inherit the test loader; the desktop runtime strips it for its own children too.
+const launchEnv = () => { const env = { ...process.env, MANDALA_HOME: home, OPEN_MANA_HOME: home, MANDALA_ACCOUNT_ORIGIN: cloudOrigin }; delete env.NODE_OPTIONS; return env; };
+const launch = () => electron.launch({ executablePath, env: launchEnv(), timeout: 30000 });
+let application = await launch();
 let frontendProcess = application.process();
+let profileHome = home;
 try {
-  const page = await application.firstWindow(); await page.waitForLoadState('domcontentloaded');
-  const origin = new URL(page.url()).origin;
-  const auth = await page.evaluate(() => fetch('/auth/session').then(r => r.json()));
-  assert.equal(auth.setup.available, true);
+  let page = await application.firstWindow(); await page.waitForLoadState('domcontentloaded');
+  // Signed-out gate: no workspace API, sandboxed renderer, no Node in the page.
+  await expect(page.getByRole('heading', { name: 'Sign in to Mandala' })).toBeVisible();
+  assert.equal(await page.evaluate(() => fetch('/api/conversations').then(r => r.status)), 401);
+  assert.equal(await page.evaluate(() => fetch('/api/config').then(r => r.status)), 401);
   assert.equal(await page.evaluate(() => typeof globalThis.require), 'undefined');
   const windows = await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map(w => w.webContents.getLastWebPreferences()));
   assert.equal(windows[0].sandbox, true); assert.equal(windows[0].contextIsolation, true); assert.equal(windows[0].nodeIntegration, false);
-  const created = await page.evaluate(token => fetch('/auth/setup', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Setup-Token': token }, body: JSON.stringify({ username: 'windowtest', password: 'synthetic-window-password' }) }).then(async r => ({ status: r.status, data: await r.json() })), auth.setup.token);
-  assert.equal(created.status, 201);
-  await page.reload(); await page.waitForLoadState('domcontentloaded');
+  if (gateOnly) {
+    await mkdir(artifactDirectory, { recursive: true });
+    await page.screenshot({ path: join(artifactDirectory, 'desktop-signin.png') });
+    const evidence = { appPath, gateOnly: true, signInGate: true, workspaceApiRejected: true, sandbox: true, requireUnavailable: true, fullLifecycle: false };
+    await writeFile(join(artifactDirectory, 'desktop-window.json'), JSON.stringify(evidence, null, 2)); console.log(JSON.stringify(evidence, null, 2));
+  } else {
+  // Real sign-in: browser approval against the isolated account service, then open the workspace.
+  await page.getByRole('button', { name: 'Start sign-in', exact: true }).click();
+  const link = page.getByRole('link', { name: 'Sign in and approve in your browser' }); await expect(link).toBeVisible();
+  const browser = await chromium.launch();
+  try {
+    const web = await (await browser.newContext()).newPage(); await web.goto(await link.getAttribute('href'));
+    const emailOption = web.getByRole('button', { name: 'Continue with email' }), emailField = web.getByRole('textbox', { name: 'Email', exact: true });
+    await expect(emailOption.or(emailField)).toBeVisible();
+    if (await emailOption.isVisible()) await emailOption.click();
+    await emailField.fill(email); await web.getByRole('button', { name: 'Send code', exact: true }).click();
+    await expect(web.getByRole('textbox', { name: 'Verification code' })).toBeVisible();
+    await expect.poll(() => verificationCode).not.toBe('');
+    await web.getByRole('textbox', { name: 'Verification code' }).fill(verificationCode); await web.getByRole('button', { name: 'Verify and sign in' }).click();
+    const profile = web.getByRole('heading', { name: 'Set up your profile' }), approve = web.getByRole('button', { name: 'Allow this computer' });
+    await expect(profile.or(approve)).toBeVisible();
+    if (await profile.isVisible()) { await web.getByRole('textbox', { name: 'Username' }).fill('windowtest'); await web.getByRole('button', { name: 'Save and continue' }).click(); }
+    await approve.click();
+  } finally { await browser.close(); }
+  await expect(page.getByRole('button', { name: 'Open workspace', exact: true })).toBeVisible();
+  // Opening the workspace relaunches the App; relaunch under Playwright instead.
+  await application.evaluate(({ app }) => { app.relaunch = () => {}; app.exit = () => {}; });
+  await page.getByRole('button', { name: 'Open workspace', exact: true }).click();
+  const accountsFile = join(home, 'account-gateway', 'desktop-accounts.json');
+  await expect.poll(() => readFile(accountsFile, 'utf8').then(text => JSON.parse(text).active?.user.email).catch(() => null)).toBe(email);
+  await application.close();
+  application = await launch(); frontendProcess = application.process();
+  page = await application.firstWindow(); await page.waitForLoadState('domcontentloaded');
+  await expect.poll(() => page.evaluate(() => fetch('/auth/session').then(r => r.json()).then(s => s.user?.email))).toBe(email);
+  const signedWindows = await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map(w => w.webContents.getLastWebPreferences()));
+  assert.equal(signedWindows[0].sandbox, true); assert.equal(signedWindows[0].contextIsolation, true); assert.equal(signedWindows[0].nodeIntegration, false);
+  const profiles = JSON.parse(await readFile(accountsFile, 'utf8')).profiles;
+  const profileKeys = Object.keys(profiles); assert.equal(profileKeys.length, 1);
+  profileHome = profiles[profileKeys[0]].legacy ? home : join(home, 'profiles', profileKeys[0]);
+  const origin = new URL(page.url()).origin;
   // Native directories remain folder cards; only their path information is sent.
   const selectedDirectory = join(home, 'selected workspace'); await mkdir(selectedDirectory);
   await page.goto(origin + '/mandala');
@@ -50,7 +105,7 @@ try {
   const second = spawn(executablePath, [], { env: { ...process.env, MANDALA_HOME: home, OPEN_MANA_HOME: home }, stdio: 'ignore' });
   const [secondExit] = await once(second, 'exit'); assert.equal(secondExit, 0);
   await expect.poll(() => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible())).toBe(true);
-  assert.equal((await (await import('node:fs/promises')).readdir(join(home, '.store-leases'))).length, 1);
+  assert.equal((await (await import('node:fs/promises')).readdir(join(profileHome, '.store-leases'))).length, 1);
 
   await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].show());
   await mkdir(artifactDirectory, { recursive: true });
@@ -155,7 +210,7 @@ try {
   assert.equal((await fetch(origin + '/auth/session')).status, 200);
   await expect.poll(() => readFile(join(proofDirectory, 'completed.txt'), 'utf8').catch(() => ''), { timeout: 60000 }).toContain('MANDALA_AFTER_QUIT');
   console.log(JSON.stringify({ phase: 'background job completed', home }));
-  application = await electron.launch({ executablePath, env: { ...process.env, MANDALA_HOME: home, OPEN_MANA_HOME: home }, timeout: 30000 });
+  application = await launch();
   frontendProcess = application.process();
   frontendProcess.stderr?.on('data', data => process.stderr.write(data));
   const reopened = await application.firstWindow(); await reopened.waitForLoadState('domcontentloaded');
@@ -165,7 +220,7 @@ try {
     const saved = await reopened.evaluate(async id => (await (await fetch('/api/conversations/' + id + '/history')).json()), chat.id);
     assert.ok(saved.filter(event => event.kind === 'text').map(event => event.data.text).join('').includes('MANDALA_AFTER_QUIT'));
   }
-  assert.equal((await readdir(join(home, '.store-leases'))).length, 1);
+  assert.equal((await readdir(join(profileHome, '.store-leases'))).length, 1);
   const reopenedFrontend = frontendProcess;
   await application.evaluate(({ dialog, Menu }) => {
     dialog.showMessageBox = async () => ({ response: 1 });
@@ -174,11 +229,12 @@ try {
   });
   await expect.poll(() => reopenedFrontend.exitCode ?? reopenedFrontend.signalCode, { timeout: 40000 }).not.toBeNull();
   assert.equal(await fetch(origin + '/auth/session').catch(() => null), null);
-  const evidence = { appPath, home, artifactDirectory, product, directorySelectionRetainedCard: true, firstOwnerCreated: true, sandbox: true, requireUnavailable: true, trustedClickExternalOpen: true, programmaticPopupsBlocked: true, windowCloseKeptService: true, secondLaunchReopenedSameWindow: true, rendererCrashRecoveredWithoutResend: true, rendererCrashKeptRuntime: true, normalQuitKeptRuntime: true, reopenReusedRuntime: true, explicitStopStoppedRuntime: true, remoteBrowserOpened: false, modelInvoked: Boolean(liveCli), liveCli: liveCli ?? null, backgroundTaskCompletedAfterQuit: true };
+  const evidence = { appPath, home, artifactDirectory, product, directorySelectionRetainedCard: true, accountSignIn: email, signInGate: true, workspaceApiRejectedBeforeSignIn: true, sandbox: true, requireUnavailable: true, trustedClickExternalOpen: true, programmaticPopupsBlocked: true, windowCloseKeptService: true, secondLaunchReopenedSameWindow: true, rendererCrashRecoveredWithoutResend: true, rendererCrashKeptRuntime: true, normalQuitKeptRuntime: true, reopenReusedRuntime: true, explicitStopStoppedRuntime: true, remoteBrowserOpened: false, modelInvoked: Boolean(liveCli), liveCli: liveCli ?? null, backgroundTaskCompletedAfterQuit: true };
   await writeFile(join(artifactDirectory, 'desktop-window.json'), JSON.stringify(evidence, null, 2)); console.log(JSON.stringify(evidence, null, 2));
+  }
 } catch (error) {
   console.error(error);
-  const record = await readFile(join(home, '.desktop-runtime.json'), 'utf8').then(JSON.parse).catch(() => null);
+  const record = await readFile(join(home, 'account-gateway', '.desktop-runtime.json'), 'utf8').then(JSON.parse).catch(() => null);
   console.error(JSON.stringify({ phase: 'failure state', runtimeRecordExists: Boolean(record), runtimeHttpStatus: record ? await fetch(record.origin + '/auth/session', { signal: AbortSignal.timeout(2000) }).then(response => response.status).catch(() => null) : null }));
   throw error;
 } finally {
@@ -189,4 +245,5 @@ try {
     }).catch(() => {});
     await application.close().catch(() => {});
   }
+  if (cloud) { cloud.closeAllConnections(); await new Promise(done => cloud.close(() => done())); }
 }

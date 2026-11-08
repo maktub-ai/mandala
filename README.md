@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/design/brand/assets/logo-on-dark-256.png">
-  <img src="docs/design/brand/assets/logo-on-light-256.png" alt="Mandala" width="64" height="64">
+  <source media="(prefers-color-scheme: dark)" srcset="src/assets/logo-on-dark.svg">
+  <img src="src/assets/logo-on-light.svg" alt="Mandala" width="64" height="64">
 </picture>
 
 # Mandala
@@ -14,7 +14,7 @@ Mandala keeps track of everything, so every thread of work keeps moving.
 
 [![License](https://img.shields.io/badge/license-source--available-7c86ff?style=flat-square)](LICENSE)
 [![Platforms](https://img.shields.io/badge/macOS%20%C2%B7%20Windows%20%C2%B7%20Web-1f2126?style=flat-square)](#get-started)
-[![Status](https://img.shields.io/badge/status-preview-e2ac4c?style=flat-square)](docs/roadmap.md)
+[![Release](https://img.shields.io/badge/release-v1.0.0-4ccb85?style=flat-square)](https://github.com/maktub-ai/mandala-releases/releases)
 [![GitHub stars](https://img.shields.io/github/stars/maktub-ai/mandala?style=flat-square&color=7c86ff)](https://github.com/maktub-ai/mandala/stargazers)
 
 [Get started](#get-started) · [Runtimes](#runtimes) · [Documentation](#documentation) · [Architecture](#architecture) · [Download](https://github.com/maktub-ai/mandala-releases/releases)
@@ -86,7 +86,7 @@ The official connection is coming with our hosted relay. Today you can [self-hos
 
 <img src="docs/assets/readme/themes.png" alt="The Mandala workspace in four themes" width="100%">
 
-Mandala is open source, and so is everything around it. Themes, language packs and the Mandala pet come from community catalogs on GitHub and install from the in-app Market. The pet sits in the Mandala panel, reacts to what your Agents are doing, and can pop out onto your desktop.
+Mandala's source is public, and so is everything around it. Themes, language packs and the Mandala pet come from community catalogs on GitHub and install from the in-app Market. The pet sits in the Mandala panel, reacts to what your Agents are doing, and can pop out onto your desktop.
 
 | I want to… | Start here |
 |---|---|
@@ -101,7 +101,7 @@ Every package is reviewed before it is listed, and the app installs only the exa
 
 ## Get started
 
-**Desktop.** Download the latest preview for macOS (`.dmg`) or Windows (`.exe`) from [Releases](https://github.com/maktub-ai/mandala-releases/releases) when one is available. The current macOS Apple Silicon preview is ad-hoc signed and not Apple-notarized; Windows installers are not yet published.
+**Desktop.** Download macOS (`.dmg`, Apple Silicon) or Windows (`.exe`) from [Releases](https://github.com/maktub-ai/mandala-releases/releases). Installers are not yet code-signed: on macOS, right-click Mandala.app and choose **Open** the first time; on Windows, choose **More info → Run anyway** in SmartScreen. Verify downloads against `SHA256SUMS.txt`.
 
 **From source.** Requires Node.js 22.23.2 or later, and at least one supported CLI that already works in your terminal.
 

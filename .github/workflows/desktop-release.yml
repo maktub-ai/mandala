@@ -49,7 +49,8 @@ jobs:
       - run: npm audit --prefix desktop
       - run: npm run desktop:build
       - run: node scripts/desktop-smoke.mjs
-      - run: node scripts/desktop-window-smoke.mjs
+      # The account service is private; the full signed-in lifecycle runs locally (see docs/desktop.md).
+      - run: node scripts/desktop-window-smoke.mjs --gate-only
       - uses: actions/upload-artifact@v7
         with:
           name: mandala-desktop-${{ matrix.os }}
@@ -85,5 +86,9 @@ jobs:
           path: release/artifacts
           merge-multiple: true
       - run: node scripts/release-checksums.mjs release/artifacts
-      - name: Create draft prerelease for maintainer review
-        run: gh release create "$RELEASE_TAG" release/artifacts/* --verify-tag --draft --prerelease --title "Mandala $RELEASE_TAG preview" --notes-file deploy/desktop-release-notes.md
+      - name: Create draft release for maintainer review
+        run: |
+          case "$RELEASE_TAG" in
+            *-*) gh release create "$RELEASE_TAG" release/artifacts/* --verify-tag --draft --prerelease --title "Mandala $RELEASE_TAG preview" --notes-file deploy/desktop-release-notes.md ;;
+            *) gh release create "$RELEASE_TAG" release/artifacts/* --verify-tag --draft --title "Mandala $RELEASE_TAG" --notes-file deploy/desktop-release-notes.md ;;
+          esac
