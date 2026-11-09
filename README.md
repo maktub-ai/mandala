@@ -38,6 +38,8 @@ Mandala is a local workspace that sits above your AI coding CLIs. You tell it wh
 
 The CLIs still do the work, with their own logins, models and tools. Mandala adds what they don't have: **Agents that own a part of your business, memory that survives a model switch, and one list that remembers what you asked for.**
 
+Some call this a **super agent**: one place you talk to, many Agents working behind it. Mandala adds what super agents usually hide. You can see what every Agent knows, what it is doing and what it changed, and you decide when the work is done.
+
 ## One loop, around one center
 
 A mandala is drawn around one center. Mandala works the same way: work leaves you, goes around, and comes back to you for the decisions only you can make. Each time around, your Agents know your business a little better.
