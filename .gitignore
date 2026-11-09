@@ -70,7 +70,6 @@
 # Local data, credentials and generated output.
 node_modules/
 dist/
-.superpowers/
 .env
 .env.*
 *.env
@@ -94,6 +93,4 @@ desktop/.runtime/
 /.development/
 /.quality-current/
 /audit/
-/.impeccable/
-/.codex/
 /specs/
