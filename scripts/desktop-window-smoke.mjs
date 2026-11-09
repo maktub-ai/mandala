@@ -81,7 +81,15 @@ try {
   const origin = new URL(page.url()).origin;
   // Native directories remain folder cards; only their path information is sent.
   const selectedDirectory = join(home, 'selected workspace'); await mkdir(selectedDirectory);
+  // Exercise first use without depending on installed or signed-in host CLIs.
+  await page.route('**/api/cli/status?*', route => route.fulfill({ json: { status: new URL(route.request().url()).searchParams.get('cli') === 'codex' ? 'ready' : 'unavailable', version: 'smoke fixture' } }));
   await page.goto(origin + '/mandala');
+  const guide = page.getByRole('region', { name: /^(Get started with Mandala|开始使用 Mandala)$/ });
+  await expect(guide.getByRole('radio', { name: /^Codex/ })).toBeVisible();
+  await guide.getByRole('radio', { name: /^Codex/ }).click();
+  await guide.getByRole('button', { name: /^(Just chat|直接对话)$/ }).click();
+  await expect(guide).toHaveCount(0);
+  await page.unroute('**/api/cli/status?*');
   const composer = page.getByRole('textbox', { name: /^(Message|消息)$/ }); await expect(composer).toBeEnabled();
   const cdp = await page.context().newCDPSession(page);
   const { root } = await cdp.send('DOM.getDocument');
