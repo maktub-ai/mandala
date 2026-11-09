@@ -170,19 +170,31 @@ Gateway-backed setup, limitations and live tests: [Hermes Agent / OpenClaw](docs
 
 ## Architecture
 
-```text
- you ──► chat / capture ──► Mandala ─────────────┐
-                              │ tasks            │ receipts
-              ┌───────────────┼───────────────┐  │
-           Agent           Agent           Agent │
-         memory · Skills · MCP · Project Wiki    │
-              │               │               │  │
-         Claude Code        Codex           Kimi ─┘   native CLIs, own logins
+How work moves: you talk to Mandala, Mandala hands tasks to long-lived Agents, and each Agent runs the work through a native CLI you already use.
 
- ── one machine ──────────────────────────────────────────────────────
- React UI (browser or Electron)  ◄──►  local Node service  ◄──►  SQLite + files
-                                         ▲
-                     optional E2EE relay │  phone browser
+```mermaid
+flowchart TB
+  you(["You"]) <-- "ask · review" --> mandala["<b>Mandala</b><br/>one inbox<br/>one progress view"]
+  mandala <-- "tasks · progress" --> agents
+  subgraph agents["Agents · long-lived owners, with memory · Skills · MCP · Project Wiki"]
+    direction LR
+    a1["Agent · payments"] ~~~ a2["Agent · releases"] ~~~ a3["Agent · metrics"]
+  end
+  agents <-- "work · receipts" --> clis
+  subgraph clis["Native CLIs · their own logins"]
+    direction LR
+    c1["Claude Code"] ~~~ c2["Codex"] ~~~ c3["Kimi · …"]
+  end
+```
+
+What runs where: everything stays on your machine. A phone can connect through an optional end-to-end encrypted relay.
+
+```mermaid
+flowchart LR
+  phone["Phone browser"] -. "optional E2EE relay" .-> svc
+  subgraph machine["Your machine"]
+    ui["<b>React UI</b><br/>browser or Electron"] <--> svc["<b>Local Node service</b><br/>one adapter per CLI"] <--> db[("SQLite + files")]
+  end
 ```
 
 | Layer | Stack |

@@ -170,19 +170,31 @@ Gateway 配置、能力限制与真实验收步骤见 [Hermes Agent / OpenClaw](
 
 ## 架构
 
-```text
- you ──► chat / capture ──► Mandala ─────────────┐
-                              │ tasks            │ receipts
-              ┌───────────────┼───────────────┐  │
-           Agent           Agent           Agent │
-         memory · Skills · MCP · Project Wiki    │
-              │               │               │  │
-         Claude Code        Codex           Kimi ─┘   native CLIs, own logins
+工作怎么流转：你和 Mandala 对话，Mandala 把任务交给长期负责的智能体，每个智能体再通过你已经在用的原生 CLI 去执行。
 
- ── one machine ──────────────────────────────────────────────────────
- React UI (browser or Electron)  ◄──►  local Node service  ◄──►  SQLite + files
-                                         ▲
-                     optional E2EE relay │  phone browser
+```mermaid
+flowchart TB
+  you(["你"]) <-- "提出 · 审阅" --> mandala["<b>Mandala</b><br/>统一收件<br/>统一看进度"]
+  mandala <-- "任务 · 进度" --> agents
+  subgraph agents["智能体 · 长期负责人，带记忆 · Skills · MCP · 项目 Wiki"]
+    direction LR
+    a1["智能体 · 支付"] ~~~ a2["智能体 · 发布"] ~~~ a3["智能体 · 指标"]
+  end
+  agents <-- "执行 · 回执" --> clis
+  subgraph clis["原生 CLI · 各自登录"]
+    direction LR
+    c1["Claude Code"] ~~~ c2["Codex"] ~~~ c3["Kimi · …"]
+  end
+```
+
+各部分运行在哪里：全部留在你的电脑上。手机可以通过可选的端到端加密中继连接。
+
+```mermaid
+flowchart LR
+  phone["手机浏览器"] -. "可选的端到端加密中继" .-> svc
+  subgraph machine["你的电脑"]
+    ui["<b>React 界面</b><br/>浏览器或 Electron"] <--> svc["<b>本地 Node 服务</b><br/>每种 CLI 一个适配器"] <--> db[("SQLite + 文件")]
+  end
 ```
 
 | 层 | 技术 |
