@@ -1,0 +1,57 @@
+name: Bug report
+description: Something in Mandala does not work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please search [existing issues](https://github.com/maktub-ai/mandala/issues) first.
+        **Security problems:** do not open an issue. See [SECURITY.md](https://github.com/maktub-ai/mandala/blob/main/SECURITY.md).
+        Do not paste credentials, tokens or private task content. Replace them with placeholders.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. See …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Mandala version
+      description: Settings → General → About and updates, or the release you built from.
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you run Mandala?
+      options:
+        - Desktop app (macOS)
+        - Desktop app (Windows)
+        - From source (browser)
+        - Phone via personal connection
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime and version
+      description: The CLI involved, if any (for example Claude Code 2.x, Codex 0.x).
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Remove personal data before attaching.
+      render: text

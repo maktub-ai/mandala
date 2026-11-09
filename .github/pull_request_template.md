@@ -1,24 +1,16 @@
-## 变化
+## What changes
 
-说明解决的问题、用户可观察的变化和涉及的文件。
+<!-- The problem this solves and what users will notice. Link the issue: Fixes #123 -->
 
-## 本机验证
+## How it was tested
 
-- [ ] `npm test`
 - [ ] `npm run typecheck`
+- [ ] `npm test`
 - [ ] `npm run build`
-- [ ] `npm run test:e2e`
+- [ ] `npm run test:e2e` (UI changes)
 
-真实 CLI 验收结果（或未执行的原因）：
+<!-- For runtime changes: which CLI and version you tried it with, or why you could not. -->
 
-## 发布
+## Notes for reviewers
 
-是否需要更新本机服务？数据迁移、运行中任务和回退注意事项：
-
-## 主线与安装交付回执
-
-默认完成 main 合并与远端同步；例外需要写明用户指示或具体阻塞。
-
-- 源码提交／合并提交：
-- 远端 main SHA 与读回结果：
-- 本地 App：是否需要更新及原因；如更新，填写安装版本、已有数据与偏好验收、备份位置。
+<!-- Data migrations, screenshots for UI changes, anything risky. Remove personal data from screenshots. -->

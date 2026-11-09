@@ -4,11 +4,14 @@
 !/.github/
 !/.gitignore
 !/AGENTS.md
+!/CODE_OF_CONDUCT.md
+!/CONTRIBUTING.md
 !/DESIGN.md
 !/LICENSE
 !/PRODUCT.md
 !/README.md
 !/README.zh-CN.md
+!/SECURITY.md
 !/THIRD_PARTY_NOTICES.md
 !/automations.playwright.config.ts
 !/cli/

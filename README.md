@@ -17,7 +17,7 @@ Mandala keeps track of everything, so every thread of work keeps moving.
 [![Release](https://img.shields.io/badge/release-v1.0.0-4ccb85?style=flat-square)](https://github.com/maktub-ai/mandala-releases/releases)
 [![GitHub stars](https://img.shields.io/github/stars/maktub-ai/mandala?style=flat-square&color=7c86ff)](https://github.com/maktub-ai/mandala/stargazers)
 
-[Get started](#get-started) · [Runtimes](#runtimes) · [Documentation](#documentation) · [Architecture](#architecture) · [Download](https://github.com/maktub-ai/mandala-releases/releases)
+[Website](https://mandala.pub) · [Download](https://mandala.pub) · [Get started](#get-started) · [Documentation](#documentation) · [Discussions](https://github.com/maktub-ai/mandala/discussions)
 
 **English** · [简体中文](README.zh-CN.md)
 
@@ -101,7 +101,7 @@ Every package is reviewed before it is listed, and the app installs only the exa
 
 ## Get started
 
-**Desktop.** Download macOS (`.dmg`, Apple Silicon) or Windows (`.exe`) from [Releases](https://github.com/maktub-ai/mandala-releases/releases). Installers are not yet code-signed: on macOS, right-click Mandala.app and choose **Open** the first time; on Windows, choose **More info → Run anyway** in SmartScreen. Verify downloads against `SHA256SUMS.txt`.
+**Desktop.** Download macOS (`.dmg`, Apple Silicon) or Windows (`.exe`) from [mandala.pub](https://mandala.pub) or [Releases](https://github.com/maktub-ai/mandala-releases/releases). Installers are not yet code-signed: on macOS, right-click Mandala.app and choose **Open** the first time; on Windows, choose **More info → Run anyway** in SmartScreen. Verify downloads against `SHA256SUMS.txt`.
 
 **From source.** Requires Node.js 22.23.2 or later, and at least one supported CLI that already works in your terminal.
 
@@ -166,6 +166,8 @@ Gateway-backed setup, limitations and live tests: [Hermes Agent / OpenClaw](docs
 | Build the desktop app or migrate data | [Desktop](docs/desktop.md) |
 | Make a theme or language pack | [Market extensions](docs/market-ui-extensions.md) |
 | See what's planned | [Roadmap](docs/roadmap.md) |
+| Contribute | [Contributing](CONTRIBUTING.md) · [Code of conduct](CODE_OF_CONDUCT.md) |
+| Report a security problem | [Security policy](SECURITY.md) |
 | Develop, test and release | [Development](docs/development.md) · [Collaboration](docs/collaboration.md) |
 
 ## Architecture

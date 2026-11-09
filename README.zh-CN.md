@@ -17,7 +17,7 @@
 [![Release](https://img.shields.io/badge/release-v1.0.0-4ccb85?style=flat-square)](https://github.com/maktub-ai/mandala-releases/releases)
 [![GitHub stars](https://img.shields.io/github/stars/maktub-ai/mandala?style=flat-square&color=7c86ff)](https://github.com/maktub-ai/mandala/stargazers)
 
-[快速开始](#快速开始) · [执行端](#执行端) · [文档](#文档) · [架构](#架构) · [下载](https://github.com/maktub-ai/mandala-releases/releases)
+[官网](https://mandala.pub) · [下载](https://mandala.pub) · [快速开始](#快速开始) · [文档](#文档) · [讨论区](https://github.com/maktub-ai/mandala/discussions)
 
 [English](README.md) · **简体中文**
 
@@ -101,7 +101,7 @@ Mandala 的源码是公开的，围绕它的一切也是。主题、语言包和
 
 ## 快速开始
 
-**桌面版。** 从 [Releases](https://github.com/maktub-ai/mandala-releases/releases) 下载 macOS（`.dmg`，Apple Silicon）或 Windows（`.exe`）安装包。安装包暂未做代码签名：macOS 首次打开请右键 Mandala.app 选择「打开」；Windows 在 SmartScreen 提示中选择「更多信息 → 仍要运行」。下载后可用 `SHA256SUMS.txt` 校验。
+**桌面版。** 从 [官网](https://mandala.pub) 或 [Releases](https://github.com/maktub-ai/mandala-releases/releases) 下载 macOS（`.dmg`，Apple Silicon）或 Windows（`.exe`）安装包。安装包暂未做代码签名：macOS 首次打开请右键 Mandala.app 选择「打开」；Windows 在 SmartScreen 提示中选择「更多信息 → 仍要运行」。下载后可用 `SHA256SUMS.txt` 校验。
 
 **从源码运行。** 需要 Node.js 22.23.2 或更高版本，以及至少一个已在终端里能正常使用的受支持 CLI。
 
@@ -166,6 +166,8 @@ Gateway 配置、能力限制与真实验收步骤见 [Hermes Agent / OpenClaw](
 | 构建桌面版或迁移数据 | [桌面说明](docs/desktop.md) |
 | 制作主题或语言包 | [主题与语言包](docs/market-ui-extensions.md) |
 | 看看接下来的计划 | [路线图](docs/roadmap.md) |
+| 参与贡献 | [贡献指南](CONTRIBUTING.md) · [行为准则](CODE_OF_CONDUCT.md)（英文） |
+| 报告安全问题 | [安全策略](SECURITY.md)（英文） |
 | 开发、测试与发布 | [开发与运维说明](docs/development.md) · [协作与发布流程](docs/collaboration.md) |
 
 ## 架构

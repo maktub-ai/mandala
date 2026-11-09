@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/maktub-ai/mandala/discussions
+    about: Ask how to do something, share a workflow or discuss an idea.
+  - name: Report a security vulnerability
+    url: https://github.com/maktub-ai/mandala/security/advisories/new
+    about: Report privately. Please do not open a public issue.
+  - name: Themes, language packs and pets
+    url: https://github.com/maktub-ai/mandala-plugins
+    about: Submit or report problems with Market packages.

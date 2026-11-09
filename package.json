@@ -2,6 +2,14 @@
   "name": "mandala",
   "version": "1.0.0",
   "private": true,
+  "description": "The AI control room for multithreaded work.",
+  "homepage": "https://mandala.pub",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maktub-ai/mandala.git"
+  },
+  "bugs": "https://github.com/maktub-ai/mandala/issues",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "bin": {
     "mandala": "cli/mandala.mjs",
