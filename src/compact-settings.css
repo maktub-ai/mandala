@@ -68,6 +68,7 @@
 .product-frame .settings-compact .team-assignment-row { padding:10px 0; }
 @media(max-width:1024px) { .product-frame .settings-compact .team-library-layout { grid-template-columns:minmax(0,1fr); }.product-frame .settings-compact .team-skill-index { display:flex; flex-wrap:wrap; gap:8px; }.product-frame .settings-compact .team-skill-index > input { width:100%; } }
 .product-frame .settings-compact .desktop-cli-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.product-frame .settings-compact .desktop-update-notes { display:inline-flex; align-items:center; gap:4px; min-height:32px; padding:0 4px; }
 .product-frame .settings-compact .desktop-cli-command { display:block; overflow-wrap:anywhere; font-size:var(--type-meta); line-height:1.6; }
 .product-frame .settings-compact .runtime-connections .runtime-connection { padding:12px 0; margin:0; }
 .product-frame .settings-compact .runtime-connections .runtime-connection-status { margin:0; }

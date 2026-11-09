@@ -18,6 +18,11 @@ async function cliRequest(action) {
   if (!reply?.ok) throw Error(reply?.error ?? 'Desktop command registration unavailable');
   return reply.value;
 }
+async function updateRequest(action, value) {
+  const reply = await ipcRenderer.invoke('mandala:updates', value === undefined ? { action } : { action, value });
+  if (!reply?.ok) throw Error(reply?.error ?? 'Update check unavailable');
+  return reply.value;
+}
 contextBridge.exposeInMainWorld('mandalaDesktop', Object.freeze({ platform: process.platform, account: Object.freeze({partition:process.argv.find(v=>v.startsWith('--mandala-account-partition='))?.split('=')[1],restart:()=>ipcRenderer.invoke('mandala:account-restart')}), files: Object.freeze({
   directoryPath: file => {
     const path = webUtils.getPathForFile(file);
@@ -35,11 +40,17 @@ contextBridge.exposeInMainWorld('mandalaDesktop', Object.freeze({ platform: proc
   settle: () => ipcRenderer.send('mandala:pet-input', { action: 'settle' }),
   onVisibility: listener => subscribe('mandala:pet-visibility', listener, value => typeof value === 'boolean'),
   onNavigate: listener => subscribe('mandala:navigate', listener, value => typeof value === 'string' && value.startsWith('/') && !value.startsWith('//')),
+}), updates: Object.freeze({
+  state: () => updateRequest('state'),
+  check: () => updateRequest('check'),
+  download: () => updateRequest('download'),
+  setAutoCheck: value => updateRequest('auto', value === true),
+  onChange: listener => subscribe('mandala:update-state', listener, value => !!value && typeof value === 'object' && typeof value.status === 'string'),
 }), preferences: Object.freeze({
   read: () => preferenceRequest('mandala:preferences', { action: 'read' }),
   write: (key, value) => preferenceRequest('mandala:preferences', { action: 'write', key, value }),
 }) }));
-// Only selected-file paths, bounded command registration and allowlisted UI preferences are callable; opening external links still requires an actual user click.
+// Only selected-file paths, bounded command registration, update checks and allowlisted UI preferences are callable; opening external links still requires an actual user click.
 window.addEventListener('click', event => {
   if (!event.isTrusted || event.button !== 0 || !(event.target instanceof Element)) return;
   const link = event.target.closest('a[href]');

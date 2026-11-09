@@ -9,6 +9,7 @@ import { useLanguage, type Message } from './i18n';
 import Icon from './ui/Icon';
 import { shortcutLabel, shortcutAria } from './shortcuts';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from './components/ui/dropdown-menu';
+import { useDesktopUpdate } from './desktopUpdates';
 
 export type SidebarAccount = { username: string; status: string; avatar?: string; onOpen: () => void };
 type Area = 'usage' | 'chat' | 'tasks' | 'projects' | 'agents' | 'assets' | 'settings' | 'mana' | 'memory' | 'market' | 'library' | 'schedules';
@@ -36,6 +37,8 @@ export default function AppNavigation({ active, disabled = false, library, modul
   const accountDescription = useId();
   const current = navigationGroup(active);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [updateState] = useDesktopUpdate();
+  const update = updateState?.status === 'available' ? updateState.update : null;
   const items = orderedSidebarItems(moduleOrder);
   const pinned = items.filter(item => modulePinned(item, modulePins));
   const unpinned = items.filter(item => item.id !== 'settings' && !modulePinned(item, modulePins));
@@ -52,12 +55,13 @@ export default function AppNavigation({ active, disabled = false, library, modul
       <div className="sidebar-primary-navigation"><a className="sidebar-destination sidebar-mandala" href="/mandala" aria-current={mandala?.active?'page':undefined} aria-disabled={disabled||undefined} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();if(!disabled)onOpenPath('/mandala');}}><BrandMark/><span>{mandala?.name??'Mandala'}</span></a>{pinned.map(link)}</div>
       <div id="navigation-chat" className="permanent-conversations"><div className="conversation-heading"><h2>{t('对话')}</h2></div>{library}</div>
       <div className="sidebar-bottom-navigation"><div className="sidebar-account-row"><DropdownMenu open={accountOpen} onOpenChange={setAccountOpen}><DropdownMenuTrigger asChild>
-        <Button type="button" className="sidebar-account" aria-label={t('用户菜单')} aria-describedby={accountDescription} disabled={disabled} title={[account?.username, account?.status ?? t('本机')].filter(Boolean).join(' · ')} aria-current={hiddenCurrent ? 'page' : undefined}><AccountAvatar className="sidebar-account-avatar" name={account?.username ?? 'Mandala'} source={account?.avatar} /><span id={accountDescription}><strong title={account?.username ?? 'Mandala'}>{account?.username ?? 'Mandala'}</strong><small title={account?.status ?? t('本机')}>{account?.status ?? t('本机')}</small></span></Button>
+        <Button type="button" className="sidebar-account" aria-label={t('用户菜单') + (update ? ' · ' + text(`有新版本 ${update.version}`, `Update ${update.version} available`) : '')} aria-describedby={accountDescription} disabled={disabled} title={[account?.username, account?.status ?? t('本机')].filter(Boolean).join(' · ')} aria-current={hiddenCurrent ? 'page' : undefined}><AccountAvatar className="sidebar-account-avatar" name={account?.username ?? 'Mandala'} source={account?.avatar} />{update && <i className="sidebar-update-dot" aria-hidden="true"/>}<span id={accountDescription}><strong title={account?.username ?? 'Mandala'}>{account?.username ?? 'Mandala'}</strong><small title={account?.status ?? t('本机')}>{account?.status ?? t('本机')}</small></span></Button>
       </DropdownMenuTrigger><DropdownMenuContent className="sidebar-account-menu" side="top" align="start" aria-label={t('用户菜单')}>
         {/* Who you are, then where you can go: the one separator divides identity from destinations. */}
         {account && <><DropdownMenuItem className="sidebar-account-identity" onSelect={() => account.onOpen()} aria-label={t('账号') + ' · ' + account.username}><AccountAvatar className="sidebar-account-avatar" name={account.username} source={account.avatar} /><span><strong>{account.username}</strong><small>{account.status}</small></span></DropdownMenuItem><DropdownMenuSeparator/></>}
         {unpinned.map(item => <DropdownMenuItem key={item.id} asChild disabled={disabled}>{link(item)}</DropdownMenuItem>)}
         <DropdownMenuItem asChild>{link(items.find(item => item.id === 'settings')!)}</DropdownMenuItem>
+        {update && <><DropdownMenuSeparator/><DropdownMenuItem className="sidebar-update-item" disabled={disabled} onSelect={() => onOpenPath('/settings/general')}><Icon name="download" size={16}/><span>{text(`更新到 ${update.version}`, `Update to ${update.version}`)}</span></DropdownMenuItem></>}
       </DropdownMenuContent></DropdownMenu><TaskNotificationInbox disabled={disabled}/></div></div>
     </nav>
   </>;

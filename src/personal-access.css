@@ -114,3 +114,6 @@
 .sign-in-waiting > button { padding-inline:0; }
 .sign-in-card .sign-in-claim { display:flex; align-items:flex-start; }
 .sign-in-card .sign-in-claim > input { width:16px; height:16px; min-height:0; flex:none; margin-top:2px; }
+.product-frame .sidebar-account { position:relative; }
+.sidebar-update-dot { position:absolute; left:30px; top:6px; width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 2px var(--sidebar, var(--surface)); }
+.sidebar-update-item { color:var(--accent); }

@@ -1,8 +1,8 @@
-const { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, dialog, shell, session, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, Menu, Tray, Notification, nativeImage, nativeTheme, dialog, shell, session, ipcMain, screen } = require('electron');
 const { join, isAbsolute } = require('node:path');
 const { statSync, readFileSync, writeFileSync } = require('node:fs');
 const { resolveDesktopHome, desktopEnvironment, loginShellPath, prepareDesktopHome, connectOrStartService, stopBackgroundService, allowedNavigation, readDesktopAppearance, writeDesktopAppearance, readDesktopPreferences, writeDesktopPreference, desktopCliStatus, installDesktopCli } = require('./runtime.cjs');
-const { createUpdateChecker } = require('./updates.cjs');
+const { createUpdateController } = require('./updates.cjs');
 let window, petWindow, petPosition, tray, service, confirming = false, stopping = false, finished = false, discardUnsaved = false;
 let homeError;
 const home = resolveDesktopHome();
@@ -214,12 +214,30 @@ async function start() {
     if (event.sender !== window.webContents || !allowedNavigation(event.senderFrame?.url ?? '', service.origin) || typeof value !== 'string') return;
     try { const url = new URL(value); if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) void shell.openExternal(url.href); } catch {}
   });
-  const checkUpdates = createUpdateChecker({ version: app.getVersion(), platform: process.platform, arch: process.arch, isActive: () => !stopping && !finished, showMessage: options => dialog.showMessageBox(options), openExternal: url => shell.openExternal(url) });
+  // Update state is shared by the menu, the settings page and the background schedule.
+  const updateStateFile = () => join(app.getPath('userData'), 'update-state.json');
+  const showSettings = () => { window.show(); window.focus(); window.webContents.send('mandala:navigate', '/settings/general'); };
+  const updates = createUpdateController({ version: app.getVersion(), platform: process.platform, arch: process.arch,
+    store: { read: () => JSON.parse(readFileSync(updateStateFile(), 'utf8')), write: value => writeFileSync(updateStateFile(), JSON.stringify(value), { mode: 0o600 }) },
+    isActive: () => !stopping && !finished, showMessage: options => dialog.showMessageBox(options), openExternal: url => shell.openExternal(url),
+    onChange: value => { if (window && !window.isDestroyed()) window.webContents.send('mandala:update-state', value); },
+    notify: update => { if (!Notification.isSupported()) return; const note = new Notification({ title: 'Mandala update available', body: `Mandala ${update.version} is ready to download. Open Settings to see what changed.` }); note.on('click', showSettings); note.show(); } });
+  ipcMain.handle('mandala:updates', async (event, request) => {
+    if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || !allowedNavigation(event.senderFrame?.url ?? '', service.origin)) return { ok: false, error: 'Untrusted update request' };
+    try {
+      if (!request || typeof request !== 'object' || Array.isArray(request)) throw Error('Invalid update request');
+      if (request.action === 'state') return { ok: true, value: updates.state() };
+      if (request.action === 'check') return { ok: true, value: await updates.check('settings') };
+      if (request.action === 'download') { await updates.download(); return { ok: true, value: updates.state() }; }
+      if (request.action === 'auto' && typeof request.value === 'boolean') return { ok: true, value: updates.setAutoCheck(request.value) };
+      throw Error('Invalid update request');
+    } catch (error) { return { ok: false, error: error.message || 'Could not check for updates' }; }
+  });
   const menu = [
     { label: 'Mandala', submenu: [
       { label: 'Show Mandala', click: () => { window.show(); window.focus(); } },
       { label: 'Open data directory', click: () => shell.openPath(profileHome) },
-      { label: 'Check for updates…', click: () => { void checkUpdates(true); } },
+      { label: 'Check for updates…', click: () => { void updates.check('menu'); } },
       { label: 'About Mandala', click: () => dialog.showMessageBox({ title: 'Mandala', message: `Mandala ${app.getVersion()}`, detail: 'Local service and native CLI authentication stay on this computer. This preview uses manual installer upgrades.' }) },
       { label: 'Stop runtime and quit…', click: stopRuntime },
       { type: 'separator' }, { label: 'Quit Mandala', accelerator: 'CmdOrCtrl+Q', click: quit }
@@ -234,9 +252,7 @@ async function start() {
   tray.setContextMenu(Menu.buildFromTemplate(menu[0].submenu)); tray.on('double-click', () => window.show());
   await window.loadURL(service.origin); if (!stopping && !finished) window.show();
   if (app.isPackaged && !stopping && !finished) {
-    const startupCheck = setTimeout(() => { void checkUpdates(); }, 30000);
-    const periodicCheck = setInterval(() => { void checkUpdates(); }, 6 * 60 * 60 * 1000);
-    startupCheck.unref(); periodicCheck.unref();
-    app.once('will-quit', () => { clearTimeout(startupCheck); clearInterval(periodicCheck); });
+    const stopUpdateChecks = updates.schedule({ setTimeout, setInterval, clearTimeout, clearInterval });
+    app.once('will-quit', stopUpdateChecks);
   }
 }

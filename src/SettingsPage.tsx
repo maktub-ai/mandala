@@ -2,6 +2,7 @@ import {isSystemAgent} from '../shared/chat-context';
 import {ObjectHeader,ObjectGroup,ObjectIdentityFields} from './ObjectExperience';
 import ProjectNavigation from './ProjectNavigation';
 import DesktopCliSettings from './DesktopCliSettings';
+import DesktopUpdateSettings from './DesktopUpdateSettings';
 import VoiceSettings from './VoiceSettings';
 import ExecutionMachinesSettings from './ExecutionMachinesSettings';
 import { PageHeader, DetailSection } from './ui/WorkspacePage';
@@ -226,6 +227,7 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
         {section === "general" && <ThemeSettings/>}
         {section === "general" && <VoiceSettings/>}
         {section === "general" && <DesktopCliSettings onBusyChange={setDesktopCliBusy}/>}
+        {section === "general" && <DesktopUpdateSettings/>}
         {section === "general" && <DetailSection title={localize('快捷键', 'Keyboard shortcuts')}><p className="field-hint">{localize('查看对话和导航的快捷键。', 'View shortcuts for chats and navigation.')}</p><div className="settings-keyboard-actions"><Button type="button" onClick={onPalette}>{localize('打开命令面板', 'Open command palette')}<kbd className="shortcut-key" aria-hidden="true">{shortcutLabel('palette')}</kbd></Button><Button type="button" onClick={onShortcuts}>{localize('快捷键', 'Keyboard shortcuts')}</Button></div></DetailSection>}
         {section === "general" && <DetailSection title={localize('新手指引', 'Getting started')}><p className="field-hint">{localize('重新检测本机 CLI，并按首次使用的步骤走一遍。不会改动已有对话、Agent 和项目。', 'Check the CLIs on this computer again and walk through first-use setup. Existing chats, Agents and Projects stay as they are.')}</p><div className="settings-keyboard-actions"><Button type="button" onClick={() => onOpenPath('/?welcome=1')}>{localize('打开新手指引', 'Open getting started')}</Button></div></DetailSection>}
         {section === "general" && <section className="settings-card" aria-label={t("回答风格")}>
