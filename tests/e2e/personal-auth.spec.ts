@@ -32,7 +32,7 @@ test('real local and account services complete phone request, computer approval,
  const store=openStore(home),conversation=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null});store.appendEvent(conversation.id,'user',{text:'Retained personal conversation'});store.appendEvent(conversation.id,'text',{text:'Local history remains on computer'});
  const manager=createSessionManager(store,async()=>(await readConfig(home)).config),local=createHttpServer({home,store,manager,requireIdentity:true}),control=createControlServer({home:controlHome,dist:resolve('dist')});
  local.listen(0,'127.0.0.1');control.listen(0,'127.0.0.1');await Promise.all([once(local,'listening'),once(control,'listening')]);
- const url=(server:typeof local)=>`http://127.0.0.1:${(server.address() as {port:number}).port}`,computerContext=await browser.newContext(),computer=await computerContext.newPage();
+ const url=(server:Pick<typeof local,'address'>)=>`http://127.0.0.1:${(server.address() as {port:number}).port}`,computerContext=await browser.newContext(),computer=await computerContext.newPage();
  const signIn=async(p:typeof page,origin:string)=>{await p.addInitScript(()=>localStorage.setItem('mana-language','zh-CN'));await p.goto(origin);await p.getByLabel('账号',{exact:true}).fill('personal');await p.getByLabel('密码',{exact:true}).fill(password);await p.getByRole('button',{name:'登录',exact:true}).click();};
  try{
   await signIn(computer,url(local));await openAccountConnection(computer);

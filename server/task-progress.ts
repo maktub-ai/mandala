@@ -89,5 +89,5 @@ export function createTaskProgress({store,loadConfig,tasks,generate,settingsRevi
   })();
   jobs.set(captured.sourceEventId,job);return job.promise;
  }
- return {evaluate,status:(id:string)=>[...jobs.values()].filter(job=>job.conversationId===id).map(()=>({kind:'taskProgress' as const,started:true})),close(){if(closed)return;closed=true;for(const [source,job]of jobs){emit(job.conversationId,source,'failed',{code:'cancelled',stage:'generation'});job.controller.abort(new Error('cancelled'));}}};
+ return {evaluate,hasActiveWork:()=>jobs.size>0,status:(id:string)=>[...jobs.values()].filter(job=>job.conversationId===id).map(()=>({kind:'taskProgress' as const,started:true})),close(){if(closed)return;closed=true;for(const [source,job]of jobs){emit(job.conversationId,source,'failed',{code:'cancelled',stage:'generation'});job.controller.abort(new Error('cancelled'));}}};
 }

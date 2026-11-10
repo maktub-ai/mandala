@@ -17,6 +17,7 @@ export function createTaskMonitor({store,listRuns,inspect,now=()=>Date.now()}:{s
     });
    }finally{pending.delete(run.id);}
   }},
+  hasActiveWork:()=>pending.size>0,
   close(){closed=true;},
  };
 }

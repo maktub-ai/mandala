@@ -226,6 +226,7 @@ export function createMemoryRuntime({home,store,loadConfig,generate=nativeGenera
   reading:async(_principal?:Principal)=>{const settings=await getSettings();return (['request','session'] as const).filter(kind=>settings[kind].read);},
   initialize:async()=>{await migrateMemory(home,store,memory);memory.repairLegacyContexts(root);memory.retireUnscopedProfiles(root);},
   start(){if(timer||closed)return;const tick=()=>{const now=Date.now();if(now>=nextScan){nextScan=now+5000;void scan().then(drain).catch(()=>{});}else void drain().catch(()=>{});if(now>=nextIndexRefresh)void refreshVectors().catch(()=>{nextIndexRefresh=Date.now()+60000;});};tick();timer=setInterval(tick,1000);timer.unref();},
+  hasActiveWork:()=>!!processing||nativeGenerations.size>0,
   async close(){closed=true;if(timer)clearInterval(timer);lifetime.abort();await scanning;await processing;await indexing;await services.recall.close();await Promise.allSettled([...nativeGenerations]);},
  };
 }

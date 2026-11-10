@@ -227,6 +227,7 @@ export function createFileMaintenance({home,store,loadConfig,memoryRuntime,gener
   return {version,authorize,assertCommit};
  }
  return {status,configure,reconcile,drain,updateGate,
+  hasActiveWork:()=>!!processing,
   start(){if(timer||closed)return;const tick=()=>{void reconcile().then(drain).catch(()=>{});};tick();timer=setInterval(tick,1000);timer.unref();},
   async close(){closed=true;if(timer)clearInterval(timer);lifetime.abort();await scanning;await processing;},
  };

@@ -386,6 +386,7 @@ export function createKnowledgeBase({home,store,loadConfig,generate=nativeGenera
  return {bindPrincipal,command,create,configure,addSource,removeSource,refresh,get,readPage,search,editPage,versions,restore,reconcile,drain,
   list(p:Principal){return db.prepare('SELECT id FROM wiki_bases').all().flatMap(row=>{try{return [get(p,row.id as string)];}catch{return [];}});},
   start(){if(timer||closed)return;const tick=()=>{void reconcile().then(drain).catch(()=>{});};tick();timer=setInterval(tick,1000);timer.unref();},
+  hasActiveWork:()=>!!processing,
   async close(){closed=true;if(timer)clearInterval(timer);lifetime.abort();await scanning;await processing;},
  };
 }

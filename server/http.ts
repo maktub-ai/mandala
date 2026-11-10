@@ -116,7 +116,7 @@ export function createHttpServer({
   setupToken?: string;
   taskDraftGenerate?: TaskDraftGenerator;
   telegram?: ReturnType<typeof createTelegramService>;
-}): Server {
+}): Server & { hasActiveWork(): boolean } {
   // Last connection check per SSH target, kept for this service's lifetime so settings can show a status without re-probing.
   const machineChecks = new Map<string,{at:string;ok:boolean;probe?:SshProbe;error?:string}>();
   const access = requireIdentity ? createLocalAccess(home, store, { setupToken }) : undefined;
@@ -171,7 +171,8 @@ export function createHttpServer({
   const dist = fileURLToPath(new URL("../dist", import.meta.url));
   const [nodeMajor,nodeMinor,nodePatch]=process.versions.node.split('.').map(Number);
   const runtime={nodeVersion:process.versions.node,nodeSupported:nodeMajor>22||(nodeMajor===22&&(nodeMinor>23||(nodeMinor===23&&nodePatch>=2))),minimumNodeVersion:'22.23.2'};
-  const server = createServer(async (req, res) => {
+  const activeRequests = new Set<IncomingMessage>();
+  async function handleRequest(req: IncomingMessage, res: ServerResponse) {
     try {
       const host = req.headers.host ?? "";
       if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host))
@@ -198,7 +199,7 @@ export function createHttpServer({
           access.track(req,res);
         }
       } else if (path === '/auth/session') return json(res, 200, { mode: 'fixture', user: null });
-      if (path === '/api/remote/transport') { if (remoteTransport) return await remoteTransport(req,res); return json(res,403,{error:'Remote access unavailable'}); }
+      if (path === '/api/remote/transport') { if (remoteTransport) return await remoteTransport(req, res, () => activeRequests.delete(req)); return json(res,403,{error:'Remote access unavailable'}); }
       if(path==='/api/skill-learning'&&method==='GET')return json(res,200,skillManagement.learningStatus());
       const skillRoute=path.match(/^\/api\/skills\/([A-Za-z0-9_-]+)(?:\/suggestions\/([A-Za-z0-9-]+)\/(accept|reject))?$/);
       if(skillRoute){
@@ -966,6 +967,11 @@ export function createHttpServer({
       json(res, status, { ...(e instanceof DomainError &&
         (req.url === '/api/cli/invoke' || (req.headers['x-mandala-cli'] ?? req.headers['x-openmana-cli']) === '1') ? {code:e.code} : {}), error: message });
     }
+  }
+  const server = createServer(async (req, res) => {
+    activeRequests.add(req);
+    try { await handleRequest(req, res); }
+    finally { activeRequests.delete(req); }
   });
   if (access) {
     if (localOrigin) access.start(localOrigin);
@@ -975,5 +981,5 @@ export function createHttpServer({
   if (!terminals) server.on('close', () => terminalService.close());
   server.on('listening', () => telegram.start());
   server.on('close', () => {telegram.stop();voice.close();});
-  return server;
+  return Object.assign(server, { hasActiveWork: () => activeRequests.size > 0 || voice.hasActiveWork() });
 }

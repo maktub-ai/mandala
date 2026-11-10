@@ -80,6 +80,7 @@ import { isSystemAgent, assertExecutionAvailable, conversationContext, hostConte
 import { join, isAbsolute, resolve } from "node:path";
 import { mkdirSync, realpathSync } from "node:fs";
 import { stat, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { setTimeout as delay } from 'node:timers/promises';
 import { homedir, tmpdir } from "node:os";
 import { enabledRuntimes } from "../shared/runtimes";
 import { capabilitySignature } from "./capabilities";
@@ -159,6 +160,8 @@ export interface SessionManager {
   getApprovals(id: string): Approval[];
   conversationApproval(id:string):Promise<{granted:boolean}>;
   revokeConversationApproval(id:string):void;
+  hasActiveWork(): boolean;
+  checkNativeBackgroundWork(): Promise<'idle' | 'busy' | 'unknown'>;
   close(): Promise<void>;
 }
 export function createSessionManager(
@@ -2469,6 +2472,48 @@ export function createSessionManager(
     getApprovals(id) {
       chat(id);
       return [...(live.get(id)?.approvals.values() ?? []),...asyncQuestions(store,id)];
+    },
+    hasActiveWork() {
+      const db = store.database;
+      return !!(branching.size || queuePumps.size || queueStarts.size || backgroundSends.size || initializations.size ||
+        continuity.hasActiveWork() || progressMonitor.hasActiveWork() || skillLearning?.hasActiveWork() ||
+        fileMaintenance.hasActiveWork() || knowledgeBase.hasActiveWork() || codeGraph.hasActiveWork() ||
+        [...live.values()].some(runtime => runtime.preparing || runtime.invocation || runtime.stopping || runtime.approvals.size) ||
+        db.prepare("SELECT 1 FROM task_runs WHERE state IN ('queued','starting','running','approval','unknown') LIMIT 1").get() ||
+        db.prepare("SELECT 1 FROM task_user_inputs WHERE state IN ('queued','running','unknown') LIMIT 1").get() ||
+        db.prepare("SELECT 1 FROM task_directory_claims WHERE submitted=1 LIMIT 1").get() ||
+        db.prepare("SELECT 1 FROM task_native_uncertainty LIMIT 1").get() ||
+        db.prepare("SELECT 1 FROM conversations WHERE json_extract(data,'$.status') IN ('running','approval') LIMIT 1").get());
+    },
+    async checkNativeBackgroundWork() {
+      const threads = [...live].flatMap(([id, runtime]) => {
+        if (!runtime.client) return [];
+        const { cli, nativeId } = chat(id);
+        return [{ id, client: runtime.client, cli, nativeId }];
+      });
+      if (!threads.length) return 'idle';
+      const controller = new AbortController();
+      const deadline = delay(3000, 'unknown' as const, { signal: controller.signal, ref: false });
+      try {
+        const checks = await Promise.all(threads.map(async ({ client, cli, nativeId }) => {
+          if (!nativeId) return 'unknown';
+          const check = async () => {
+            try {
+              if (client.assertReloadable) { await client.assertReloadable(nativeId); return 'idle'; }
+              if (cli === 'omp' && client.inspectContext) return (await client.inspectContext(nativeId)).settled ? 'idle' : 'busy';
+            } catch (error) {
+              if (error instanceof DomainError && error.code === 'native_background_active') return 'busy';
+            }
+            return 'unknown';
+          };
+          return Promise.race([check(), deadline]);
+        }));
+        if (checks.includes('busy')) return 'busy';
+        if (checks.includes('unknown')) return 'unknown';
+        const changed = [...live.values()].filter(runtime => runtime.client).length !== threads.length ||
+          threads.some(({ id, client, nativeId }) => live.get(id)?.client !== client || chat(id).nativeId !== nativeId);
+        return changed ? 'busy' : 'idle';
+      } finally { controller.abort(); }
     },
     close() {
       if(closing)return closing;

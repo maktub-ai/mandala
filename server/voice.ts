@@ -98,5 +98,7 @@ export function createVoiceService(home:string,options:{fetcher?:typeof fetch;lo
    combined.throwIfAborted();return text.trim();
   }finally{active=undefined;if(temporary)await rm(temporary,{recursive:true,force:true});}
  }
- return {status,configure,download,remove,transcribe,close(){active?.abort();for(const state of downloads.values())state.controller.abort();}};
+ return {status,configure,download,remove,transcribe,
+  hasActiveWork:()=>!!active||[...downloads.values()].some(state=>state.downloading),
+  close(){active?.abort();for(const state of downloads.values())state.controller.abort();}};
 }

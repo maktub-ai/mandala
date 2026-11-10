@@ -1,5 +1,5 @@
 import { claimServiceHome } from './service-home-lock';
-import { claimServiceRecord, handleServiceControl, removeServiceRecord } from '../desktop/service-discovery';
+import { claimServiceRecord, handleServiceControl, removeServiceRecord, type IdleStop } from '../desktop/service-discovery';
 import { productEnv, productHome } from "../cli/product-env.mjs";
 import { createMemoryRuntime } from "./memory-runtime";
 import { createServer } from "node:http";
@@ -46,14 +46,19 @@ await readConfig(home);
 await migrateWorkspace(home, "apply");
 const store = openStore(home);
 const memoryRuntime = createMemoryRuntime({home,store,loadConfig:async()=>(await readConfig(home)).config,authorizeConversationRead:(_p,id)=>manager.authorizeConversationRead(id)});
+let systemWork = 0;
+const trackSystemWork = (work: Promise<void>) => {
+  systemWork++;
+  void work.catch(() => {}).finally(() => { systemWork--; });
+};
 const manager = createSessionManager(
   store,
   async () => (await readConfig(home)).config,
   undefined,
   undefined,
   home,
-  (id, round) => { void systemTasks.onSettled(id, round).catch(() => {}); },
-  id => { void systemTasks.onMessage(id).catch(() => {}); },
+  (id, round) => trackSystemWork(systemTasks.onSettled(id, round)),
+  id => trackSystemWork(systemTasks.onMessage(id)),
   memoryRuntime,
 );
  await memoryRuntime.initialize();
@@ -84,11 +89,32 @@ const ready = createHttpServer({
 });
 server.on("close", () => ready.emit("close"));
 server.removeAllListeners("request");
+let stopping = false, checkingIdle = false;
+const hasActiveWork = () => systemWork || systemTasks.hasActiveWork() || terminalService.running('').length ||
+  automations.hasActiveWork() || telegram.hasActiveWork() || memoryRuntime.hasActiveWork() || ready.hasActiveWork() || manager.hasActiveWork();
+const stopIfIdle = async (): Promise<IdleStop> => {
+  if (stopping) return 'accepted';
+  if (checkingIdle || hasActiveWork()) return 'busy';
+  checkingIdle = true;
+  try {
+    const native = await manager.checkNativeBackgroundWork();
+    if (hasActiveWork()) return 'busy';
+    if (native !== 'idle') return native;
+    // Close admission and stop the internal producers in this turn, before reporting acceptance.
+    void stop();
+    return 'accepted';
+  } finally { checkingIdle = false; }
+};
+const workerControl = process.env.MANDALA_ACCOUNT_WORKER_KEY ? { stopIfIdle } : undefined;
 server.on("request", (req, res) => {
-  if (serviceRecord && handleServiceControl(serviceRecord, req, res, () => { void stop(); })) return;
+  if (serviceRecord && handleServiceControl(serviceRecord, req, res, () => { void stop(); }, workerControl)) return;
+  if (stopping || checkingIdle) {
+    res.writeHead(503, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Runtime upgrade in progress; retry shortly.' }));
+    return;
+  }
   ready.emit("request", req, res);
 });
-let stopping = false;
 const stop = async () => {
   if (stopping) return;
   stopping = true;
@@ -96,10 +122,7 @@ const stop = async () => {
   terminalService.close();
   automations.close();
   systemTasks.close();
-  await manager.fileMaintenance.close();
-  await manager.knowledgeBase.close();
-  await manager.close();
-  await memoryRuntime.close();
+  await Promise.all([manager.close(), memoryRuntime.close()]);
   server.closeAllConnections();
   server.close(() => {
     store.close();

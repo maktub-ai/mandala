@@ -12,7 +12,7 @@ export function createRemoteTransport(options: {
   dispatch(req: IncomingMessage, inner: RemoteRequest, signal: AbortSignal): Promise<Response>;
 }) {
   const replay = new ReplayWindow(4096, options.replayFile && existsSync(options.replayFile) ? JSON.parse(readFileSync(options.replayFile, 'utf8')) : []); let active = 0;
-  return async (req: IncomingMessage, res: ServerResponse) => {
+  return async (req: IncomingMessage, res: ServerResponse, onReadStream?: () => void) => {
     const peer = options.peer(req);
     if (!peer || req.method !== 'POST') { res.writeHead(403); res.end(); return; }
     if (active >= 32) { res.writeHead(429); res.end(); return; }
@@ -40,6 +40,7 @@ export function createRemoteTransport(options: {
         if (options.peer(req) !== peer || controller.signal.aborted) throw new Error('Remote access revoked');
         response = await options.dispatch(req, { method: value.method, path: value.path, headers, body }, controller.signal);
       }
+      if (value.method === 'GET' && response.headers.get('content-type')?.startsWith('text/event-stream')) onReadStream?.();
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store' });
       let seq = 0;
       async function send(record: Record<string, unknown>) {

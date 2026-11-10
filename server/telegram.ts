@@ -534,6 +534,7 @@ export function createTelegramService({home,store,workspace,fetch:fetcher=fetch,
       }
     }
   };
+  let processingUpdate = false;
   const tick = async () => {
     const signal=epoch.signal, secret=token;
     if (!secret||stopped||conflict) return;
@@ -543,6 +544,7 @@ export function createTelegramService({home,store,workspace,fetch:fetcher=fetch,
       const offset=saved.lastUpdateAt!==undefined&&startedAt-saved.lastUpdateAt>6*24*60*60_000?undefined:saved.offset;
       const updates=await api.call<TelegramUpdate[]>('getUpdates',{offset,timeout:backlog?0:8,limit:100,allowed_updates:['message','callback_query']},20_000);
       assertActive();
+      processingUpdate = true;
       if (!Array.isArray(updates)) throw new TelegramApiError(0);
       const delayed=now()-startedAt>25_000;
       if (delayed) {catchingUp=true;reconnecting=true;}
@@ -579,7 +581,7 @@ export function createTelegramService({home,store,workspace,fetch:fetcher=fetch,
       if (stopped||signal.aborted) return;
       recordFailure(error);
       retryAfter=Math.min(60_000,Math.max(error instanceof TelegramApiError?error.retryAfter??0:0,retryAfter?retryAfter*2:1000));
-    }
+    } finally { processingUpdate = false; }
   };
   const poll = () => {
     if (polling) return polling;
@@ -605,6 +607,7 @@ export function createTelegramService({home,store,workspace,fetch:fetcher=fetch,
   };
   return {
     status,poll,taskStatus,
+    hasActiveWork:()=>processingUpdate||!!configuring,
     start(){if(!started&&!stopped){started=true;void loop();}},
     stop(){stopped=true;configuring?.abort();invalidate();},
     async configure(value:unknown) {

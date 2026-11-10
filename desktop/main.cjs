@@ -1,7 +1,7 @@
 const { app, BrowserWindow, Menu, Tray, Notification, nativeImage, nativeTheme, dialog, shell, session, ipcMain, screen } = require('electron');
 const { join, isAbsolute } = require('node:path');
 const { statSync, readFileSync, writeFileSync } = require('node:fs');
-const { resolveDesktopHome, desktopEnvironment, loginShellPath, prepareDesktopHome, connectOrStartService, stopBackgroundService, allowedNavigation, readDesktopAppearance, writeDesktopAppearance, readDesktopPreferences, writeDesktopPreference, desktopCliStatus, installDesktopCli } = require('./runtime.cjs');
+const { resolveDesktopHome, desktopEnvironment, loginShellPath, prepareDesktopHome, connectOrStartService, stopBackgroundService, readRuntimeBuild, RuntimeShutdownTimeout, allowedNavigation, readDesktopAppearance, writeDesktopAppearance, readDesktopPreferences, writeDesktopPreference, desktopCliStatus, installDesktopCli } = require('./runtime.cjs');
 const { createUpdateController } = require('./updates.cjs');
 let window, petWindow, petPosition, tray, service, confirming = false, stopping = false, finished = false, discardUnsaved = false;
 let homeError;
@@ -44,14 +44,65 @@ async function stopRuntime() {
   stopping = false; quit();
 }
 
+function upgradeCopy() {
+  return app.getLocale?.().startsWith('zh') ? {
+    pending: '后台升级待完成',
+    unknown: '无法确认旧版后台是否空闲。切换会停止当前的本地任务和终端。',
+    busy: '后台仍有任务、终端或其他工作。可以继续使用，等工作结束后重新打开 Mandala 完成升级。',
+    timeout: '旧后台仍在退出。请稍候重试。',
+    later: '稍后', switch: '切换到新版', keepWorking: '继续使用', retry: '重试', quit: '退出',
+  } : {
+    pending: 'Runtime upgrade pending',
+    unknown: 'Mandala cannot confirm that the previous runtime is idle. Switching stops its local tasks and terminals.',
+    busy: 'The previous runtime still has active work. Keep working and reopen Mandala after it finishes to complete the upgrade.',
+    timeout: 'The previous runtime is still shutting down. Wait a moment, then try again.',
+    later: 'Later', switch: 'Switch to New Version', keepWorking: 'Keep Working', retry: 'Try Again', quit: 'Quit',
+  };
+}
+
+async function connectDesktopRuntime(options, copy) {
+  let confirmedSecret;
+  const confirmLegacy = async previous => {
+    if (previous.record.secret === confirmedSecret) return true;
+    const { response } = await dialog.showMessageBox({
+      type: 'warning', message: copy.pending, detail: copy.unknown,
+      buttons: [copy.later, copy.switch], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    if (response !== 1 || finished) return false;
+    confirmedSecret = previous.record.secret;
+    return true;
+  };
+  while (!finished) {
+    try {
+      const connected = await connectOrStartService({ ...options, confirmLegacy });
+      if (finished || connected.upgradePending !== 'busy') return connected;
+      const { response } = await dialog.showMessageBox({
+        type: 'info', message: copy.pending, detail: copy.busy,
+        buttons: [copy.keepWorking, copy.retry], defaultId: 0, cancelId: 0, noLink: true,
+      });
+      if (response !== 1) return connected;
+    } catch (error) {
+      if (!(error instanceof RuntimeShutdownTimeout) || finished) throw error;
+      const { response } = await dialog.showMessageBox({
+        type: 'warning', message: copy.pending, detail: copy.timeout,
+        buttons: [copy.quit, copy.retry], defaultId: 1, cancelId: 0, noLink: true,
+      });
+      if (response !== 1) { quit(); return; }
+    }
+  }
+}
+
 async function start() {
   if (stopping || finished) return;
   if (homeError) throw homeError;
   const runtime = app.isPackaged ? join(process.resourcesPath, 'runtime') : join(__dirname, '..', '.runtime');
   const env = desktopEnvironment({ home, runtime, loginPath: loginShellPath() });
   const gatewayHome=join(home,'account-gateway'); prepareDesktopHome(gatewayHome);
-  service = await connectOrStartService({ home:gatewayHome, node: join(runtime, 'bin', process.platform === 'win32' ? 'node.exe' : 'node'), entry: join(runtime, 'server', 'account-desktop-main.mjs'), cwd: runtime, env });
-  if (stopping || finished) return;
+  const build = readRuntimeBuild(runtime);
+  if (app.isPackaged && !build) throw Error('The installed Mandala build information is missing or invalid.');
+  const upgrade = upgradeCopy();
+  service = await connectDesktopRuntime({ home:gatewayHome, build, node: join(runtime, 'bin', process.platform === 'win32' ? 'node.exe' : 'node'), entry: join(runtime, 'server', 'account-desktop-main.mjs'), cwd: runtime, env }, upgrade);
+  if (stopping || finished || !service) return;
   const bootstrapResponse=await fetch(service.origin+'/auth/desktop/bootstrap',{headers:{'X-Mandala-Launcher':service.setupToken}});
   if(!bootstrapResponse.ok)throw Error('Could not verify desktop account');
   const bootstrap=await bootstrapResponse.json(), profileHome=bootstrap.home;
@@ -239,6 +290,9 @@ async function start() {
       { label: 'Open data directory', click: () => shell.openPath(profileHome) },
       { label: 'Check for updates…', click: () => { void updates.check('menu'); } },
       { label: 'About Mandala', click: () => dialog.showMessageBox({ title: 'Mandala', message: `Mandala ${app.getVersion()}`, detail: 'Local service and native CLI authentication stay on this computer. This preview uses manual installer upgrades.' }) },
+      ...(service.upgradePending ? [{ label: upgrade.pending, click: () => dialog.showMessageBox(window, {
+        type: 'info', message: upgrade.pending, detail: service.upgradePending === 'busy' ? upgrade.busy : upgrade.unknown,
+      }) }] : []),
       { label: 'Stop runtime and quit…', click: stopRuntime },
       { type: 'separator' }, { label: 'Quit Mandala', accelerator: 'CmdOrCtrl+Q', click: quit }
     ] },
@@ -248,7 +302,7 @@ async function start() {
   // A tray makes the background app reachable on Windows and when its window is hidden.
   const icon = nativeImage.createFromPath(join(__dirname, process.platform === 'darwin' ? 'tray.png' : 'tray-color.png'));
   if (process.platform === 'darwin') icon.setTemplateImage(true);
-  tray = new Tray(icon); tray.setToolTip('Mandala — connected to background runtime');
+  tray = new Tray(icon); tray.setToolTip(service.upgradePending ? `Mandala — ${upgrade.pending}` : 'Mandala — connected to background runtime');
   tray.setContextMenu(Menu.buildFromTemplate(menu[0].submenu)); tray.on('double-click', () => window.show());
   await window.loadURL(service.origin); if (!stopping && !finished) window.show();
   if (app.isPackaged && !stopping && !finished) {

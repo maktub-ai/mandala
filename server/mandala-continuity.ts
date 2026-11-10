@@ -114,6 +114,7 @@ export function createMandalaContinuity(options:{store:Store;closed:()=>boolean;
  };
  return {blocked,event,latest,disconnected(id:string){const entry=active.get(id);if(!entry)return false;write(id,{...entry.record,status:'unknown'});entry.resolve(false);return true;},
   tick(){const promise=(async()=>{for(const c of store.listConversations())if(c.purpose==='mandala-main')await maintain(c.id);})();pending.add(promise);void promise.finally(()=>pending.delete(promise));return promise;},
+  hasActiveWork:()=>fenced.size>0||active.size>0,
   async close(){for(const entry of active.values())entry.resolve(false);await Promise.allSettled(pending);},
  };
 }

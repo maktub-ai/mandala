@@ -20,7 +20,7 @@ export function createCodeGraph({home,store,loadConfig}:{home:string;store:Store
  const db=store.database,managed=resolve(home,'code-graph'),engines=new Map<string,Engine>();
  db.exec(`CREATE TABLE IF NOT EXISTS code_indexes(id TEXT PRIMARY KEY,source_root TEXT NOT NULL UNIQUE,engine_version TEXT NOT NULL,generation INTEGER NOT NULL DEFAULT 0,manifest TEXT NOT NULL DEFAULT '{}',status TEXT NOT NULL DEFAULT 'pending',updated_at TEXT NOT NULL DEFAULT '',ref_count INTEGER NOT NULL DEFAULT 0,failure_count INTEGER NOT NULL DEFAULT 0);
  CREATE TABLE IF NOT EXISTS code_index_bindings(binding_key TEXT PRIMARY KEY,index_id TEXT NOT NULL,allowed_root TEXT NOT NULL);`);
- let tail:Promise<unknown>=Promise.resolve(),timer:ReturnType<typeof setInterval>|undefined,closed=false;
+ let tail:Promise<unknown>=Promise.resolve(),timer:ReturnType<typeof setInterval>|undefined,closed=false,running=false;
  const serial=<T>(fn:()=>Promise<T>):Promise<T>=>{const next=tail.then(()=>{if(closed)throw new Error('CodeGraph closed');return fn();});tail=next.catch(()=>{});return next;};
  const rows=()=>db.prepare('SELECT * FROM code_indexes').all() as unknown as Index[];
  const indexFor=(key:string)=>db.prepare('SELECT i.* FROM code_indexes i JOIN code_index_bindings b ON b.index_id=i.id WHERE b.binding_key=?').get(key) as unknown as Index|undefined;
@@ -197,7 +197,8 @@ export function createCodeGraph({home,store,loadConfig}:{home:string;store:Store
    const current=await authorize(scope,bindingId,assertActive),status=await view(current);if((await authorize(scope,bindingId,assertActive)).root!==current.root)fail('forbidden',403,'CodeGraph scope changed');
    const config=await loadConfig();assertOutput(revision,config,[binding,current],assertActive);return status;
   }),
-  start(){if(timer||closed)return;let running=false;const tick=()=>{if(running||closed)return;running=true;void service.reconcile().catch(()=>{}).finally(()=>{running=false;});};tick();timer=setInterval(tick,5000);timer.unref();},
+  hasActiveWork:()=>running,
+  start(){if(timer||closed)return;const tick=()=>{if(running||closed)return;running=true;void service.reconcile().catch(()=>{}).finally(()=>{running=false;});};tick();timer=setInterval(tick,5000);timer.unref();},
   async close(){if(timer)clearInterval(timer);timer=undefined;closed=true;await tail;for(const engine of engines.values())engine.close();engines.clear();},
  };
  return service;

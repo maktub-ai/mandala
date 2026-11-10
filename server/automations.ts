@@ -314,6 +314,7 @@ export function createAutomations({home,store,manager,loadConfig,now=()=>new Dat
    })().finally(()=>{ticking=undefined;});return ticking;
   },
   start(){if(timer||closed)return;const check=()=>{if(!closed)void service.tick().catch(()=>{if(!closed)console.error('Automation scheduler failed');});};timer=setInterval(check,1000);timer.unref();check();},
+  hasActiveWork(){return !!ticking;},
   close(){closed=true;if(timer)clearInterval(timer);},
  };
  manager.setAutomationService?.(service);

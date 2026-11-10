@@ -1,14 +1,15 @@
-import { createServer, request as httpRequest, type ServerResponse } from 'node:http';
+import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { writeFileSync, renameSync, existsSync, unlinkSync, mkdirSync, statSync, readFileSync } from 'node:fs';
 import { join, resolve, sep, extname } from 'node:path';
+import type { IdleStop } from '../desktop/service-discovery';
 import { readJsonBody } from './http-body';
 import { validateControlUrl } from './computer-connector';
 import { systemComputerName } from './computer-name';
 import { openDesktopAccounts, desktopPartition, validateDesktopLease, type DesktopLease } from './desktop-accounts';
 
-export type AccountWorkspace={origin:string;cookie:string;csrfToken:string;key:string;close:()=>Promise<void>;exited?:Promise<void>};
+export type AccountWorkspace={origin:string;cookie:string;csrfToken:string;key:string;close:()=>Promise<void>;stopIfIdle?:()=>Promise<IdleStop>;exited?:Promise<void>};
 export function createDesktopGateway(options:{root:string;setupToken:string;controlOrigin:string;dist?:string;startWorkspace:(home:string,lease:DesktopLease)=>Promise<AccountWorkspace>;fetch?:typeof fetch}){
  const cloudOrigin=validateControlUrl(options.controlOrigin), accounts=openDesktopAccounts(options.root,cloudOrigin), request=options.fetch??fetch;
  const computerName=systemComputerName();
@@ -17,6 +18,20 @@ export function createDesktopGateway(options:{root:string;setupToken:string;cont
  const json=(res:ServerResponse,status:number,value:unknown)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
  let worker:AccountWorkspace|undefined,starting:Promise<AccountWorkspace>|undefined,changing=false,linking=false,stopped=false,epoch=0;
  const cleanupQueue:AccountWorkspace[]=[];let cleanup:Promise<void>|undefined;
+ let checkingIdle = false, requests = 0, forwarding = 0;
+ const reserveIdleShutdown = async (): Promise<IdleStop> => {
+  if (stopped) return 'accepted';
+  if (checkingIdle || requests || forwarding || starting || cleanup || changing || linking) return 'busy';
+  if (cleanupQueue.length) return 'unknown';
+  if (!worker) { stopped = true; return 'accepted'; }
+  if (!worker.stopIfIdle) return 'unknown';
+  checkingIdle = true;
+  try {
+   const result = await worker.stopIfIdle();
+   if (result === 'accepted') stopped = true;
+   return result;
+  } finally { checkingIdle = false; }
+ };
  let pending:{deviceCode:string;verificationUri:string;expires:number;grant?:Omit<DesktopLease,'localToken'>}|undefined;
  const streams=new Set<ServerResponse>();
  const cloud=async(path:string,data?:unknown,lease?:DesktopLease)=>request(cloudOrigin+path,{method:data===undefined?'GET':'POST',headers:{Origin:cloudOrigin,'Content-Type':'application/json',...(lease?{Cookie:`mandala_session=${lease.token}`,'X-CSRF-Token':lease.csrfToken}:{})},...(data===undefined?{}:{body:JSON.stringify(data)}),redirect:'error',signal:AbortSignal.timeout(10000)});
@@ -61,8 +76,8 @@ export function createDesktopGateway(options:{root:string;setupToken:string;cont
   await starting?.catch(()=>undefined);await drainCleanup();
  };
  const expire=async()=>{if(changing)return;changing=true;try{const current=accounts.current();if(current){const file=join(accounts.home(current.user.id),'.account-session');if(existsSync(file))unlinkSync(file);}accounts.logout();await closeWorker();}finally{changing=false;}};
- const timer=setInterval(()=>{if(!accounts.current()&&(worker||starting))void expire().catch(()=>{});},1000);timer.unref();
- const server=createServer(async(req,res)=>{
+ const timer=setInterval(()=>{if(!stopped&&!checkingIdle&&!accounts.current()&&(worker||starting))void expire().catch(()=>{});},1000);timer.unref();
+ async function handleRequest(req: IncomingMessage, res: ServerResponse) {
   try{
    const host=req.headers.host??'';if(!/^127\.0\.0\.1:\d+$/.test(host))return json(res,403,{error:'Invalid host'});
    const origin='http://'+host,url=new URL(req.url??'/',origin),path=url.pathname;
@@ -71,7 +86,7 @@ export function createDesktopGateway(options:{root:string;setupToken:string;cont
    const native=!req.headers.origin&&equal(req.headers['x-mandala-launcher'],options.setupToken);
    const setup=equal(c.mandala_setup,options.setupToken);
    const signed=lease&&equal(c.mandala_desktop,lease.localToken)?lease:undefined;
-   const stillSigned=()=>signed&&!changing&&accounts.current()?.localToken===signed.localToken;
+   const stillSigned=()=>signed&&!stopped&&!changing&&accounts.current()?.localToken===signed.localToken;
    const body=()=>readJsonBody(req,{maxBytes:8192,contentTypeError:'JSON required',sizeError:'Request too large'});
    if(path==='/auth/desktop/bootstrap'&&req.method==='GET'){
     if(!native)return json(res,403,{error:'Desktop launcher required'});
@@ -163,8 +178,13 @@ export function createDesktopGateway(options:{root:string;setupToken:string;cont
     const w=await start();if(!stillSigned())return json(res,401,{error:'Sign in required'});
     const headers: import('node:http').OutgoingHttpHeaders={...req.headers,host:new URL(w.origin).host,origin:w.origin,cookie:w.cookie,'x-csrf-token':w.csrfToken,'x-mandala-gateway-key':w.key};
     for(const name of ['x-mandala-local-key','x-openmana-local-key','x-mandala-bridge-key','x-openmana-bridge-key','x-mandala-owner-id','x-mandala-client-id','authorization'])delete headers[name];
-    const upstream=httpRequest(w.origin+(req.url??'/'),{method:req.method,headers},reply=>{const h={...reply.headers};delete h['set-cookie'];res.writeHead(reply.statusCode??502,h);reply.pipe(res);});
-    streams.add(res);res.on('close',()=>{streams.delete(res);upstream.destroy();});upstream.on('error',()=>{if(!res.headersSent)json(res,502,{error:'Workspace unavailable'});else res.destroy();});req.pipe(upstream);return;
+    // Count forwarded work until the worker sees it. Established read streams
+    // can remain open while idle and will close during normal shutdown.
+    let awaitingReply = true;
+    const replied = () => { if (awaitingReply) { awaitingReply = false; forwarding--; } };
+    const upstream=httpRequest(w.origin+(req.url??'/'),{method:req.method,headers},reply=>{if (!mutation) replied();const h={...reply.headers};delete h['set-cookie'];res.writeHead(reply.statusCode??502,h);reply.pipe(res);});
+    forwarding++;
+    streams.add(res);res.on('close',()=>{streams.delete(res);upstream.destroy();});upstream.once('close', replied);upstream.on('error',()=>{if(!res.headersSent)json(res,502,{error:'Workspace unavailable'});else res.destroy();});req.pipe(upstream);return;
    }
    if(options.dist&&['GET','HEAD'].includes(req.method??'GET')){
     const root=resolve(options.dist),file=resolve(root,'.'+decodeURIComponent(path));if(file!==root&&!file.startsWith(root+sep))return json(res,403,{error:'Invalid path'});
@@ -174,8 +194,14 @@ export function createDesktopGateway(options:{root:string;setupToken:string;cont
    }
    json(res,404,{error:'Not found'});
   }catch{if(!res.headersSent)json(res,503,{error:'Service unavailable; retry later'});else res.destroy();}
+ }
+ const server = createServer(async (req, res) => {
+  if (stopped || checkingIdle) return json(res, 503, { error: 'Runtime upgrade in progress; retry shortly.' });
+  requests++;
+  try { await handleRequest(req, res); }
+  finally { requests--; }
  });
  async function expireAfterFailure(){accounts.logout();await closeWorker();}
  server.on('close',()=>{stopped=true;clearInterval(timer);void closeWorker().catch(()=>{});});
- return {server,close:async()=>{stopped=true;clearInterval(timer);await closeWorker();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}};
+ return {server,reserveIdleShutdown,close:async()=>{stopped=true;clearInterval(timer);await closeWorker();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}};
 }

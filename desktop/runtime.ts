@@ -1,3 +1,4 @@
+export { readRuntimeBuild } from './service-discovery';
 export { desktopCliStatus, installDesktopCli } from './cli-registration';
 export { readDesktopPreferences, writeDesktopPreference } from './preferences';
 export { readDesktopAppearance, writeDesktopAppearance } from './appearance';
@@ -5,7 +6,7 @@ import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { existsSync, readdirSync, statSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { readServiceRecord, serviceAlive, removeServiceRecord, controlService, ServiceStartingError, type ServiceRecord } from './service-discovery';
+import { readServiceRecord, serviceAlive, removeServiceRecord, controlService, ServiceStartingError, type RuntimeBuild, type ServiceRecord } from './service-discovery';
 import { windowsSystemBinary } from '../cli/windows-system.mjs';
 import { ownedPrivatePath, protectInvocationDirectory } from '../cli/private-path.mjs';
 import { productHome } from '../cli/product-env.mjs';
@@ -100,25 +101,60 @@ export async function forceStopService(child: ChildProcess): Promise<void> {
   await exited;
 }
 
-export type BackgroundService = { origin: string; setupToken: string; home: string; record: ServiceRecord };
+export type BackgroundService = {
+  origin: string; setupToken: string; home: string; record: ServiceRecord;
+  build?: RuntimeBuild; canStopIfIdle?: boolean; upgradePending?: 'busy' | 'confirmation';
+};
+function sameBuild(expected: RuntimeBuild, actual?: RuntimeBuild): boolean {
+  return expected.version === actual?.version && expected.commit === actual.commit;
+}
+export class RuntimeShutdownTimeout extends Error {
+  constructor() { super('Runtime is still shutting down. Wait a moment, then try again.'); }
+}
+const pause = () => new Promise(resolve => setTimeout(resolve, 100));
 export async function connectService(home: string): Promise<BackgroundService | undefined> {
   const record = readServiceRecord(home);
   if (!record) return;
   if (!serviceAlive(record)) { removeServiceRecord(home, record); return; }
-  await controlService(record, 'probe');
-  return { home, record, origin: record.origin, setupToken: record.setupToken };
+  const { build, canStopIfIdle } = await controlService(record, 'probe');
+  return { home, record, origin: record.origin, setupToken: record.setupToken, build, canStopIfIdle };
 }
-export async function connectOrStartService(options: Parameters<typeof startService>[0] & { home: string }): Promise<BackgroundService> {
+export async function connectOrStartService(options: Parameters<typeof startService>[0] & {
+  home: string; build?: RuntimeBuild; shutdownTimeoutMs?: number;
+  confirmLegacy?: (service: BackgroundService) => Promise<boolean>;
+}): Promise<BackgroundService> {
   const deadline = Date.now() + (options.timeoutMs ?? 30000);
+  let existing: BackgroundService | undefined;
   while (true) {
     try {
-      const existing = await connectService(options.home);
-      if (existing) return existing;
+      existing = await connectService(options.home);
       break;
     } catch (error) {
       // A frontend may reopen while the independently running daemon initializes.
-      if (!(error instanceof ServiceStartingError) || Date.now() >= deadline) throw error;
-      await new Promise(resolve => setTimeout(resolve, 100));
+      const waitingForShutdown = options.build && (error instanceof TypeError || (error as Error).name === 'TimeoutError');
+      if (!waitingForShutdown && !(error instanceof ServiceStartingError)) throw error;
+      if (Date.now() >= deadline) {
+        if (waitingForShutdown) throw new RuntimeShutdownTimeout();
+        throw error;
+      }
+      await pause();
+    }
+  }
+  if (existing) {
+    if (!options.build || sameBuild(options.build, existing.build)) return existing;
+    const result = existing.canStopIfIdle ? (await requestUpgradeStop(existing, 'stop-if-idle')).idleStop : 'unknown';
+    if (result === 'busy') return { ...existing, upgradePending: 'busy' };
+    if (result === 'accepted') await waitForBackgroundShutdown(existing, options.shutdownTimeoutMs);
+    else {
+      if (!await options.confirmLegacy?.(existing)) return { ...existing, upgradePending: 'confirmation' };
+      await requestUpgradeStop(existing, 'stop');
+      await waitForBackgroundShutdown(existing, options.shutdownTimeoutMs);
+    }
+    // Another launcher could have won the claim after the old lock was released.
+    const replacement = await connectService(options.home);
+    if (replacement) {
+      if (!sameBuild(options.build, replacement.build)) throw new Error('Another desktop runtime started with a different build. Reopen Mandala to check again.');
+      return replacement;
     }
   }
   assertHomeAvailable(options.home);
@@ -126,16 +162,37 @@ export async function connectOrStartService(options: Parameters<typeof startServ
   try {
     const connected = await connectService(options.home);
     if (!connected || connected.record.pid !== service.child.pid) throw new Error('Desktop runtime did not publish its identity.');
+    if (options.build && !sameBuild(options.build, connected.build)) throw new Error('The background runtime does not match the installed Mandala build.');
     // The daemon owns its lifecycle from this point, including across frontend crashes.
     service.child.disconnect(); service.child.unref();
     return connected;
   } catch (error) { await stopService(service.child); throw error; }
 }
-export async function stopBackgroundService(service: BackgroundService, timeoutMs = 30000): Promise<void> {
-  await controlService(service.record, 'stop');
+async function requestUpgradeStop(service: BackgroundService, action: 'stop' | 'stop-if-idle') {
+  if (readServiceRecord(service.home)?.secret !== service.record.secret) return { idleStop: 'accepted' as const };
+  try { return await controlService(service.record, action); }
+  catch (error) {
+    if (readServiceRecord(service.home)?.secret !== service.record.secret) return { idleStop: 'accepted' as const };
+    if (error instanceof TypeError || (error as Error).name === 'TimeoutError') throw new RuntimeShutdownTimeout();
+    throw error;
+  }
+}
+export async function stopBackgroundService(service: BackgroundService, timeoutMs?: number): Promise<void> {
+  // A confirmation may stay open while the verified process finishes independently.
+  if (readServiceRecord(service.home)?.secret === service.record.secret) {
+    try { await controlService(service.record, 'stop'); }
+    catch (error) {
+      if (readServiceRecord(service.home)?.secret === service.record.secret) throw error;
+    }
+  }
+  await waitForBackgroundShutdown(service, timeoutMs);
+}
+async function waitForBackgroundShutdown(service: BackgroundService, timeoutMs = 30000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (readServiceRecord(service.home)?.secret === service.record.secret) {
-    if (Date.now() >= deadline) throw new Error('Runtime is still shutting down. Keep Mandala open and try again after active work has settled.');
-    await new Promise(resolve => setTimeout(resolve, 100));
+  while (true) {
+    const current = readServiceRecord(service.home);
+    if (current ? current.secret !== service.record.secret : !existsSync(join(service.home, '.service-home-lock'))) return;
+    if (Date.now() >= deadline) throw new RuntimeShutdownTimeout();
+    await pause();
   }
 }

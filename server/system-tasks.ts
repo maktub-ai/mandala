@@ -137,7 +137,7 @@ export function createSystemTasks({ store, loadConfig, home, generate = nativeGe
     provenance?: { cli: SystemTaskConfig["cli"]; model: string | null; sourceEventId: number } };
   const jobs = new Map<string, Job>();
   const memoryQueues = new Map<string, Promise<void>>();
-  let closed = false;
+  let closed = false, captures = 0;
   const emit = (job: Job, status: "running" | "completed" | "failed", message?: string,
     outcome: { applied?: boolean; title?: string; count?: number; code?: string; stage?: string } = {}) =>
     store.appendEvent(job.id, "metadata", { systemTask: job.kind, status, ...job.provenance, ...outcome, ...(message ? { message } : {}),
@@ -246,6 +246,7 @@ export function createSystemTasks({ store, loadConfig, home, generate = nativeGe
     return job.promise;
   }
   return {
+    hasActiveWork: () => jobs.size > 0 || captures > 0 || !!progress?.hasActiveWork(),
     status(id: string) {
       return {
         active: [...[...jobs.values()].filter(job=>job.id===id).map(job=>({kind:job.kind,started:job.started})), ...(progress?.status(id) ?? [])],
@@ -273,7 +274,15 @@ export function createSystemTasks({ store, loadConfig, home, generate = nativeGe
       ]);
     },
     generateTitle: (id: string) => run(id, "title"),
-    captureMemory: async (id: string) => { if(memoryRuntime){await memoryRuntime.captureConversation(id,"explicit");await memoryRuntime.drain();}else await run(id, "memory", round(store.listEvents(id, 0).filter((event) => event.kind !== "metadata"), true, true)); },
+    async captureMemory(id: string) {
+      captures++;
+      try {
+        if (memoryRuntime) {
+          await memoryRuntime.captureConversation(id, "explicit");
+          await memoryRuntime.drain();
+        } else await run(id, "memory", round(store.listEvents(id, 0).filter((event) => event.kind !== "metadata"), true, true));
+      } finally { captures--; }
+    },
     close() {
       if (closed) return;
       closed = true;

@@ -24,5 +24,5 @@ export function createVoiceHttp(home:string){
   }
   throw new DomainError('voice_route',405,'Unsupported voice operation');
  }
- return {handle,close:service.close};
+ return {handle,close:service.close,hasActiveWork:service.hasActiveWork};
 }
