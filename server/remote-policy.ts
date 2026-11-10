@@ -2,7 +2,8 @@ import {isCli} from '../shared/runtimes';
 import type { Config } from '../shared/types';
 
 const id = '[a-zA-Z0-9_-]{1,100}';
-const conversation = new RegExp(`^/api/conversations/(${id})(?:/([^/]+)(?:/(${id}))?)?$`);
+const itemId = '[a-zA-Z0-9_:-]{1,100}';
+const conversation = new RegExp(`^/api/conversations/(${id})(?:/([^/]+)(?:/(${itemId}))?)?$`);
 const task = new RegExp(`^/api/v2/tasks/${id}/(control|stop)$`);
 const mandalaProposal = new RegExp(`^/api/mandala/proposals/(${id})$`);
 const assetFile = new RegExp(`^/api/v2/assets/${id}/versions/${id}/files/${id}$`);

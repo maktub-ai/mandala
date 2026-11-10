@@ -17,6 +17,7 @@ it('allows chat, attachment, approval, question and individual stop workflows', 
   expect(allowed('POST', '/api/conversations/chat-1/attachments?name=%E6%96%87%E4%BB%B6.bin')).toBe(true);
   expect(allowed('POST', '/api/conversations/chat-1/approvals/approval-1', {decision: 'approve'})).toBe(true);
   expect(allowed('POST', '/api/conversations/chat-1/questions/question-1', {answers: {q: ['answer']}})).toBe(true);
+  expect(allowed('POST', '/api/conversations/chat-1/questions/async:a1b2c3', {answers: {0: ['answer']}})).toBe(true);
   expect(allowed('POST', '/api/conversations/chat-1/stop', {expectedExecutionId: 'run-1'})).toBe(true);
   expect(allowed('POST', '/api/conversations/chat-1/stop', {expectedExecutionId: null})).toBe(true);
   expect(allowed('POST', '/api/conversations/chat-1/stop', {})).toBe(false);

@@ -1521,6 +1521,28 @@ it('routes question answers through same-origin and conversation-scoped HTTP', a
  } finally {server.close();}
 });
 
+it('submits a durable async question answer whose id contains a colon over HTTP', async () => {
+ const {Readable}=await import('node:stream');const {createHttpServer}=await import('../server/http');
+ const server=createHttpServer({requireIdentity:false,home,store,manager});
+ const chat=await manager.create('p','a');await manager.send(chat.id,'ask');
+ const runId=(store.listEvents(chat.id,0).find(e=>e.kind==='metadata'&&(e.data as {execution?:string}).execution==='started')!.data as {runId:string}).runId;
+ store.appendEvent(chat.id,'tool',{runId,method:'item/completed',params:{threadId:'native-1',turnId:'turn-1',item:{
+  id:'q-async',type:'agentMessage',delivery:'async',questions:[{title:'你感觉主要慢在哪里？',options:['发消息后等很久','切换会话卡顿','输出慢']}],
+ }}});
+ options.onEvent({method:'turn/completed',params:{threadId:'native-1',turn:{id:'turn-1',status:'completed'}}});
+ const approval=manager.getApprovals(chat.id).find(a=>a.id.startsWith('async:'))!;
+ expect(approval.id).toContain(':');
+ const custom='前两种都存在，发消息后，等很久才开始回复/切换会话、打开页面或点击操作卡顿';
+ const call=(origin='http://127.0.0.1')=>new Promise<number>(resolve=>{
+  let status=0;server.emit('request',Object.assign(Readable.from([JSON.stringify({answers:{0:{answers:[custom]}}})]),{url:`/api/conversations/${chat.id}/questions/${approval.id}`,method:'POST',headers:{host:'127.0.0.1',origin,'content-type':'application/json'}}),{writeHead(code:number){status=code;},end(){resolve(status);}});
+ });
+ try {
+  expect(await call()).toBe(200);
+  expect(manager.listUserInputs(chat.id).some(i=>i.text.includes(custom))).toBe(true);
+  expect(store.listEvents(chat.id,0).some(e=>e.kind==='metadata'&&(e.data as {answeredQuestionId?:string}).answeredQuestionId===approval.id)).toBe(true);
+ } finally {server.close();}
+});
+
 it('publishes removal of an asynchronously resolved question for UI refresh', async () => {
  const chat=await manager.create('p','a');await manager.send(chat.id,'ask');
  options.onEvent({method:'turn/started',params:{threadId:'native-1',turn:{id:'turn-1'}}});

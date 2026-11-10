@@ -647,7 +647,7 @@ export function createHttpServer({
         }
       }
       const match = path.match(
-        /^\/api\/conversations\/([a-zA-Z0-9_-]+)(?:\/(workspace|environment|workspace-file|local-file|local-files|attachments|model|queue|results|messages|edit|branch|fork|stop|continue|events|history|reference-summary|references|questions|approvals|completion|archive|title|memory|approval-mode)(?:\/([a-zA-Z0-9_-]+))?)?$/,
+        /^\/api\/conversations\/([a-zA-Z0-9_-]+)(?:\/(workspace|environment|workspace-file|local-file|local-files|attachments|model|queue|results|messages|edit|branch|fork|stop|continue|events|history|reference-summary|references|questions|approvals|completion|archive|title|memory|approval-mode)(?:\/([a-zA-Z0-9_:-]+))?)?$/,
       );
       if (match) {
         const [, id, action, approvalId] = match;
