@@ -8,23 +8,58 @@ import { validateControlUrl } from './computer-connector';
 import { systemComputerName } from './computer-name';
 import { openDesktopAccounts, desktopPartition, validateDesktopLease, type DesktopLease } from './desktop-accounts';
 
-export type AccountWorkspace={origin:string;cookie:string;csrfToken:string;key:string;close:()=>Promise<void>};
+export type AccountWorkspace={origin:string;cookie:string;csrfToken:string;key:string;close:()=>Promise<void>;exited?:Promise<void>};
 export function createDesktopGateway(options:{root:string;setupToken:string;controlOrigin:string;dist?:string;startWorkspace:(home:string,lease:DesktopLease)=>Promise<AccountWorkspace>;fetch?:typeof fetch}){
  const cloudOrigin=validateControlUrl(options.controlOrigin), accounts=openDesktopAccounts(options.root,cloudOrigin), request=options.fetch??fetch;
  const computerName=systemComputerName();
  const equal=(a:unknown,b:string)=>typeof a==='string'&&Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b));
  const cookies=(value:string)=>Object.fromEntries(value.split(';').map(c=>c.trim().split('=')).filter(c=>c.length===2));
  const json=(res:ServerResponse,status:number,value:unknown)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
- let worker:AccountWorkspace|undefined,starting:Promise<AccountWorkspace>|undefined,changing=false,linking=false;
+ let worker:AccountWorkspace|undefined,starting:Promise<AccountWorkspace>|undefined,changing=false,linking=false,stopped=false,epoch=0;
+ const cleanupQueue:AccountWorkspace[]=[];let cleanup:Promise<void>|undefined;
  let pending:{deviceCode:string;verificationUri:string;expires:number;grant?:Omit<DesktopLease,'localToken'>}|undefined;
  const streams=new Set<ServerResponse>();
  const cloud=async(path:string,data?:unknown,lease?:DesktopLease)=>request(cloudOrigin+path,{method:data===undefined?'GET':'POST',headers:{Origin:cloudOrigin,'Content-Type':'application/json',...(lease?{Cookie:`mandala_session=${lease.token}`,'X-CSRF-Token':lease.csrfToken}:{})},...(data===undefined?{}:{body:JSON.stringify(data)}),redirect:'error',signal:AbortSignal.timeout(10000)});
+ const drainCleanup=()=>{
+  if(cleanup)return cleanup;
+  const operation=(async()=>{while(cleanupQueue.length){await cleanupQueue[0].close();cleanupQueue.shift();}})();
+  cleanup=operation;
+  void operation.finally(()=>{if(cleanup===operation)cleanup=undefined;}).catch(()=>{});
+  return operation;
+ };
+ const dispose=(value:AccountWorkspace)=>{cleanupQueue.push(value);return drainCleanup();};
+ const launch=(home:string,lease:DesktopLease,valid:()=>boolean)=>{
+  const generation=epoch;
+  const operation=(async()=>{
+   await drainCleanup();
+   if(stopped||generation!==epoch||!valid())throw Error('Workspace start cancelled');
+   const value=await options.startWorkspace(home,lease);
+   if(stopped||generation!==epoch||!valid()){await dispose(value);throw Error('Workspace start cancelled');}
+   worker=value;
+   void value.exited?.then(()=>{
+    if(worker!==value)return;
+    worker=undefined;
+    for(const response of streams)response.destroy();streams.clear();
+    void dispose(value).catch(()=>{});
+   });
+   return value;
+  })();
+  starting=operation;
+  void operation.finally(()=>{if(starting===operation)starting=undefined;}).catch(()=>{});
+  return operation;
+ };
  const start=()=>{
+  if(stopped||changing)return Promise.reject(Error('Workspace unavailable'));
   if(worker)return Promise.resolve(worker);
   const lease=accounts.current();if(!lease)return Promise.reject(Error('Sign in required'));
-  return starting??=(options.startWorkspace(accounts.home(lease.user.id),lease).then(value=>worker=value).finally(()=>{starting=undefined;}));
+  return starting??launch(accounts.home(lease.user.id),lease,()=>!changing&&accounts.current()?.localToken===lease.localToken);
  };
- const closeWorker=async()=>{for(const response of streams)response.destroy();streams.clear();const previous=worker??await starting?.catch(()=>undefined);if(previous)await previous.close();worker=undefined;};
+ const closeWorker=async()=>{
+  epoch++;for(const response of streams)response.destroy();streams.clear();
+  const previous=worker;worker=undefined;
+  if(previous)void dispose(previous).catch(()=>{});
+  await starting?.catch(()=>undefined);await drainCleanup();
+ };
  const expire=async()=>{if(changing)return;changing=true;try{const current=accounts.current();if(current){const file=join(accounts.home(current.user.id),'.account-session');if(existsSync(file))unlinkSync(file);}accounts.logout();await closeWorker();}finally{changing=false;}};
  const timer=setInterval(()=>{if(!accounts.current()&&(worker||starting))void expire().catch(()=>{});},1000);timer.unref();
  const server=createServer(async(req,res)=>{
@@ -68,7 +103,7 @@ export function createDesktopGateway(options:{root:string;setupToken:string;cont
     if(path==='/auth/desktop/activate'){
      if(!pending?.grant||pending.expires<=Date.now()||lease)return json(res,409,{error:'Complete sign-in first'});
      const b=await body();if(typeof b.claimLegacy!=='boolean')return json(res,422,{error:'Confirm local data ownership'});
-     try{const grant=pending.grant;validateDesktopLease(grant);worker=await options.startWorkspace(accounts.plannedHome(grant.user.id,b.claimLegacy),{...grant,localToken:''});accounts.activate(grant,b.claimLegacy);pending=undefined;json(res,200,{restart:true});}catch{await expireAfterFailure();json(res,409,{error:'Could not open this workspace. Stop its existing runtime before claiming old data, or use a new workspace.'});}
+     try{const grant=pending.grant;validateDesktopLease(grant);await launch(accounts.plannedHome(grant.user.id,b.claimLegacy),{...grant,localToken:''},()=>changing&&!stopped);if(stopped)throw Error('Gateway stopped');accounts.activate(grant,b.claimLegacy);pending=undefined;json(res,200,{restart:true});}catch{await expireAfterFailure();json(res,409,{error:'Could not open this workspace. Stop its existing runtime before claiming old data, or use a new workspace.'});}
      return;
     }
     return json(res,404,{error:'Not found'});
@@ -141,6 +176,6 @@ export function createDesktopGateway(options:{root:string;setupToken:string;cont
   }catch{if(!res.headersSent)json(res,503,{error:'Service unavailable; retry later'});else res.destroy();}
  });
  async function expireAfterFailure(){accounts.logout();await closeWorker();}
- server.on('close',()=>{clearInterval(timer);void closeWorker().catch(()=>{});});
- return {server,close:async()=>{clearInterval(timer);await closeWorker();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}};
+ server.on('close',()=>{stopped=true;clearInterval(timer);void closeWorker().catch(()=>{});});
+ return {server,close:async()=>{stopped=true;clearInterval(timer);await closeWorker();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}};
 }

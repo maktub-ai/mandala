@@ -1,37 +1,18 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, readFileSync, renameSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { productHome } from '../cli/product-env.mjs';
 import { claimServiceHome } from './service-home-lock';
 import { claimServiceRecord, handleServiceControl, removeServiceRecord } from '../desktop/service-discovery';
-import { assertHomeAvailable, prepareDesktopHome, startService, stopService } from '../desktop/runtime';
-import { openAccountStore } from './account-store';
+import { prepareDesktopHome } from '../desktop/runtime';
+import { startAccountWorkspace } from './account-desktop-workspace';
 import { createDesktopGateway } from './desktop-gateway';
 
 const root=productHome(),home=join(root,'account-gateway'),setupToken=randomBytes(32).toString('base64url');
 prepareDesktopHome(home);
 const lock=claimServiceHome(home), directory=dirname(fileURLToPath(import.meta.url));
 const gateway=createDesktopGateway({root,setupToken,controlOrigin:process.env.MANDALA_ACCOUNT_ORIGIN??'https://account.mandala.pub',dist:join(directory,'../dist'),async startWorkspace(profileHome,lease){
- assertHomeAvailable(profileHome);prepareDesktopHome(profileHome);
- const key=randomBytes(32).toString('base64url'),store=openAccountStore(profileHome);
- // Preserve legacy owner IDs and history. The account index exclusively assigns this whole workspace.
- const owner=store.listUsers()[0];if(!owner)store.importUser(lease.user);
- const local=store.createSession(owner?.id??lease.user.id);
- const connection=join(profileHome,'computer-connection.json'),previousConnection=connection+'.before-account-login-'+randomBytes(8).toString('hex');
- let movedConnection=false;
- try{
- if(existsSync(connection)&&JSON.parse(readFileSync(connection,'utf8')).device?.ownerId!==lease.user.id){renameSync(connection,previousConnection);movedConnection=true;}
- const leaseFile=join(profileHome,'.account-session');
- writeFileSync(leaseFile,JSON.stringify({key,expiresAt:lease.expiresAt}),{mode:0o600});
- const entry=join(directory,'main.mjs');
- const service=await startService({node:process.execPath,entry,cwd:join(directory,'..'),env:{...process.env,MANDALA_HOME:profileHome,OPEN_MANA_HOME:profileHome,MANDALA_PORT:'0',OPEN_MANA_PORT:'0',MANDALA_DESKTOP:'1',MANDALA_DESKTOP_PERSIST:'0',MANDALA_ACCOUNT_LEASE_FILE:leaseFile,MANDALA_ACCOUNT_WORKER_KEY:key}});
- return {origin:service.origin,cookie:`mandala_local_session=${local.token}`,csrfToken:local.csrfToken,key,async close(){if(existsSync(leaseFile))unlinkSync(leaseFile);await stopService(service.child);store.deleteSession(local.token);store.close();}};
- }catch(error){
-  const leaseFile=join(profileHome,'.account-session');if(existsSync(leaseFile))unlinkSync(leaseFile);
-  if(movedConnection)renameSync(previousConnection,connection);
-  store.deleteSession(local.token);store.close();throw error;
- }
+ return startAccountWorkspace(profileHome,lease,join(directory,'main.mjs'));
 }});
 let record:ReturnType<typeof claimServiceRecord>|undefined,stopping=false;
 const stop=async()=>{if(stopping)return;stopping=true;await gateway.close();if(record)removeServiceRecord(home,record);lock.release();if(process.connected)process.disconnect();};
