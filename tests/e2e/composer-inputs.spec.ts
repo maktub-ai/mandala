@@ -6,7 +6,10 @@ let inputAgentId:string;
 test.beforeEach(async ({ request }, testInfo) => {
  inputAgentId='input-agent-'+testInfo.testId.replace(/[^a-zA-Z0-9]/g,'').slice(-16);
  const snapshot = await (await request.get('/api/config')).json();
- expect((await request.put('/api/config', { data: { revision: snapshot.revision, config: { version: 2, projects: [], agents: [{ id: inputAgentId, name: 'Input Agent', instructions: 'Synthetic input test', defaultCli: 'codex', models: {}, mcp: [], skills: [] }] } } })).ok()).toBe(true);
+ const systemAgents = snapshot.config.agents.filter((agent: { systemRole?: string }) => agent.systemRole);
+ const agent = { id: inputAgentId, name: 'Input Agent', instructions: 'Synthetic input test', defaultCli: 'codex', models: {}, mcp: [], skills: [] };
+ const response = await request.put('/api/config', { data: { revision: snapshot.revision, config: { ...snapshot.config, projects: [], agents: [...systemAgents, agent] } } });
+ expect(response.ok(), await response.text()).toBe(true);
 });
 
 test('directories remain folder cards and send their paths alongside ordinary attachments', async ({ page, request }) => {

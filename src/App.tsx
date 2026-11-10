@@ -55,7 +55,7 @@ import { ContentPreviewContext, type ContentTarget } from "./ContentPreviewConte
 import { conversationFiles } from "./conversationFiles";
 import { VerifiedFilesContext, useVerifiedConversationFiles,usePublishedConversationFiles } from "./VerifiedFilesContext";
 import { isSystemAgent, projectAgentChoice } from "../shared/chat-context";
-import SelectionQuote from "./SelectionQuote";
+import SelectionQuote, { QuoteButton, quoteDragType } from "./SelectionQuote";
 import ConversationFind from "./ConversationFind";
 import ComposerActions from "./ComposerActions";
 import ComposerSettings from "./ComposerSettings";
@@ -252,7 +252,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const [referencesLoading, setReferencesLoading] = useState(false);
   const [referencesError, setReferencesError] = useState('');
   const [referenceReload, setReferenceReload] = useState(0);
-  const [conversationDragOver, setConversationDragOver] = useState(false);
+  const [composerDragOver, setComposerDragOver] = useState(false);
   const visibleReferences = referenceItems
     .filter(item => (referenceMode === 'mention' ? item.kind === 'agent' : item.kind !== 'agent' && item.kind !== 'chat')
       && !selectedReferences.some(selected=>selected.id===item.id) && matchesReferenceQuery(item,referenceQuery?.query??''))
@@ -889,6 +889,12 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     addFiles([new File([value], name, { type: 'text/plain' })]);
     composerInput.current?.focus();
   };
+  const quoteDisabled = !composerDraft.loaded || pending || branchPending || navigationLocked;
+  const addQuote = (value: string) => {
+    if (quoteDisabled || !value.trim()) return;
+    addTextAttachment(value, true);
+    window.getSelection()?.removeAllRanges();
+  };
   const send = async (interrupt = false) => {
     if(voiceBusy)return;
     if (selected && (chat?.id !== selected || !historyReady)) return;
@@ -1059,7 +1065,10 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const renderApprovalRequest=(approval:Approval)=><ApprovalRequest key={approval.id} approval={approval} events={events}
     pending={submittingApproval===approval.id} onDecision={(id,decision)=>void submitApproval(id,decision)} onAnswer={(id,answers)=>void submitQuestion(id,answers)}/>;
   const turns = useMemo(() => groupChatTurns(events), [events]);
-  const presentedTurns = useMemo(() => turns.map(turn => ({ turn, run: presentRun(turn) })), [turns]);
+  const presentedTurns = useMemo(() => turns.map(turn => {
+    const run = presentRun(turn);
+    return { turn, run, replyText: run.answers.map(message => message.text).join("\n\n") };
+  }), [turns]);
   const executionResults=useExecutionResults(chatActive&&agent?.systemRole==='mandala'?selected:'');
   const resultGroups=useMemo(()=>{
     const presented=new Set(turns.flatMap(turn=>turn.messages.flatMap(message=>message.source?.kind==='coordination'?message.source.receiptIds:[])));
@@ -1526,10 +1535,10 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
             </>
           </section>}
           {selected && !historyReady && <LoadingState label={t('正在读取对话历史…')} />}
-          <SelectionQuote conversationId={selected} disabled={pending || branchPending || navigationLocked} onQuote={value => addTextAttachment(value, true)} />
+          <SelectionQuote conversationId={selected} disabled={quoteDisabled} onQuote={addQuote} />
           <div ref={messagesRoot} className={"messages"+(mandalaMain?" mandala-messages":"")} hidden={!historyReady}>
             <ExecutionResults items={resultGroups.get(null)??[]} config={config} tasks={operationTasks.tasks} onOpen={openWorkspacePath}/>
-            {presentedTurns.map(({ turn, run }) => {
+            {presentedTurns.map(({ turn, run, replyText }) => {
               const inspect = () => { followLatest.current = false; setAwayFromLatest(true); };
               const checkpoint = [...turn.events].reverse().find(event => event.kind === "status" && (event.data as {status?: string}).status === "idle");
               const answer = run.answers.at(-1);
@@ -1545,6 +1554,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               <div className="message-content">
                 {m.source?.kind==='telegram'&&<span className="telegram-source">Telegram</span>}
                 {!mandalaMain && <div className="message-name">{t("你")}<span className="message-actions">
+                {m.text.trim() && <QuoteButton kind="message" text={m.text} disabled={quoteDisabled} onQuote={addQuote} />}
                 <Button type="button" aria-label={t("复制消息")} title={t(copiedMessage === m.key ? "已复制" : "复制消息")} data-copied={copiedMessage === m.key || undefined} onClick={() => void copyMessage(m.key, m.text)}><Icon key={"icon-" + copySequence} name={copiedMessage === m.key ? "check" : "copy"} size={14} />{copiedMessage === m.key && <span key={"feedback-" + copySequence} className="copy-feedback" role="status">{t('已复制')}</span>}</Button>
                 <Button type="button" aria-label={t("在新对话中使用此请求")} title={t("在新对话中使用此请求")} disabled={pending || branchPending || navigationLocked} onClick={() => void reuseRequest(m)}><Icon name="message" size={14} /></Button>
                 {!mandalaMain && <Button type="button" aria-label={t("编辑消息")} disabled={busy || branchPending} title={t(busy ? "执行结束后可编辑消息" : "编辑消息")}
@@ -1563,6 +1573,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
                 {m.attachments?.length ? <div className="message-attachments">{m.attachments.map(item => <AttachmentItem key={item.id} item={item} conversationId={selected} />)}</div> : null}
               </div>
               {mandalaMain && <div className="message-name"><span className="message-actions">
+                {m.text.trim() && <QuoteButton kind="message" text={m.text} disabled={quoteDisabled} onQuote={addQuote} />}
                 <Button type="button" aria-label={t("复制消息")} title={t(copiedMessage === m.key ? "已复制" : "复制消息")} data-copied={copiedMessage === m.key || undefined} onClick={() => void copyMessage(m.key, m.text)}><Icon key={"icon-" + copySequence} name={copiedMessage === m.key ? "check" : "copy"} size={14} />{copiedMessage === m.key && <span key={"feedback-" + copySequence} className="copy-feedback" role="status">{t('已复制')}</span>}</Button>
                 <Button type="button" aria-label={t("在新对话中使用此请求")} title={t("在新对话中使用此请求")} disabled={pending || branchPending || navigationLocked} onClick={() => void reuseRequest(m)}><Icon name="message" size={14} /></Button>
                 {!mandalaMain && <Button type="button" aria-label={t("编辑消息")} disabled={busy || branchPending} title={t(busy ? "执行结束后可编辑消息" : "编辑消息")}
@@ -1581,7 +1592,8 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               </article>)}
               {operationCards}
               <TurnFooter turn={turn} run={run} turns={turns} onInspect={inspect} actions={answer && checkpoint && !run.incomplete ? <>
-                <Button type="button" aria-label={t("复制消息")} title={t(copiedMessage === answer.key ? "已复制" : "复制消息")} data-copied={copiedMessage === answer.key || undefined} onClick={() => void copyMessage(answer.key, run.answers.map(message => message.text).join("\n\n"))}><Icon key={"icon-" + copySequence} name={copiedMessage === answer.key ? "check" : "copy"} size={15} />{copiedMessage === answer.key && <span key={"feedback-" + copySequence} className="copy-feedback" role="status">{t('已复制')}</span>}</Button>
+                <QuoteButton kind="reply" text={replyText} disabled={quoteDisabled} onQuote={addQuote} />
+                <Button type="button" aria-label={t("复制消息")} title={t(copiedMessage === answer.key ? "已复制" : "复制消息")} data-copied={copiedMessage === answer.key || undefined} onClick={() => void copyMessage(answer.key, replyText)}><Icon key={"icon-" + copySequence} name={copiedMessage === answer.key ? "check" : "copy"} size={15} />{copiedMessage === answer.key && <span key={"feedback-" + copySequence} className="copy-feedback" role="status">{t('已复制')}</span>}</Button>
                 {!mandalaMain && <Button type="button" aria-label="Fork" title={t("从这轮回答继续新对话，不重新执行")} disabled={!canFork} onClick={() => void forkReply(checkpoint.id)}><Icon name="workflow" size={15} /></Button>}
               </> : undefined} />
             </section> : operationCards}
@@ -1613,10 +1625,26 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
             try {await api("/conversations/"+selected+"/queue/"+inputId,"DELETE");if(view===navigationVersion.current){queueReads.current.generation++;setQueuedInputs(items=>items.filter(item=>item.id!==inputId));}}
             catch(e){if(view===navigationVersion.current)setError((e as Error).message);}
           }}/>
-          <div className={'composer'+(conversationDragOver?' is-conversation-drop-target':'')}
-            onDragOver={event=>{if(event.dataTransfer.types.includes(conversationDragType)&&composerDraft.loaded){event.preventDefault();event.stopPropagation();event.dataTransfer.dropEffect='copy';setConversationDragOver(true);}}}
-            onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setConversationDragOver(false);}}
-            onDrop={event=>{if(event.dataTransfer.types.includes(conversationDragType)){event.preventDefault();event.stopPropagation();setConversationDragOver(false);addConversationReference(event.dataTransfer.getData(conversationDragType));}}}>
+          <div className={'composer'+(composerDragOver?' is-composer-drop-target':'')}
+            onDragOver={event=>{
+              const { types } = event.dataTransfer;
+              if (types.includes(quoteDragType) ? quoteDisabled : !types.includes(conversationDragType) || !composerDraft.loaded) return;
+              event.preventDefault();
+              event.stopPropagation();
+              event.dataTransfer.dropEffect = 'copy';
+              setComposerDragOver(true);
+            }}
+            onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))setComposerDragOver(false);}}
+            onDrop={event=>{
+              const { dataTransfer } = event;
+              const type = dataTransfer.types.includes(quoteDragType) ? quoteDragType : conversationDragType;
+              if (!dataTransfer.types.includes(type)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              setComposerDragOver(false);
+              if (type === quoteDragType) addQuote(dataTransfer.getData(type));
+              else addConversationReference(dataTransfer.getData(type));
+            }}>
             <ComposerReferences selected={selectedReferences} items={visibleReferences} open={!!referenceQuery}
               conversationItems={referenceItems.filter(item=>item.kind==='chat')} onChangeConversation={changeConversationReference}
               loading={referencesLoading} error={referencesError} onRetry={() => setReferenceReload(value => value + 1)} activeIndex={referenceIndex} onChoose={chooseReference}
