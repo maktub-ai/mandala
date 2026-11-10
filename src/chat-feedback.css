@@ -19,7 +19,8 @@
 .composer-send-menu > button:hover { background: var(--raised); }
 .composer-send-menu span { display: grid; gap: 4px; }
 .composer-send-menu small { color: var(--muted); font-size: var(--type-meta); }
-.selection-quote { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 32px; padding: var(--space-1) var(--space-2); font-size: var(--type-meta); }
+.selection-quote { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 32px; padding: var(--space-1) var(--space-2); font-size: var(--type-meta); user-select: none; }
+.ui-button.message-quote[draggable="true"] { cursor: grab; }
 .conversation-viewport { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; }
 .product-frame .workspace-main.is-new .conversation-viewport { flex: 0 1 auto; }
 .conversation-viewport > .conversation { width: 100%; }
@@ -47,6 +48,7 @@
   .product-frame .composer textarea { max-height: min(180px, 25dvh); }
 }
 @media (pointer: coarse) {
+  .product-frame .message-actions .message-quote, .product-frame .reply-actions .message-quote, .selection-quote .message-quote { min-height: 44px; min-width: 44px; }
   .product-frame .composer-toolbar { gap: 2px; padding: 0 4px 6px; }
   .product-frame .composer .ui-select-trigger, .product-frame .composer-actions > button, .product-frame .attachment-button { min-height: 44px; }
   .product-frame .composer-actions > button, .product-frame .attachment-button { width: 44px; }
