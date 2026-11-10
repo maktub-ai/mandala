@@ -31,7 +31,7 @@ function textRanges(root: HTMLElement, query: string): Range[] {
 }
 
 type Highlights = { set(name: string, value: unknown): void; delete(name: string): void };
-export default function ConversationFind({ root, conversationId, version, onInspect }: { root: RefObject<HTMLDivElement | null>; conversationId: string; version: unknown; onInspect: () => void }) {
+export default function ConversationFind({ root, conversationId, version, hasEarlier, onInspect }: { root: RefObject<HTMLDivElement | null>; conversationId: string; version: unknown; hasEarlier: boolean; onInspect: () => void }) {
   const {text: localize } = useLanguage(), say = (zh: string, en: string) => localize(zh, en);
   const [open, setOpen] = useState(false), [query, setQuery] = useState(''), [index, setIndex] = useState(0), [count, setCount] = useState(0);
   const input = useRef<HTMLInputElement>(null), matches = useRef<Range[]>([]), restoreFocus = useRef<HTMLElement | null>(null);
@@ -73,6 +73,7 @@ export default function ConversationFind({ root, conversationId, version, onInsp
     <Icon name="search" size={16} />
     <Input ref={input} type="search" aria-label={say('对话内查找', 'Find in conversation')} value={query} onChange={event => setQuery(event.target.value)}
       onKeyDown={event => { if (event.key === 'Enter' && !composing.current && !composingKey(event.nativeEvent)) { event.preventDefault(); move(event.shiftKey ? -1 : 1); } }} />
+    {hasEarlier && <small>{say('已加载记录', 'Loaded messages')}</small>}
     <output data-testid="conversation-find-count" aria-live="polite">{count ? index + 1 : 0} / {count}</output>
     <Button type="button" disabled={!count} aria-label={say('上一个匹配', 'Previous match')} onClick={() => move(-1)}><Icon name="arrowUp" size={16} /></Button>
     <Button type="button" disabled={!count} aria-label={say('下一个匹配', 'Next match')} onClick={() => move(1)}><Icon name="arrowDown" size={16} /></Button>

@@ -64,7 +64,7 @@ for (const resource of ['detail', 'events']) test(`pending authorized ${resource
  const held = new Promise<void>(resolve => { release = resolve; });
  const mutations: string[] = [];
  page.on('request', req => { if (req.method() === 'POST' && /\/api\/conversations(?:$|\/)/.test(req.url())) mutations.push(req.url()); });
- await page.route('**/api/conversations/' + conversation.id + (resource === 'events' ? '/events' : ''), async route => { entered = true; await held; await route.continue(); });
+ await page.route('**/api/conversations/' + conversation.id + (resource === 'events' ? '/events?*' : ''), async route => { entered = true; await held; await route.continue(); });
  await page.goto('/?conversation=' + conversation.id);
  try {
   await expect.poll(() => entered).toBe(true);

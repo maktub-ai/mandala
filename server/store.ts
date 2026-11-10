@@ -34,6 +34,8 @@ export interface Store {
   setAutomaticTitle(id: string, title: string): boolean;
   appendEvent(id: string, kind: EventKind, data: unknown, observedAt?: string): DisplayEvent;
   listEvents(id: string, afterId: number, limit?: number): DisplayEvent[];
+  historyWindowStart(id: string, before: number, turns: number): number | null;
+  listEarlierEvents(id: string, from: number, before: number): DisplayEvent[];
   listAgentHistory(id: string, afterId: number, latest: boolean): DisplayEvent[];
   replaceHistory(id: string, fromEventId: number, nativeId: string | null): number;
   createTask(input: Pick<Task, "projectId" | "sourceConversationId" | "targetConversationId" | "kind" | "request"> & Pick<Task, "continuationEpoch" | "autoResume">): Task;
@@ -42,6 +44,12 @@ export interface Store {
   updateTask(id: string, patch: Partial<Pick<Task, "status" | "result" | "startEventId" | "continuationEpoch" | "autoResume">>): void;
   close(): void;
 }
+// A regular execution already belongs to its user turn. Independently started
+// executions also need boundaries, including Chats used only for Task runs.
+const agentReplyAnchor = `(kind='metadata' AND json_extract(data,'$.agentMessage.direction')='reply'
+  AND length(trim(json_extract(data,'$.agentMessage.reply')))>0)`;
+const historyAnchor = `(kind='user' OR (kind='metadata' AND json_extract(data,'$.execution')='started') OR ${agentReplyAnchor})`;
+const decodeEvent = (row: Record<string, unknown>) => ({ ...row, data: JSON.parse(row.data as string) }) as DisplayEvent;
 const decodeTask = (data: string): Task => {
   const task = JSON.parse(data) as Task;
   return { ...task, continuationEpoch: task.continuationEpoch ?? 0, autoResume: task.autoResume ?? false };
@@ -109,6 +117,12 @@ export function openStore(home: string, maintenanceToken?:symbol): Store {
   const eventColumns = db.prepare("PRAGMA table_info(events)").all();
   if (!eventColumns.some(row => row.name === "superseded"))
     db.exec("ALTER TABLE events ADD COLUMN superseded INTEGER NOT NULL DEFAULT 0");
+  db.exec(`CREATE INDEX IF NOT EXISTS events_chat_history_anchors ON events(conversationId,id)
+    WHERE superseded=0 AND ${historyAnchor};
+    CREATE INDEX IF NOT EXISTS events_chat_user_runs ON events(conversationId,json_extract(data,'$.runId'))
+    WHERE superseded=0 AND kind='user';
+    CREATE INDEX IF NOT EXISTS events_chat_agent_replies ON events(conversationId,json_extract(data,'$.agentMessage.id'),id)
+    WHERE superseded=0 AND ${agentReplyAnchor};`);
   // Digest invalidation follows the affected transcript, including writes from other connections.
   db.exec(`CREATE TABLE IF NOT EXISTS event_revisions (conversation_id TEXT PRIMARY KEY, revision INTEGER NOT NULL);
     CREATE TRIGGER IF NOT EXISTS event_revision_insert AFTER INSERT ON events BEGIN
@@ -299,10 +313,33 @@ export function openStore(home: string, maintenanceToken?:symbol): Store {
           "SELECT id,conversationId,kind,data,createdAt FROM events WHERE conversationId=? AND id>? AND superseded=0 ORDER BY id LIMIT ?",
         )
         .all(conversationId, afterId, limit ?? -1)
-        .map((r) => ({
-          ...r,
-          data: JSON.parse(r.data as string),
-        })) as DisplayEvent[];
+        .map(decodeEvent);
+    },
+    historyWindowStart(id, before, turns) {
+      const anchors = db.prepare(`SELECT id, kind, json_extract(data,'$.runId') AS runId FROM events AS e
+        WHERE conversationId=? AND id<? AND superseded=0 AND ${historyAnchor}
+          AND (kind='user' OR (json_extract(data,'$.execution')='started' AND NOT EXISTS (SELECT 1 FROM events AS u
+            WHERE u.conversationId=e.conversationId AND u.superseded=0 AND u.kind='user'
+              AND json_extract(u.data,'$.runId')=json_extract(e.data,'$.runId')))
+            OR (${agentReplyAnchor} AND NOT EXISTS (SELECT 1 FROM events AS r
+              WHERE r.conversationId=e.conversationId AND r.id<e.id AND r.superseded=0 AND ${agentReplyAnchor}
+                AND json_extract(r.data,'$.agentMessage.id')=json_extract(e.data,'$.agentMessage.id'))))
+        ORDER BY id DESC LIMIT ?`).all(id, before, turns + 1);
+      if (anchors.length <= turns) return null;
+      const oldest = anchors[turns - 1], previous = anchors[turns];
+      if (oldest.kind === 'user' && typeof oldest.runId === 'string') {
+        // Some stored runs emitted startup events before accepting their user message.
+        const earlier = db.prepare(`SELECT id FROM events WHERE conversationId=? AND superseded=0
+          AND id>? AND id<? AND json_extract(data,'$.runId')=? ORDER BY id LIMIT 1`)
+          .get(id, previous.id!, oldest.id!, oldest.runId);
+        if (earlier) return Number(earlier.id);
+      }
+      return Number(oldest.id);
+    },
+    listEarlierEvents(id, from, before) {
+      return db.prepare(`SELECT id,conversationId,kind,data,createdAt FROM events
+        WHERE conversationId=? AND id>=? AND id<? AND superseded=0 ORDER BY id`)
+        .all(id, from, before).map(decodeEvent);
     },
     listAgentHistory(id, afterId, latest) {
       const rows = db.prepare(`SELECT id,conversationId,kind,data,createdAt FROM events

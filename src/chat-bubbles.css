@@ -41,3 +41,5 @@
 }
 /* A structured reply (heading, list, code, table) is a document: it drops the bubble fill and reads like an ordinary chat answer. Short replies keep the bubble. */
 .product-frame .mandala-messages .chat-reply-bubble:has(.markdown-text :is(h1,h2,h3,h4,ol,ul,pre,table)) { width:100%; padding:0; background:transparent; }
+
+.chat-earlier-history { display:flex; justify-content:center; margin:0 0 16px; overflow-anchor:none; }

@@ -178,6 +178,93 @@ it("replays_events_after_cursor_without_duplicate_execution", async () => {
   expect(text).toContain('event: history-ready\ndata: {"cursor":4}');
   expect(store.listConversations()).toHaveLength(1);
 });
+it("pages recent conversation turns and resumes live events from the last received ID", async () => {
+  const chat = store.createConversation({ projectId: "p", agentId: "a", cli: "codex", model: null });
+  const path = url + "/api/conversations/" + chat.id;
+  const turns = Array.from({ length: 25 }, (_, i) => {
+    const runId = "run-" + i;
+    return [
+      store.appendEvent(chat.id, "user", { text: "Question " + i, runId }),
+      store.appendEvent(chat.id, "metadata", { execution: "started", runId }),
+      store.appendEvent(chat.id, "text", { text: "Answer " + i, runId }),
+    ];
+  });
+  const connect = async (lastId?: number) => {
+    const controller = new AbortController();
+    const response = await fetch(path + "/events?recent=20", {
+      headers: lastId ? { "Last-Event-ID": String(lastId) } : {},
+      signal: controller.signal,
+    });
+    const reader = response.body!.getReader(), decoder = new TextDecoder();
+    let buffered = "";
+    const readThrough = async (marker: string) => {
+      while (!buffered.includes(marker)) {
+        const { value, done } = await reader.read();
+        if (done) throw new Error("SSE closed before " + marker);
+        buffered += decoder.decode(value, { stream: true });
+      }
+      const end = buffered.indexOf(marker) + marker.length;
+      const result = buffered.slice(0, end);
+      buffered = buffered.slice(end);
+      return result;
+    };
+    return { readThrough, close: () => controller.abort() };
+  };
+  const ids = (frames: string) => [...frames.matchAll(/^id: (\d+)$/gm)].map(match => Number(match[1]));
+  const initial = await connect();
+  const last = turns.at(-1)!.at(-1)!.id, before = turns[5][0].id;
+  try {
+    const replay = await initial.readThrough('event: history-ready\ndata: {"cursor":' + last + '}\n\n');
+    expect(ids(replay)).toEqual(turns.slice(5).flat().map(event => event.id));
+    expect(replay).toContain('event: history-window\ndata: {"before":' + before + '}');
+    const page = await (await fetch(path + "/history?before=" + before + "&recent=20")).json();
+    expect(page.events.map((event: { id: number }) => event.id)).toEqual(turns.slice(0, 5).flat().map(event => event.id));
+    expect(page.before).toBeNull();
+    const live = store.appendEvent(chat.id, "user", { text: "Live question" });
+    expect(ids(await initial.readThrough('"text":"Live question"'))).toEqual([live.id]);
+  } finally { initial.close(); }
+  const reconnectAfter = store.listEvents(chat.id, last).at(-1)!.id;
+  const missed = store.appendEvent(chat.id, "text", { text: "While disconnected" });
+  const resumed = await connect(reconnectAfter);
+  try {
+    const replay = await resumed.readThrough('event: history-ready\ndata: {"cursor":' + missed.id + '}\n\n');
+    expect(ids(replay)).toEqual([missed.id]);
+    expect(replay).not.toContain("history-window");
+  } finally { resumed.close(); }
+});
+it("counts a substantive agent reply once even when its state changes", async () => {
+  const chat = store.createConversation({ projectId: "p", agentId: "a", cli: "codex", model: null });
+  const user = store.appendEvent(chat.id, "user", { text: "Old request" });
+  const reply = store.appendEvent(chat.id, "metadata", {
+    agentMessage: { id: "inquiry", direction: "reply", reply: "Here is the result", replyState: "pending" },
+  });
+  const update = store.appendEvent(chat.id, "metadata", {
+    agentMessage: { id: "inquiry", direction: "reply", reply: "Here is the result", replyState: "consumed" },
+  });
+  const latest = store.appendEvent(chat.id, "user", { text: "Latest request" });
+  const path = url + "/api/conversations/" + chat.id + "/history?recent=2";
+  const page = await (await fetch(path)).json();
+  expect(page.events.map((event: { id: number }) => event.id)).toEqual([reply.id, update.id, latest.id]);
+  expect(page.before).toBe(reply.id);
+  const earlier = await (await fetch(path + "&before=" + page.before)).json();
+  expect(earlier.events.map((event: { id: number }) => event.id)).toEqual([user.id]);
+  expect(earlier.before).toBeNull();
+});
+it("gives an empty recent history a resume cursor", async () => {
+  const chat = store.createConversation({ projectId: "p", agentId: "a", cli: "codex", model: null });
+  const controller = new AbortController();
+  try {
+    const response = await fetch(url + "/api/conversations/" + chat.id + "/events?recent=20", { signal: controller.signal });
+    const reader = response.body!.getReader(), decoder = new TextDecoder();
+    let frames = "";
+    while (!frames.includes('data: {"cursor":0}\n\n')) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error("SSE closed before history-ready");
+      frames += decoder.decode(value, { stream: true });
+    }
+    expect(frames).toContain('id: 0\nevent: history-ready\ndata: {"cursor":0}');
+  } finally { controller.abort(); }
+});
 it("renames_a_conversation_and_rejects_invalid_titles_without_changing_execution", async () => {
   const c = store.createConversation({
     projectId: "p",

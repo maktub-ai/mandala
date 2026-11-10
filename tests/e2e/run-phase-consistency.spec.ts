@@ -44,7 +44,7 @@ test('running without output still displays startup', async ({ page, request }) 
       { id: 1, conversationId: chat.id, kind: 'user', data: { text: 'hold' }, createdAt: new Date().toISOString() },
       { id: 2, conversationId: chat.id, kind: 'status', data: { status: 'running' }, createdAt: new Date().toISOString() },
     ];
-    await page.route(`**/api/conversations/${chat.id}/events`, route => route.fulfill({
+    await page.route(`**/api/conversations/${chat.id}/events?*`, route => route.fulfill({
       contentType: 'text/event-stream', body: events.map(event => `data: ${JSON.stringify(event)}\n\n`).join('') + 'event: history-ready\ndata: {}\n\n',
     }));
     await page.goto(`/?project=run-phase&conversation=${chat.id}`);

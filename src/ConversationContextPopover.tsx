@@ -20,9 +20,9 @@ type Source = {key:string;icon:IconName;name:string;kind:string;tone?:'muted';op
 // The single context view of a chat, and the summary of everything the side panel holds:
 // where it works and what changed, what is moving, every source it draws on and what it can use.
 // Clicking through opens the matching side-panel tool; documents open in the panel's reader.
-export default function ConversationContextPopover({conversationId,executionLocation,activityVersion='',running=false,capabilitiesQuery,loadFiles,onPanel,onDocument,onContent}:{
+export default function ConversationContextPopover({conversationId,executionLocation,activityVersion='',running=false,capabilitiesQuery,loadFiles,hasEarlier,onPanel,onDocument,onContent}:{
  conversationId:string; executionLocation?:ExecutionLocation; activityVersion?:string; running?:boolean; capabilitiesQuery?:string;
- loadFiles?:()=>ConversationFile[];
+ loadFiles?:()=>ConversationFile[]; hasEarlier?:boolean;
  onPanel:(tab:ConversationWorkspaceTab)=>void; onDocument:(doc:ReferenceDocument)=>void; onContent:(target:ContentTarget)=>void;
 }) {
  const {text}=useLanguage();
@@ -85,6 +85,7 @@ export default function ConversationContextPopover({conversationId,executionLoca
     {!data?<p className="context-popover-note">{text('正在读取…','Loading…')}</p>:!sources.length&&<p className="context-popover-note">{text('还没有附件、资料或记忆。','No attachments, sources or memories yet.')}</p>}
     <div className="context-popover-sources">{sources.map(source=>{const body=<><Icon name={source.icon} size={16}/><span className="context-popover-name">{source.name}</span><span className="context-popover-aside" data-tone={source.tone}>{source.kind}</span></>;
      return source.href?<a key={source.key} className="context-popover-row" href={source.href} onClick={event=>{setOpen(false);followAssetPage(event);}}>{body}</a>:<button type="button" key={source.key} className="context-popover-row" onClick={()=>{setOpen(false);source.open?.();}}>{body}</button>;})}</div>
+    {hasEarlier&&<p className="context-popover-note">{text('消息里的文件链接会随历史记录加载。','File links in messages appear as older history is loaded.')}</p>}
     {data?.truncated&&<p className="context-popover-note">{text('引用过多，仅显示最近的部分。','Only the most recent references are shown.')}</p>}
    </section>
    <section aria-label={text('能力','Capabilities')}><h3>{text('能力','Capabilities')}</h3>

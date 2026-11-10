@@ -122,6 +122,24 @@ const server = createServer(async(req,res)=>{
   if(await mandalaPanelsFixture(req,res,home,store,manager,automations))return;
   if(await conversationActivityFixture(req,res,store,manager,native))return;
   if(await liveOutputFixture(req,res,store,manager,native))return;
+  if (req.method === 'POST' && req.url === '/__test__/chat-history') {
+    const { ensureMandalaConfig } = await import('../../server/config');
+    const { ensureMandalaConversation } = await import('../../server/mandala');
+    const { config } = await ensureMandalaConfig(home);
+    const chats = [
+      store.createConversation({ projectId: '', agentId: '', cli: 'codex', model: null, workspaceId: null }),
+      ensureMandalaConversation(store, config),
+    ];
+    for (const chat of chats) for (let i = 1; i <= 25; i++) {
+      const runId = 'history-' + i;
+      store.appendEvent(chat.id, 'user', { text: 'History request ' + i, runId });
+      store.appendEvent(chat.id, 'text', { text: 'History answer ' + i, runId });
+      store.appendEvent(chat.id, 'status', { status: 'idle', runId });
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ordinary: chats[0].id, mandala: chats[1].id }));
+    return;
+  }
   if(req.method==='POST'&&req.url==='/__test__/mandala-proposal'){
     const {ensureMandalaConfig}=await import('../../server/config'),{ensureMandalaConversation}=await import('../../server/mandala');
     const {config}=await ensureMandalaConfig(home),chat=ensureMandalaConversation(store,config);

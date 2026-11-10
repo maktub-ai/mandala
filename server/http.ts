@@ -656,7 +656,18 @@ export function createHttpServer({
         if(method==='GET'||method==='POST'&&['workspace-file','local-file','local-files','attachments','model','queue','fork','branch','edit','messages','continue','questions','title','memory'].includes(action??''))manager.authorizeConversationRead(id);
         if(action==='results'&&method==='GET')return json(res,200,conversationResults(store,manager.taskService,{userId:store.ownerUserId},id,manager.authorizeConversationRead));
         if (action === "reference-summary" && method === "GET") return json(res,200,await manager.listReferenceSummary(id));
+        const recentTurns = () => {
+          const recent = Number(url.searchParams.get('recent'));
+          if (!Number.isSafeInteger(recent) || recent < 1 || recent > 100) throw new Error('invalid history window');
+          return recent;
+        };
         if (action === 'history' && method === 'GET') {
+          if (url.searchParams.has('recent')) {
+            const before = Number(url.searchParams.get('before') ?? Number.MAX_SAFE_INTEGER);
+            if (!Number.isSafeInteger(before) || before < 1) throw new Error('invalid event cursor');
+            const start = store.historyWindowStart(id, before, recentTurns());
+            return json(res, 200, { events: store.listEarlierEvents(id, start ?? 0, before), before: start });
+          }
           const after = Number(url.searchParams.get('after') ?? 0);
           if (!Number.isSafeInteger(after) || after < 0) throw new Error('invalid event cursor');
           const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
@@ -842,9 +853,14 @@ export function createHttpServer({
         if (action === "references" && method === "POST") return json(res,200,await createMessageReference({home,store,manager,config:(await readConfig(home)).config,principal:workspacePrincipal(store),conversationId:id},await requestBody(req)));
         if (action === "references" && method === "GET") return json(res,200,{items:await manager.listComposerReferences(id)});
         if (action === "events" && method === "GET") {
-          let cursor = Number(
-            url.searchParams.get("after") ?? req.headers["last-event-id"] ?? 0,
-          );
+          const recent = url.searchParams.has('recent') ? recentTurns() : null;
+          const after = recent === null
+            ? url.searchParams.get("after") ?? req.headers["last-event-id"]
+            : req.headers["last-event-id"] ?? url.searchParams.get("after");
+          const window = recent !== null && after == null
+            ? { before: store.historyWindowStart(id, Number.MAX_SAFE_INTEGER, recent) }
+            : null;
+          let cursor = after == null ? (window?.before ?? 1) - 1 : Number(after);
           if (!Number.isSafeInteger(cursor) || cursor < 0)
             throw new Error("invalid event cursor");
           res.writeHead(200, {
@@ -853,6 +869,7 @@ export function createHttpServer({
             Connection: "keep-alive",
             "X-Accel-Buffering": "no",
           });
+          if (window) res.write(`event: history-window\ndata: ${JSON.stringify(window)}\n\n`);
           let replaying = true;
           const pump = () => {
             if(res.destroyed||res.writableEnded||res.writableNeedDrain)return;
@@ -865,7 +882,12 @@ export function createHttpServer({
               if(!res.write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`))return;
             }
             if(batch.length===256)setImmediate(pump);
-            else if(replaying){replaying=false;res.write(`event: history-ready\ndata: ${JSON.stringify({cursor})}\n\n`);}
+            else if (replaying) {
+              replaying = false;
+              // Even an empty recent window must resume from the same point after a disconnect.
+              const emptyCursor = recent !== null && cursor === 0 ? 'id: 0\n' : '';
+              res.write(`${emptyCursor}event: history-ready\ndata: ${JSON.stringify({ cursor })}\n\n`);
+            }
           };
           pump();
           res.write(": connected\n\n");

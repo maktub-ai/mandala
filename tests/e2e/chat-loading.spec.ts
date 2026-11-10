@@ -12,7 +12,7 @@ test('history replay keeps conversation refresh requests bounded',async({page,re
  });
  await page.route('**/api/conversations/'+chat.id+'/queue',route=>route.fulfill({json:[]}));
  const events=[{kind:'user',data:{text:'Synthetic history'}},{kind:'text',data:{text:'Synthetic history answer'}},...Array.from({length:250},()=>({kind:'metadata',data:{synthetic:true}})),{kind:'status',data:{status:'idle'}}].map((event,index)=>({...event,id:index+1,conversationId:chat.id,createdAt:'2026-10-01T00:00:00.000Z'}));
- await page.route('**/api/conversations/'+chat.id+'/events',route=>route.fulfill({contentType:'text/event-stream',body:events.map(event=>'id: '+event.id+'\ndata: '+JSON.stringify(event)+'\n\n').join('')+'event: history-ready\ndata: {}\n\n'}));
+ await page.route('**/api/conversations/'+chat.id+'/events?*',route=>route.fulfill({contentType:'text/event-stream',body:events.map(event=>'id: '+event.id+'\ndata: '+JSON.stringify(event)+'\n\n').join('')+'event: history-ready\ndata: {}\n\n'}));
  await page.goto('/?project=performance&conversation='+chat.id);
  await expect(page.getByText('Synthetic history answer',{exact:true})).toBeVisible();
  await expect(page.getByTestId('chat-status')).toHaveText('就绪');
@@ -28,7 +28,7 @@ test('keeps native reasoning unmounted until its disclosure opens',async({page,r
  expect((await request.put('/api/config',{data:{revision,config:{...config,projects:[...config.projects,{id:projectId,name:'Deferred reasoning',cwd:executionDirectory,agentIds:[agentId],resources:[],mcp:[],skills:[]}],agents:[...config.agents,{id:agentId,name:'Deferred reasoning',instructions:'Synthetic fixture',defaultCli:'codex',models:{},mcp:[],skills:[]}]}}})).ok()).toBe(true);
  const chat=await(await request.post('/api/conversations',{data:{projectId,agentId,cli:'codex'}})).json();
  const events=[{kind:'user',data:{text:'Inspect the result'}},{kind:'tool',data:{method:'item/completed',params:{item:{id:'reasoning',type:'reasoning',summary:['Deferred reasoning body']}}}},{kind:'text',data:{text:'Final result'}},{kind:'status',data:{status:'idle'}}].map((event,index)=>({...event,id:index+1,conversationId:chat.id,createdAt:'2026-10-01T00:00:00.000Z'}));
- await page.route('**/api/conversations/'+chat.id+'/events',route=>route.fulfill({contentType:'text/event-stream',body:'data: '+JSON.stringify(events[0])+'\n\nevent: history-ready\ndata: {}\n\n'}));
+ await page.route('**/api/conversations/'+chat.id+'/events?*',route=>route.fulfill({contentType:'text/event-stream',body:'data: '+JSON.stringify(events[0])+'\n\nevent: history-ready\ndata: {}\n\n'}));
  await page.addInitScript(()=>{const Native=window.EventSource;window.EventSource=class extends Native{constructor(url:string|URL,options?:EventSourceInit){super(url,options);(window as any).__historyStream=this;}};});
  await page.goto('/?conversation='+chat.id);
  await expect(page.getByText('Inspect the result',{exact:true})).toBeVisible();
@@ -46,7 +46,7 @@ test('keeps native reasoning unmounted until its disclosure opens',async({page,r
 test('keeps an unsaved message edit when returning from another page',async({page,request})=>{
  const response=await request.post('/api/conversations',{data:{projectId:'',agentId:'',cli:'codex',workspaceId:null}});expect(response.ok()).toBe(true);const chat=await response.json();
  const events=[{kind:'user',data:{text:'Original editable request'}},{kind:'text',data:{text:'Saved answer'}},{kind:'status',data:{status:'idle'}}].map((event,index)=>({...event,id:index+1,conversationId:chat.id,createdAt:'2026-10-01T00:00:00.000Z'}));
- await page.route('**/api/conversations/'+chat.id+'/events',route=>route.fulfill({contentType:'text/event-stream',body:events.map(event=>'data: '+JSON.stringify(event)+'\n\n').join('')+'event: history-ready\ndata: {}\n\n'}));
+ await page.route('**/api/conversations/'+chat.id+'/events?*',route=>route.fulfill({contentType:'text/event-stream',body:events.map(event=>'data: '+JSON.stringify(event)+'\n\n').join('')+'event: history-ready\ndata: {}\n\n'}));
  await page.goto('/?conversation='+chat.id);await expect(page.getByText('Saved answer',{exact:true})).toBeVisible();
  await page.locator('.message.user').hover();await page.getByRole('button',{name:'编辑消息',exact:true}).click();
  await page.getByRole('textbox',{name:'修改消息内容',exact:true}).fill('Keep this unsaved edit');
@@ -59,7 +59,7 @@ test('keeps a pending approval disabled after visiting another page',async({page
  const approval={id:'pending-approval',method:'item/commandExecution/requestApproval',params:{command:'pwd'}};
  await page.route('**/api/conversations/'+chat.id,route=>route.fulfill({json:{conversation:{...chat,status:'approval'},approvals:[approval]}}));
  const event={id:1,conversationId:chat.id,kind:'user',data:{text:'Pending approval fixture'},createdAt:'2026-10-01T00:00:00.000Z'};
- await page.route('**/api/conversations/'+chat.id+'/events',route=>route.fulfill({contentType:'text/event-stream',body:'data: '+JSON.stringify(event)+'\n\nevent: history-ready\ndata: {}\n\n'}));
+ await page.route('**/api/conversations/'+chat.id+'/events?*',route=>route.fulfill({contentType:'text/event-stream',body:'data: '+JSON.stringify(event)+'\n\nevent: history-ready\ndata: {}\n\n'}));
  let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve);
  await page.route('**/api/conversations/'+chat.id+'/approvals/'+approval.id,async route=>{await held;await route.fulfill({json:{}});});
  try{
@@ -91,4 +91,51 @@ test('user-only history has no orphan Agent avatars and keeps later execution vi
  await emit('status',{status:'idle'},1000007);
  await expect(page.locator('.agent-reply')).toHaveCount(2);
  await expect(page.locator('.agent-reply > .message.text')).toContainText('Synthetic completed answer');
+});
+
+test('opens ordinary and Mandala chats at the latest page and anchors earlier history on scroll', async ({ page, request }) => {
+ const { ordinary, mandala } = await (await request.post('/__test__/chat-history')).json();
+ for (const [path, id] of [['/', ordinary], ['/mandala', mandala]]) {
+  await page.goto(path + '?conversation=' + id);
+  const messages = page.locator('.messages');
+  const latest = messages.getByText('History answer 25', { exact: true });
+  const first = messages.getByText('History request 6', { exact: true });
+  await expect(latest).toBeVisible();
+  await expect(messages.getByText('History request 5', { exact: true })).toHaveCount(0);
+  if (id === ordinary) {
+   const shortcut = await page.evaluate(() => /Mac/.test(navigator.platform)) ? 'Meta+f' : 'Control+f';
+   await page.keyboard.press(shortcut);
+   const find = page.getByRole('search', { name: '对话内查找' });
+   await expect(find.getByText('已加载记录', { exact: true })).toBeVisible();
+   await find.getByRole('searchbox').fill('History request 5');
+   await expect(find.getByTestId('conversation-find-count')).toHaveText('0 / 0');
+   await page.keyboard.press('Escape');
+  }
+  const scroller = page.locator('.conversation');
+  await expect.poll(() => scroller.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(4);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const historyUrl = (url: URL) => url.pathname === '/api/conversations/' + id + '/history';
+  await page.route(historyUrl, async route => { await held; await route.continue(); });
+  try {
+   await scroller.evaluate(element => { element.scrollTop = 0; });
+   await expect(page.getByRole('button', { name: '正在加载更早的记录…' })).toBeDisabled();
+   const before = (await first.boundingBox())!.y;
+   release();
+   await expect(messages.getByText('History request 1', { exact: true })).toBeAttached();
+   await expect.poll(async () => Math.abs((await first.boundingBox())!.y - before)).toBeLessThan(3);
+   await expect(latest).toHaveCount(1);
+  } finally {
+   release();
+   await page.unroute(historyUrl);
+  }
+  if (id === ordinary) {
+   await page.getByRole('navigation', { name: '主导航', exact: true }).getByRole('link', { name: '任务', exact: true }).click();
+   await expect(page.locator('.task-workspace')).toBeVisible();
+   await page.goBack();
+   await expect(latest).toBeVisible();
+   await expect(messages.getByText('History request 5', { exact: true })).toHaveCount(0);
+   await expect.poll(() => scroller.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(4);
+  }
+ }
 });

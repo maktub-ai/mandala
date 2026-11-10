@@ -217,6 +217,11 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     [events, setEvents] = useState<DisplayEvent[]>([]),
     [approvals, setApprovals] = useState<Approval[]>([]);
   const [historyReadyConversation, setHistoryReadyConversation] = useState('');
+  const [earlierBefore, setEarlierBefore] = useState<number | null>(null);
+  const [earlierState, setEarlierState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const loadEarlier = useRef<(() => void) | null>(null);
+  const historyAnchor = useRef<{ element: HTMLElement; top: number } | null>(null);
+  const lastScrollTop = useRef(0);
   const historyReady = !selected || historyReadyConversation === selected;
   const readerConversation = useRef("");
   const [contentRequest, setContentRequest] = useState<{ conversationId: string; target: ContentTarget } | null>(null);
@@ -529,13 +534,17 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     setEditingMessage(null);
     setBranchPending(false);
     clearCopiedMessage();
-    followLatest.current = true;
-    setAwayFromLatest(false);
   }, [selected]);
   useEffect(() => {
     if (!chatActive) return;
+    followLatest.current = true;
+    setAwayFromLatest(false);
     setEvents([]);
     setHistoryReadyConversation('');
+    setEarlierBefore(null);
+    setEarlierState('idle');
+    historyAnchor.current = null;
+    lastScrollTop.current = 0;
     setApprovals([]);
     setConnectionLost(false);
     setChat(null);
@@ -596,10 +605,41 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
           if (active && reload) { reload = false; scheduleLoad(); }
         });
     };
+    const path = "/conversations/" + selected, pageSize = 20;
+    let before: number | null = null;
+    let earlierRequest: AbortController | undefined;
+    loadEarlier.current = () => {
+      if (!active || !initialReplayComplete || before === null || earlierRequest) return;
+      const controller = new AbortController();
+      earlierRequest = controller;
+      setEarlierState('loading');
+      void api<{ events: DisplayEvent[]; before: number | null }>(
+        path + "/history?recent=" + pageSize + "&before=" + before, "GET", undefined, controller.signal,
+      ).then(page => {
+        if (!active) return;
+        const viewport = messagesRoot.current?.closest('.conversation');
+        if (viewport && !followLatest.current) {
+          const top = viewport.getBoundingClientRect().top;
+          const element = Array.from(messagesRoot.current!.querySelectorAll<HTMLElement>('.chat-turn'))
+            .find(turn => turn.getBoundingClientRect().bottom > top);
+          if (element) historyAnchor.current = { element, top: element.getBoundingClientRect().top };
+        }
+        before = page.before;
+        setEarlierBefore(before);
+        // Replay the newer window over the page so an edit arriving during the read
+        // still removes any now-superseded events from the older response.
+        setEvents(previous => mergeChatEvents(page.events, previous));
+        setEarlierState('idle');
+      }).catch(() => { if (active) setEarlierState('error'); })
+        .finally(() => { earlierRequest = undefined; });
+    };
     load();
-    const stream = new EventSource(
-      "/api/conversations/" + selected + "/events",
-    );
+    const stream = new EventSource("/api" + path + "/events?recent=" + pageSize);
+    stream.addEventListener('history-window', (message: MessageEvent<string>) => {
+      if (!active || initialReplayComplete) return;
+      before = (JSON.parse(message.data) as { before: number | null }).before;
+      setEarlierBefore(before);
+    });
     stream.onerror = () => { if (active) setConnectionLost(true); };
     stream.onopen = () => { if (active) { setConnectionLost(false); if (initialReplayComplete) scheduleLoad(); } };
     stream.addEventListener('history-ready', () => {
@@ -635,13 +675,20 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     };
     return () => {
       active = false;
+      loadEarlier.current = null;
+      earlierRequest?.abort();
       clearTimeout(refreshTimer); clearTimeout(eventTimer);
       stream.close();
     };
   }, [selected, chatActive]);
   useLayoutEffect(() => {
     const viewport = bottom.current?.closest('.conversation');
-    if (followLatest.current && viewport) viewport.scrollTop = viewport.scrollHeight;
+    const anchor = historyAnchor.current;
+    historyAnchor.current = null;
+    if (!viewport) return;
+    if (followLatest.current) viewport.scrollTop = viewport.scrollHeight;
+    else if (anchor?.element.isConnected) viewport.scrollTop += anchor.element.getBoundingClientRect().top - anchor.top;
+    lastScrollTop.current = viewport.scrollTop;
   }, [events, approvals.length, historyReady]);
   const busy =
     pending || chat?.status === "running" || chat?.status === "approval";
@@ -1073,26 +1120,31 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const resultGroups=useMemo(()=>{
     const presented=new Set(turns.flatMap(turn=>turn.messages.flatMap(message=>message.source?.kind==='coordination'?message.source.receiptIds:[])));
     const groups=new Map<number|null,typeof executionResults.items>();
+    const oldestLoadedAt = earlierBefore !== null ? events[0]?.createdAt : undefined;
     for(const item of executionResults.items){
       if(presented.has(item.id))continue;
       const turn=[...turns].reverse().find(turn=>(turn.events.find(event=>event.kind==='user')??turn.events[0]).createdAt<=item.createdAt);
+      if (!turn && oldestLoadedAt && item.createdAt < oldestLoadedAt) continue;
       const key=turn?.key??null;
       groups.set(key,[...groups.get(key)??[],item]);
     }
     return groups;
-  },[turns,executionResults.items]);
+  },[turns,executionResults.items,earlierBefore,events]);
   const focusedExecution=useRef('');
   useLayoutEffect(()=>{
     const runId=new URLSearchParams(location.search).get('run');
     if(!runId||!historyReady){focusedExecution.current='';return;}
     const key=selected+':'+runId;if(focusedExecution.current===key)return;
     const target=messagesRoot.current?.querySelector<HTMLElement>('[data-run-id="'+CSS.escape(runId)+'"]');
-    if(!target)return;
+    if (!target) {
+      if (earlierState === 'idle') loadEarlier.current?.();
+      return;
+    }
     focusedExecution.current=key;followLatest.current=false;setAwayFromLatest(true);
     target.focus({preventScroll:true});
     const viewport=target.closest<HTMLElement>('.conversation');
     if(viewport)viewport.scrollTop+=target.getBoundingClientRect().top-viewport.getBoundingClientRect().top;
-  },[selected,historyReady,events,routeLocation]);
+  },[selected,historyReady,events,routeLocation,earlierState]);
   const chatMessages = useMemo(() => turns.flatMap(turn => turn.messages), [turns]);
   const verifiedFiles = useVerifiedConversationFiles(chatActive ? selected : "", chatMessages);
   const publishedFiles=usePublishedConversationFiles(chatActive?selected:'',chat?.updatedAt??'');
@@ -1371,7 +1423,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   // The chat's context glance: in the desktop titlebar beside the panel button, otherwise at the end of the chat bar.
   // A remote workspace's CLI status comes from its machine, so the notice points to that machine rather than local CLI setup.
   const statusMachine = chat?.executionLocation ? { name: chat.executionLocation.machineName } : workspace?.machineId !== undefined ? { name: config.executionMachines?.find(item => item.id === workspace.machineId)?.name ?? localize("执行机器不可用", "Machine unavailable") } : undefined;
-  const contextPopover = selected && !workbench && !mandalaMain ? <ConversationContextPopover conversationId={selected} executionLocation={chat?.executionLocation} activityVersion={chat?.updatedAt} running={chat?.status==='running'} capabilitiesQuery={effectiveQuery} loadFiles={loadChatFiles} onContent={openContent} onPanel={tab=>{setWorkspaceTab(tab);setEffectiveOpen(true);}} onDocument={doc=>openContent({kind:'asset',assetId:doc.assetId,versionId:doc.versionId,fileId:doc.files?.[0]?.fileId??'',title:doc.title})}/> : null;
+  const contextPopover = selected && !workbench && !mandalaMain ? <ConversationContextPopover conversationId={selected} executionLocation={chat?.executionLocation} activityVersion={chat?.updatedAt} running={chat?.status==='running'} capabilitiesQuery={effectiveQuery} loadFiles={loadChatFiles} hasEarlier={earlierBefore !== null} onContent={openContent} onPanel={tab=>{setWorkspaceTab(tab);setEffectiveOpen(true);}} onDocument={doc=>openContent({kind:'asset',assetId:doc.assetId,versionId:doc.versionId,fileId:doc.files?.[0]?.fileId??'',title:doc.title})}/> : null;
   const environmentPanel = cli && <>{!selected && <p className="effective-scope">{agent?.name}{project && <> / {project.name}</>}</p>}<EffectivePanel visible={effectiveOpen && (!selected || !!workbench || workspaceTab === "configuration")} view={selected ? "capabilities" : "all"} projectId={projectId} agentId={agentId} cli={chat?.cli ?? cli} conversationId={selected || undefined} workspaceId={workspace?.id ?? null} cwd={!project ? directory : undefined} references={selected ? referenceItems : undefined} onReference={selected ? addCatalogReference : undefined} /></>;
   return withPalette(
     <ContentPreviewContext.Provider value={selected && !workbench ? openContent : null}><div className="product-frame"><div className="app-shell">
@@ -1408,7 +1460,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
             <span>{runtimeName(statusCli)}{runtimePending&&<small className="mandala-runtime-pending">{localize('下轮：', 'Next turn: ')}{activeChat?.cli!==mandalaAgent.defaultCli?runtimeName(mandalaAgent.defaultCli):localize('切换模型', 'model change')}</small>}</span>
           </Button>}
         {!document.getElementById('desktop-titlebar-right')&&contextPopover}</header>}
-        {chatActive && <ConversationFind root={messagesRoot} conversationId={selected} version={events} onInspect={() => { followLatest.current = false; }} />}
+        {chatActive && <ConversationFind root={messagesRoot} conversationId={selected} version={events} hasEarlier={earlierBefore !== null} onInspect={() => { followLatest.current = false; }} />}
         {!workbench && selected && (()=>{const slot=document.getElementById('desktop-titlebar-right');const button=<Button ref={contentPanelTrigger} type="button" className="content-panel-trigger" hidden={!slot&&effectiveOpen} aria-label={t(effectiveOpen?'收起右侧栏':'展开右侧栏')} title={t(effectiveOpen?'收起右侧栏':'展开右侧栏')} aria-expanded={effectiveOpen} aria-controls="chat-environment-panel" onClick={()=>{setEffectiveOpen(value=>!value);}}><Icon name="panel" size={18}/></Button>;return slot?createPortal(<>{contextPopover}{button}</>,slot):button;})()}
 
         {workbench && workbenchProject ? <>{(error || refreshError) && <p className="form-error" role="alert">{errorText(error || refreshError)}</p>}
@@ -1500,7 +1552,12 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
             followLatest.current =
               element.scrollHeight - element.scrollTop - element.clientHeight <
               80;
+            if (earlierBefore !== null && element.scrollTop < 100 && element.scrollTop < lastScrollTop.current && earlierState === 'idle') {
+              followLatest.current = false;
+              loadEarlier.current?.();
+            }
             setAwayFromLatest(!followLatest.current);
+            lastScrollTop.current = element.scrollTop;
           }}
         >
           {mandalaMain&&historyReady&&!events.some(event=>event.kind==='user'||event.kind==='text')&&<MandalaWelcome name={agent?.name??'Mandala'} disabled={!composerDraft.loaded||pending||navigationLocked||busy} hasDraft={existingComposerDraft} onPrepare={prompt=>{if(!composerDraft.loaded||existingComposerDraft||pending||navigationLocked||busy)return;setText(prompt);requestAnimationFrame(()=>composerInput.current?.focus());}}/>}
@@ -1537,6 +1594,15 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
           {selected && !historyReady && <LoadingState label={t('正在读取对话历史…')} />}
           <SelectionQuote conversationId={selected} disabled={quoteDisabled} onQuote={addQuote} />
           <div ref={messagesRoot} className={"messages"+(mandalaMain?" mandala-messages":"")} hidden={!historyReady}>
+            {earlierBefore !== null && <div className="chat-earlier-history">
+              <Button type="button" variant="ghost" disabled={earlierState === 'loading'} onClick={() => {
+                followLatest.current = false;
+                loadEarlier.current?.();
+              }}>
+                {earlierState === 'loading' ? localize('正在加载更早的记录…', 'Loading earlier messages…') : earlierState === 'error'
+                  ? localize('加载失败，点击重试', 'Could not load history. Retry') : localize('加载更早的记录', 'Load earlier messages')}
+              </Button>
+            </div>}
             <ExecutionResults items={resultGroups.get(null)??[]} config={config} tasks={operationTasks.tasks} onOpen={openWorkspacePath}/>
             {presentedTurns.map(({ turn, run, replyText }) => {
               const inspect = () => { followLatest.current = false; setAwayFromLatest(true); };

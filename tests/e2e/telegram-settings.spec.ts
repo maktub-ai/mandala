@@ -105,7 +105,7 @@ test('expired pairing cannot be confirmed, and the instructions remain readable 
 test('Telegram messages retain their human bubble and source in the main chat',async({page,request})=>{
  const {conversation}=await (await request.get('/api/mandala')).json();
  const event={id:987654,conversationId:conversation.id,kind:'user',createdAt:new Date().toISOString(),data:{text:'请继续核对账单',source:{kind:'telegram',requestId:'synthetic-request'}}};
- await page.route('**/api/conversations/'+conversation.id+'/events',route=>route.fulfill({contentType:'text/event-stream',body:'data: '+JSON.stringify(event)+'\n\nevent: history-ready\ndata: {}\n\n'}));
+ await page.route('**/api/conversations/'+conversation.id+'/events?*',route=>route.fulfill({contentType:'text/event-stream',body:'data: '+JSON.stringify(event)+'\n\nevent: history-ready\ndata: {}\n\n'}));
  await page.goto('/mandala');
  const message=page.getByRole('article',{name:'你的消息'}).filter({hasText:'请继续核对账单'});
  await expect(message.getByText('Telegram',{exact:true})).toBeVisible();

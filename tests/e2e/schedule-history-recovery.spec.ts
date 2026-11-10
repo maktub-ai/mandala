@@ -11,7 +11,7 @@ test('a large coordinator history can open and leave without a blank application
  const parts=[data(1,'user',{text:'Synthetic large history'})];
  for(let i=2;i<140000;i++)parts.push(data(i,'tool',{method:'item/reasoning/textDelta',params:{turnId:'large',itemId:'reason',delta:'Synthetic historical reasoning. '}}));
  parts.push(data(140000,'text',{text:'Synthetic historical result',itemId:'answer',snapshot:true}),data(140001,'status',{status:'idle'}),'event: history-ready\ndata: {"cursor":140001}\n\n');
- await page.route('**/api/conversations/'+id+'/events',route=>route.fulfill({status:200,contentType:'text/event-stream',body:parts.join('')}));
+ await page.route('**/api/conversations/'+id+'/events?*',route=>route.fulfill({status:200,contentType:'text/event-stream',body:parts.join('')}));
  await page.goto('/mandala?conversation='+id);
  await expect(page.locator('.composer')).toBeVisible({timeout:30000});
  await expect(page.getByText('Synthetic historical result',{exact:true})).toBeVisible({timeout:30000});
