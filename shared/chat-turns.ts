@@ -4,6 +4,9 @@ import type { ComposerReferenceItem } from './composer-references';
 import type { DisplayEvent, Task } from "./types";
 import { summarizeOperations } from "./execution";
 
+export const CHAT_HISTORY_PAGE_TURNS = 5;
+export type ChatHistoryPage = { events: DisplayEvent[]; before: number | null };
+
 export type ChatMessage = {
   source?:import('./tasks').QueuedInputSource;
   kind: "user" | "text" | "error" | "agent_message";

@@ -100,7 +100,7 @@ import {WorkspacePage,PageHeader} from "./ui/WorkspacePage";
 import CommandPalette, { type PaletteAction } from "./CommandPalette";
 import KeyboardShortcuts from './KeyboardShortcuts';
 import { composingKey, useShortcuts, shortcutLabel, shortcutAria } from './shortcuts';
-import { groupChatTurns, mergeChatEvents, type ChatMessage } from "./chatTurns";
+import { CHAT_HISTORY_PAGE_TURNS, groupChatTurns, mergeChatEvents, type ChatHistoryPage, type ChatMessage } from "./chatTurns";
 import "./journeys.css";
 import "./ui/design-system.css";
 import "./workspace.css";
@@ -605,7 +605,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
           if (active && reload) { reload = false; scheduleLoad(); }
         });
     };
-    const path = "/conversations/" + selected, pageSize = 20;
+    const path = "/conversations/" + selected;
     let before: number | null = null;
     let earlierRequest: AbortController | undefined;
     loadEarlier.current = () => {
@@ -613,8 +613,8 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       const controller = new AbortController();
       earlierRequest = controller;
       setEarlierState('loading');
-      void api<{ events: DisplayEvent[]; before: number | null }>(
-        path + "/history?recent=" + pageSize + "&before=" + before, "GET", undefined, controller.signal,
+      void api<ChatHistoryPage>(
+        path + "/history?recent=" + CHAT_HISTORY_PAGE_TURNS + "&before=" + before, "GET", undefined, controller.signal,
       ).then(page => {
         if (!active) return;
         const viewport = messagesRoot.current?.closest('.conversation');
@@ -634,7 +634,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
         .finally(() => { earlierRequest = undefined; });
     };
     load();
-    const stream = new EventSource("/api" + path + "/events?recent=" + pageSize);
+    const stream = new EventSource("/api" + path + "/events?recent=" + CHAT_HISTORY_PAGE_TURNS);
     stream.addEventListener('history-window', (message: MessageEvent<string>) => {
       if (!active || initialReplayComplete) return;
       before = (JSON.parse(message.data) as { before: number | null }).before;

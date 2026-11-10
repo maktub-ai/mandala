@@ -55,6 +55,7 @@
 
 /* Messages */
 .remote-messages { width:100%; max-width:820px; margin:0 auto; padding:20px; flex:1; min-height:80px; box-sizing:border-box; }
+.remote-earlier-history { display:flex; justify-content:center; margin-bottom:16px; overflow-anchor:none; }
 .remote-turn { display:grid; gap:10px; margin-bottom:20px; }
 .remote-message { overflow-wrap:anywhere; font-size:calc(var(--theme-font-size) + 1px); line-height:1.65; min-width:0; }
 .remote-message > small { display:flex; align-items:center; font-size:var(--type-meta); font-weight:500; }

@@ -665,8 +665,14 @@ export function createHttpServer({
           if (url.searchParams.has('recent')) {
             const before = Number(url.searchParams.get('before') ?? Number.MAX_SAFE_INTEGER);
             if (!Number.isSafeInteger(before) || before < 1) throw new Error('invalid event cursor');
+            const since = url.searchParams.has('since') ? Number(url.searchParams.get('since')) : undefined;
+            if (since !== undefined && (!Number.isSafeInteger(since) || since < 0 || url.searchParams.has('before')))
+              throw new Error('invalid history sync cursor');
             const start = store.historyWindowStart(id, before, recentTurns());
-            return json(res, 200, { events: store.listEarlierEvents(id, start ?? 0, before), before: start });
+            // Re-read the previous live window so in-place updates and retired events
+            // are reflected, including when a disconnect spans more than one page.
+            const from = since === undefined ? start ?? 0 : Math.min(since, start ?? 0);
+            return json(res, 200, { events: store.listEarlierEvents(id, from, before), before: start });
           }
           const after = Number(url.searchParams.get('after') ?? 0);
           if (!Number.isSafeInteger(after) || after < 0) throw new Error('invalid event cursor');

@@ -43,6 +43,14 @@ export function remoteRequestAllowed(method: string, target: string, body?: unkn
   const [, , action, itemId] = match;
   if (method === 'GET') {
     if (!action) return queryOnly(url, []);
+    if (action === 'history' && !itemId && url.searchParams.has('recent')) {
+      const recent = Number(url.searchParams.get('recent'));
+      const before = Number(url.searchParams.get('before') ?? 1);
+      const since = Number(url.searchParams.get('since') ?? 0);
+      return queryOnly(url, ['recent', 'before', 'since']) && !(url.searchParams.has('since') && url.searchParams.has('before'))
+        && Number.isSafeInteger(recent) && recent >= 1 && recent <= 100
+        && Number.isSafeInteger(before) && before >= 1 && Number.isSafeInteger(since) && since >= 0;
+    }
     if (['history', 'events'].includes(action) && !itemId) return queryOnly(url, ['after', 'limit']);
     if (action === 'queue' && !itemId) return queryOnly(url, []);
     if (action === 'attachments' && itemId) return queryOnly(url, ['download']);

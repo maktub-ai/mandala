@@ -6,7 +6,7 @@ import { restoreSubmission, submitComposerInput, uploadComposerFiles, submission
 import Button from './ui/Button';
 import Input from './ui/Input';
 import Textarea from './ui/Textarea';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkCjkFriendly from 'remark-cjk-friendly';
@@ -16,7 +16,7 @@ import type { Task } from '../shared/tasks';
 import type { ManagementProposal, MandalaGoal } from '../shared/mandala-coordination';
 import { approvalChoices } from '../shared/approvals';
 import { nativeQuestions } from '../shared/questions';
-import { groupChatTurns, type ChatMessage } from './chatTurns';
+import { CHAT_HISTORY_PAGE_TURNS, groupChatTurns, mergeChatEvents, type ChatHistoryPage, type ChatMessage } from './chatTurns';
 import { createRemoteFetch } from './remote-client';
 import { useLanguage } from './i18n';
 import Select from './ui/Select';
@@ -61,6 +61,13 @@ export default function RemoteWorkspace({ hostPublicKey, keyPair, computerName, 
   const [selected, setSelected] = useState(initial.get('conversation') ?? ''), [chat, setChat] = useState<Conversation>();
   const [executionId, setExecutionId] = useState<string | null>(null), [stopUncertain, setStopUncertain] = useState(false);
   const [events, setEvents] = useState<DisplayEvent[]>([]), [approvals, setApprovals] = useState<Approval[]>([]);
+  const [earlierBefore, setEarlierBefore] = useState<number | null>(null);
+  const [earlierState, setEarlierState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const historyRead = useRef<{ conversationId: string; from: number | null } | null>(null);
+  const earlierRequest = useRef<AbortController | null>(null);
+  const chatViewport = useRef<HTMLElement>(null);
+  const historyAnchor = useRef<{ element: HTMLElement; top: number } | null>(null);
+  const followLatest = useRef(true), lastScrollTop = useRef(0);
   const [page, setPageState] = useState<Page>(() => initial.get('conversation') ? 'chat' : (['tasks', 'config', 'chat'] as string[]).includes(initial.get('view') ?? '') ? initial.get('view') as Page : 'mandala'), [listOpen, setListOpen] = useState(false);
   const [agentId, setAgentId] = useState(''), [projectId, setProjectId] = useState(''), [model, setModel] = useState('');
   const [connection,setConnection]=useState<'checking'|'online'|'offline'|'access-lost'>(hostOnline===false?'offline':'checking'),[lastRead,setLastRead]=useState<number|null>(null),[chatUnavailable,setChatUnavailable]=useState(false);
@@ -80,12 +87,30 @@ export default function RemoteWorkspace({ hostPublicKey, keyPair, computerName, 
   const setPage = (next: Page) => { pageRef.current = next; setPageState(next); };
   useEffect(()=>{submission.current=null;},[selected]);
   current.current = selected;
-  const clearProtected=()=>{setSummary(undefined);summaryRef.current=undefined;setChats([]);setTasks([]);setChat(undefined);setExecutionId(null);setEvents([]);setApprovals([]);setAnswers({});setPreview(undefined);setGoals(null);setResolvedProposals({});};
+  const resetHistory = () => {
+    earlierRequest.current?.abort();
+    earlierRequest.current = null;
+    historyRead.current = null;
+    historyAnchor.current = null;
+    followLatest.current = true;
+    lastScrollTop.current = 0;
+    setEvents([]);
+    setEarlierBefore(null);
+    setEarlierState('idle');
+  };
+  const clearProtected=()=>{setSummary(undefined);summaryRef.current=undefined;setChats([]);setTasks([]);setChat(undefined);setExecutionId(null);resetHistory();setApprovals([]);setAnswers({});setPreview(undefined);setGoals(null);setResolvedProposals({});};
   const markFailure=(reason:unknown)=>{
     const problem=reason as Error&{status?:number},status=problem.status??Number(/Remote transport unavailable \((\d+)\)/.exec(problem.message)?.[1]);
     if(status===401||status===403){authorityGeneration.current++;readGeneration.current++;readController.current?.abort();for(const controller of fileControllers.current)controller.abort();setConnection('access-lost');clearProtected();setError('');setTransportError(l('远程访问已失效或被撤销。请重新确认账号与电脑授权。','Remote access expired or was revoked. Check your account and computer access.'));}
     else{setConnection('offline');setTransportError(l('电脑暂不可用。草稿可继续编辑；连接恢复后不会自动发送。','Computer unavailable. Drafts remain editable; reconnecting will not send them automatically.'));}
   };
+  const readHistory = useCallback(async (path: string, previous: typeof historyRead.current, signal: AbortSignal) => {
+    if (previous?.from === null) return call<DisplayEvent[]>(path, 'GET', undefined, signal);
+    const recent = path + '?recent=' + CHAT_HISTORY_PAGE_TURNS + (previous ? '&since=' + previous.from : '');
+    const page = await optional<ChatHistoryPage | DisplayEvent[]>(recent, signal);
+    // The old host policy rejects the pagination parameters until the desktop is updated.
+    return page === UNSUPPORTED ? call<DisplayEvent[]>(path, 'GET', undefined, signal) : page;
+  }, [call, optional]);
   const refresh = useCallback(async (includeConfig=false) => {
     const epoch=++readGeneration.current,id=current.current,controller=new AbortController();readController.current?.abort();readController.current=controller;
     const valid=()=>alive.current&&!controller.signal.aborted&&readGeneration.current===epoch;
@@ -108,14 +133,52 @@ export default function RemoteWorkspace({ hostPublicKey, keyPair, computerName, 
       const resolved: RemoteMandala | null = mandalaInfo === UNSUPPORTED || !mandalaInfo ? primary ? { agentId: primary.agentId, name: null, conversationId: primary.id } : null : { ...mandalaInfo, conversationId: mandalaInfo.conversationId ?? primary?.id ?? null };
       setMandala(old => JSON.stringify(old) === JSON.stringify(resolved) ? old : resolved); setMandalaLegacy(mandalaInfo === UNSUPPORTED);
       if (goalList === UNSUPPORTED) { goalsSupported.current = false; setGoalsUnsupported(true); } else if (goalList) setGoals(goalList);
-      if(id){
-        try{const [detail,history]=await Promise.all([call<{conversation:Conversation;approvals:Approval[];executionId:string|null}>(`/api/conversations/${id}`,'GET',undefined,controller.signal),call<DisplayEvent[]>(`/api/conversations/${id}/history`,'GET',undefined,controller.signal)]);
-          if(valid()&&current.current===id){setChat(detail.conversation);setExecutionId(detail.executionId);setStopUncertain(false);setApprovals(detail.approvals);setEvents(history);setChatUnavailable(false);}
-        }catch(reason){if(!valid())return;if((reason as {status?:number}).status===404){setChat(undefined);setExecutionId(null);setEvents([]);setApprovals([]);setChatUnavailable(true);}else throw reason;}
+      if (id) {
+        try {
+          const path = '/api/conversations/' + id;
+          const previous = historyRead.current?.conversationId === id ? historyRead.current : null;
+          const [detail, history] = await Promise.all([
+            call<{ conversation: Conversation; approvals: Approval[]; executionId: string | null }>(path, 'GET', undefined, controller.signal),
+            readHistory(path + '/history', previous, controller.signal),
+          ]);
+          if (valid() && current.current === id) {
+            if (Array.isArray(history)) {
+              historyRead.current = { conversationId: id, from: null };
+              setEarlierBefore(null);
+              setEvents(history);
+            } else {
+              const nextFrom = history.before ?? 0;
+              const from = Math.min(previous?.from ?? nextFrom, nextFrom);
+              historyRead.current = { conversationId: id, from: nextFrom };
+              setEarlierBefore(old => !previous ? history.before : old !== null && from > 0 ? Math.min(old, from) : null);
+              setEvents(events => {
+                const prefix = events.filter(event => event.id < from);
+                if (events.length === prefix.length + history.events.length && history.events.every((event, index) => {
+                  const cached = events[prefix.length + index];
+                  return cached.id === event.id && JSON.stringify(cached.data) === JSON.stringify(event.data);
+                })) return events;
+                return mergeChatEvents(prefix, history.events);
+              });
+            }
+            setChat(detail.conversation);
+            setExecutionId(detail.executionId);
+            setStopUncertain(false);
+            setApprovals(detail.approvals);
+            setChatUnavailable(false);
+          }
+        } catch (reason) {
+          if (!valid()) return;
+          if ((reason as { status?: number }).status !== 404) throw reason;
+          setChat(undefined);
+          setExecutionId(null);
+          resetHistory();
+          setApprovals([]);
+          setChatUnavailable(true);
+        }
       }
     }catch(reason){if(valid()){setLoaded(true);markFailure(reason);}}finally{clearTimeout(timeout);}
-  },[call,optional,hostOnline,language]);
-  useEffect(()=>{alive.current=true;return()=>{alive.current=false;authorityGeneration.current++;readGeneration.current++;readController.current?.abort();for(const controller of fileControllers.current)controller.abort();};},[]);
+  },[call,optional,readHistory,hostOnline,language]);
+  useEffect(()=>{alive.current=true;return()=>{alive.current=false;authorityGeneration.current++;readGeneration.current++;readController.current?.abort();earlierRequest.current?.abort();for(const controller of fileControllers.current)controller.abort();};},[]);
   useEffect(()=>{if(hostOnline===false)setConnection('offline');},[hostOnline]);
   useEffect(()=>{
     const update=()=>{if(inFlight.current||document.hidden)return;inFlight.current=true;void refresh().finally(()=>{inFlight.current=false;});};
@@ -123,6 +186,58 @@ export default function RemoteWorkspace({ hostPublicKey, keyPair, computerName, 
   },[refresh,selected]);
   useEffect(()=>{if(page==='config'||page==='chat'&&!selected)void refresh(true);},[page,selected]);
   const networkReady=hostOnline!==false&&connection==='online';
+  const loadEarlier = async () => {
+    if (!networkReady || earlierBefore === null || earlierRequest.current || !selected) return;
+    const controller = new AbortController();
+    earlierRequest.current = controller;
+    followLatest.current = false;
+    setEarlierState('loading');
+    const timeout = setTimeout(() => {
+      if (controller.signal.aborted || earlierRequest.current !== controller) return;
+      earlierRequest.current = null;
+      controller.abort();
+      setEarlierState('error');
+    }, 8000);
+    try {
+      const page = await call<ChatHistoryPage>(
+        '/api/conversations/' + selected + '/history?recent=' + CHAT_HISTORY_PAGE_TURNS + '&before=' + earlierBefore,
+        'GET', undefined, controller.signal,
+      );
+      if (controller.signal.aborted || current.current !== selected) return;
+      const viewport = chatViewport.current;
+      if (viewport && !followLatest.current) {
+        const top = viewport.getBoundingClientRect().top;
+        const element = Array.from(viewport.querySelectorAll<HTMLElement>('.remote-turn'))
+          .find(turn => turn.getBoundingClientRect().bottom > top);
+        if (element) historyAnchor.current = { element, top: element.getBoundingClientRect().top };
+      }
+      setEarlierBefore(old => old !== null && page.before !== null ? Math.min(old, page.before) : null);
+      setEvents(events => mergeChatEvents(page.events.filter(event => !events.length || event.id < events[0].id), events));
+      setEarlierState('idle');
+    } catch (reason) {
+      if (controller.signal.aborted || current.current !== selected) return;
+      const status = (reason as { status?: number }).status;
+      if (status === 401 || status === 403) markFailure(reason);
+      else setEarlierState('error');
+    } finally {
+      clearTimeout(timeout);
+      if (earlierRequest.current === controller) earlierRequest.current = null;
+    }
+  };
+  useLayoutEffect(() => {
+    const viewport = chatViewport.current, anchor = historyAnchor.current;
+    historyAnchor.current = null;
+    if (!viewport?.clientHeight) return;
+    if (followLatest.current) viewport.scrollTop = viewport.scrollHeight;
+    else if (anchor?.element.isConnected) viewport.scrollTop += anchor.element.getBoundingClientRect().top - anchor.top;
+    lastScrollTop.current = viewport.scrollTop;
+  }, [events, page, mandalaPane, approvals.length]);
+  const onChatScroll = (event: React.UIEvent<HTMLElement>) => {
+    const viewport = event.currentTarget;
+    followLatest.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
+    if (viewport.scrollTop < 100 && viewport.scrollTop < lastScrollTop.current && earlierState === 'idle') void loadEarlier();
+    lastScrollTop.current = viewport.scrollTop;
+  };
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);
   const run = async (work: () => Promise<void>) => {
     if (busy||!networkReady) return; setBusy(true); setError('');
@@ -133,7 +248,7 @@ export default function RemoteWorkspace({ hostPublicKey, keyPair, computerName, 
     const nextPage: Page = id && id === mandalaId ? 'mandala' : 'chat';
     if (nextPage === 'chat') lastChat.current = id;
     void draft.flush();if(id===current.current){setPage(nextPage);setListOpen(false);void refresh();return;}selectionGeneration.current++;readGeneration.current++;readController.current?.abort();for(const controller of fileControllers.current)controller.abort();
-    setPage(nextPage);setChatUnavailable(false);setSelected(id); setChat(undefined); setExecutionId(null); setStopUncertain(false); setEvents([]); setApprovals([]); setListOpen(false);
+    setPage(nextPage);setChatUnavailable(false);setSelected(id); setChat(undefined); setExecutionId(null); setStopUncertain(false); resetHistory(); setApprovals([]); setListOpen(false);
     history.replaceState(null, '', id ? '/?conversation=' + encodeURIComponent(id) : nextPage === 'chat' ? '/?view=chat' : '/');
   };
   // The Mandala tab always shows the one continuous primary chat once its identity is known.
@@ -239,6 +354,12 @@ export default function RemoteWorkspace({ hostPublicKey, keyPair, computerName, 
       ? <div className="remote-chat-heading remote-mandala-heading"><BrandMark className="remote-mandala-mark"/><div><h1>{mandalaName}</h1><span>{l('系统协调者 · 交代目标，它负责分派与跟进', 'System coordinator · delegates and follows up on your goals')}</span></div><StatusLabel filled tone={chatTone(chat?.status ?? 'idle')} shape={statusShape(chat?.status === 'idle' || !chat ? 'completed' : chat.status)} icon="activity">{chat ? statusLabel(chat.status) : connection === 'online' ? l('读取中…', 'Loading…') : l('离线', 'Offline')}</StatusLabel></div>
       : <div className="remote-chat-heading"><PageHeader title={chat?.title||l('对话','Chat')} icon="message" context={<StatusLabel icon={chat?.status==='running'?'activity':'message'}>{chat?statusLabel(chat.status):chatUnavailable?l('对话不可用','Chat unavailable'):connection==='online'?l('读取中…','Loading…'):l('离线','Offline')}</StatusLabel>}/>{chat&&<MetadataList items={[{label:l('智能体','Agent'),value:summary?.agents.find(agent=>agent.id===chat.agentId)?.name||(chat.agentId?l('智能体不可用','Unavailable Agent'):l('无智能体','No Agent'))},{label:l('执行端','Runtime'),value:runtimeName(chat.cli)}]}/>}</div>}
     <div className="remote-messages" aria-label={l('消息记录', 'Messages')}>
+      {earlierBefore !== null && <div className="remote-earlier-history">
+        <Button type="button" variant="ghost" disabled={!networkReady || earlierState === 'loading'} onClick={() => void loadEarlier()}>
+          {earlierState === 'loading' ? l('正在加载更早的记录…', 'Loading earlier messages…') : earlierState === 'error'
+            ? l('加载失败，点击重试', 'Could not load history. Retry') : l('加载更早的记录', 'Load earlier messages')}
+        </Button>
+      </div>}
       {turns.map(turn => <section className="remote-turn" key={turn.key}>{turn.messages.map(renderMessage)}{isMandalaPage && <MandalaTurnCards events={turn.events} allEvents={events} resolved={resolvedProposals} agents={summary?.agents ?? []} projects={summary?.projects ?? []} say={l} canDecide={networkReady} unsupported={proposalsUnsupported || mandalaLegacy} busy={busy} onDecide={decideProposal}/>}</section>)}
       {!hasMessages&&(chatUnavailable?<EmptyState icon="message">{l('此对话已删除或不可访问。草稿仍保留在此浏览器。','This Chat was deleted or is unavailable. Its draft remains in this browser.')}</EmptyState>:!chat&&connection==='online'?<LoadingState label={l('读取消息…','Loading messages…')}/>:<EmptyState icon={isMandalaPage ? 'sparkles' : 'message'}>{connection!=='online'?l('离线时无法读取消息，草稿可以继续编辑。','Messages cannot be read offline; you can continue editing your draft.'):isMandalaPage?l(`告诉 ${mandalaName} 你想完成什么，它会安排合适的智能体并持续跟进。`,`Tell ${mandalaName} what you want done; it assigns the right Agents and follows up.`):l('发送第一条消息开始对话。','Send your first message to start.')}</EmptyState>)}
     </div>
@@ -254,7 +375,7 @@ export default function RemoteWorkspace({ hostPublicKey, keyPair, computerName, 
       {!ownChats.length && <p className="remote-muted remote-list-empty">{l('还没有对话', 'No chats yet')}</p>}
       {backgroundChats.length > 0 && <div className="remote-list-group"><Button variant="ghost" className="remote-list-toggle" aria-expanded={backgroundOpen} onClick={() => setBackgroundOpen(value => !value)}><Icon name={backgroundOpen ? 'chevronDown' : 'chevronRight'} size={14}/>{l('Mandala 后台执行', 'Mandala background runs')}<span className="remote-count" aria-hidden="true">{backgroundChats.length}</span></Button>{backgroundOpen && backgroundChats.map(chatItem)}</div>}
     </aside>
-    <section className="remote-chat-main">{!selected ? <form className="remote-create" onSubmit={event=>{event.preventDefault();if(!agentId)return;void run(async()=>{const created=await call<Conversation>('/api/conversations','POST',{agentId,projectId,...(model?{model}:{})});select(created.id);});}}><PageHeader title={l('新对话','New Chat')} icon="message"/><p className="remote-muted">{l('选择项目和智能体，创建后再明确发送消息。','Choose a Project and Agent, then send a message when ready.')}{mandalaId && <> {l('想让 Mandala 统筹安排？','Want Mandala to coordinate?')} <Button variant="ghost" size="sm" className="remote-inline-link" onClick={() => openPage('mandala')}>{l('交给 Mandala','Hand it to Mandala')}</Button></>}</p><label>{l('项目','Project')}<Select ariaLabel={l('项目','Project')} value={projectId} disabled={busy||!summary} onChange={value=>{setProjectId(value);setAgentId('');setModel('');}} options={[{value:'',label:l('无项目','No Project')},...(summary?.projects.map(item=>({value:item.id,label:item.name}))??[])]}/></label><label>{l('智能体','Agent')}<Select ariaLabel={l('智能体','Agent')} value={agentId} disabled={busy||!summary} onChange={value=>{setAgentId(value);setModel('');}} options={[{value:'',label:l('选择智能体','Choose Agent')},...choosableAgents.map(item=>({value:item.id,label:item.name,description:runtimeName(item.defaultCli)}))]}/></label>{agent&&<MetadataList items={[{label:l('执行端','Runtime'),value:runtimeName(agent.defaultCli)}]}/>} {models.length>0&&<label>{l('模型','Model')}<Select ariaLabel={l('模型','Model')} value={model} onChange={setModel} options={[{value:'',label:l('沿用智能体配置','Use Agent configuration')},...models.map(id=>({value:id,label:id}))]}/></label>}<Button type="submit" className="primary" disabled={busy||!networkReady||!agentId}>{l('创建对话','Create Chat')}</Button></form> : conversationView}</section>
+    <section className="remote-chat-main" ref={chatViewport} onScroll={onChatScroll}>{!selected ? <form className="remote-create" onSubmit={event=>{event.preventDefault();if(!agentId)return;void run(async()=>{const created=await call<Conversation>('/api/conversations','POST',{agentId,projectId,...(model?{model}:{})});select(created.id);});}}><PageHeader title={l('新对话','New Chat')} icon="message"/><p className="remote-muted">{l('选择项目和智能体，创建后再明确发送消息。','Choose a Project and Agent, then send a message when ready.')}{mandalaId && <> {l('想让 Mandala 统筹安排？','Want Mandala to coordinate?')} <Button variant="ghost" size="sm" className="remote-inline-link" onClick={() => openPage('mandala')}>{l('交给 Mandala','Hand it to Mandala')}</Button></>}</p><label>{l('项目','Project')}<Select ariaLabel={l('项目','Project')} value={projectId} disabled={busy||!summary} onChange={value=>{setProjectId(value);setAgentId('');setModel('');}} options={[{value:'',label:l('无项目','No Project')},...(summary?.projects.map(item=>({value:item.id,label:item.name}))??[])]}/></label><label>{l('智能体','Agent')}<Select ariaLabel={l('智能体','Agent')} value={agentId} disabled={busy||!summary} onChange={value=>{setAgentId(value);setModel('');}} options={[{value:'',label:l('选择智能体','Choose Agent')},...choosableAgents.map(item=>({value:item.id,label:item.name,description:runtimeName(item.defaultCli)}))]}/></label>{agent&&<MetadataList items={[{label:l('执行端','Runtime'),value:runtimeName(agent.defaultCli)}]}/>} {models.length>0&&<label>{l('模型','Model')}<Select ariaLabel={l('模型','Model')} value={model} onChange={setModel} options={[{value:'',label:l('沿用智能体配置','Use Agent configuration')},...models.map(id=>({value:id,label:id}))]}/></label>}<Button type="submit" className="primary" disabled={busy||!networkReady||!agentId}>{l('创建对话','Create Chat')}</Button></form> : conversationView}</section>
   </div>;
   const goalsPanel = <aside className="remote-goals" aria-label={l('Mandala 负责的目标', 'Goals owned by Mandala')}>
     <header><h2>{l('负责的目标', 'Owned goals')}</h2>{goals && <span className="remote-count">{activeGoals}/{goals.length}</span>}</header>
@@ -264,7 +385,7 @@ export default function RemoteWorkspace({ hostPublicKey, keyPair, computerName, 
     ? <WorkspacePage className="remote-content"><EmptyState icon="sparkles">{connection !== 'online' ? l('连接电脑后可使用 Mandala。', 'Connect to your computer to use Mandala.') : mandalaLegacy ? l('电脑端还没有 Mandala 主对话。请在电脑上打开一次 Mandala，或更新到最新版本。', 'Your computer has no Mandala primary chat yet. Open Mandala once on the computer, or update to the latest version.') : l('Mandala 尚未在电脑上启用。', 'Mandala is not enabled on your computer yet.')}</EmptyState></WorkspacePage>
     : <div className="remote-mandala" data-pane={mandalaPane}>
       <div className="remote-segmented" role="group" aria-label={l('Mandala 视图', 'Mandala view')}><Button size="sm" variant="ghost" aria-pressed={mandalaPane === 'chat'} onClick={() => setMandalaPane('chat')}>{l('主对话', 'Chat')}</Button><Button size="sm" variant="ghost" aria-pressed={mandalaPane === 'goals'} onClick={() => setMandalaPane('goals')}>{l('目标', 'Goals')}{activeGoals > 0 && <span className="remote-count" aria-hidden="true">{activeGoals}</span>}</Button></div>
-      <section className="remote-chat-main remote-mandala-chat">{conversationView}</section>
+      <section className="remote-chat-main remote-mandala-chat" ref={chatViewport} onScroll={onChatScroll}>{conversationView}</section>
       {goalsPanel}
     </div>;
   const navItems: [Page, string, IconName, number][] = [['mandala', 'Mandala', 'sparkles', activeGoals], ['chat', l('对话', 'Chats'), 'message', pendingCount(ownChats)], ['tasks', l('任务', 'Tasks'), 'plan', attentionTasks], ['config', l('配置概览', 'Configuration'), 'settings', 0]];

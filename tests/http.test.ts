@@ -250,6 +250,22 @@ it("counts a substantive agent reply once even when its state changes", async ()
   expect(earlier.events.map((event: { id: number }) => event.id)).toEqual([user.id]);
   expect(earlier.before).toBeNull();
 });
+it("reconciles the previous recent window when events change and more than a page arrives", async () => {
+  const chat = store.createConversation({ projectId: "p", agentId: "a", cli: "codex", model: null });
+  const path = url + "/api/conversations/" + chat.id + "/history?recent=5";
+  const turns = Array.from({ length: 8 }, (_, i) => store.appendEvent(chat.id, "user", { text: "Turn " + i }));
+  const initial = await (await fetch(path)).json();
+  expect(initial.before).toBe(turns[3].id);
+  store.database.prepare("UPDATE events SET data=? WHERE id=?").run(JSON.stringify({ text: "Updated text" }), turns[4].id);
+  store.database.prepare("UPDATE events SET superseded=1 WHERE id=?").run(turns[5].id);
+  const additions = Array.from({ length: 7 }, (_, i) => store.appendEvent(chat.id, "user", { text: "Missed " + i }));
+  const refreshed = await (await fetch(path + "&since=" + initial.before)).json();
+  expect(refreshed.before).toBe(additions[2].id);
+  expect(refreshed.events.map((event: { id: number }) => event.id)).toEqual(
+    [...turns.slice(3, 5), ...turns.slice(6), ...additions].map(event => event.id),
+  );
+  expect(refreshed.events[1].data.text).toBe("Updated text");
+});
 it("gives an empty recent history a resume cursor", async () => {
   const chat = store.createConversation({ projectId: "p", agentId: "a", cli: "codex", model: null });
   const controller = new AbortController();

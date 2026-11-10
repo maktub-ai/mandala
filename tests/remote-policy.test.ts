@@ -24,6 +24,14 @@ it('allows chat, attachment, approval, question and individual stop workflows', 
   expect(allowed('POST', '/api/v2/tasks/task-1/stop', {expectedRevision: 3})).toBe(true);
 });
 
+it('allows bounded history reads for remote chats without widening other remote routes', () => {
+  const path = '/api/conversations/chat-1/history';
+  for (const query of ['?recent=5', '?recent=5&before=42', '?recent=5&since=0', '?recent=5&since=42'])
+    expect(allowed('GET', path + query), query).toBe(true);
+  for (const query of ['?before=42', '?since=42', '?recent=5&before=42&since=42', '?recent=5&since=-1', '?recent=5&after=42', '?recent=5&before=0', '?recent=101', '?recent=5&recent=5'])
+    expect(allowed('GET', path + query), query).toBe(false);
+  expect(allowed('GET', '/api/conversations/chat-1/events?recent=5')).toBe(false);
+});
 it('allows the Mandala primary chat, owned goals and in-chat proposal decisions only', () => {
   for (const path of ['/api/remote/mandala', '/api/mandala/goals']) {
     expect(allowed('GET', path), path).toBe(true);

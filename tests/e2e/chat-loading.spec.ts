@@ -99,15 +99,15 @@ test('opens ordinary and Mandala chats at the latest page and anchors earlier hi
   await page.goto(path + '?conversation=' + id);
   const messages = page.locator('.messages');
   const latest = messages.getByText('History answer 25', { exact: true });
-  const first = messages.getByText('History request 6', { exact: true });
+  const first = messages.getByText('History request 21', { exact: true });
   await expect(latest).toBeVisible();
-  await expect(messages.getByText('History request 5', { exact: true })).toHaveCount(0);
+  await expect(messages.getByText('History request 20', { exact: true })).toHaveCount(0);
   if (id === ordinary) {
    const shortcut = await page.evaluate(() => /Mac/.test(navigator.platform)) ? 'Meta+f' : 'Control+f';
    await page.keyboard.press(shortcut);
    const find = page.getByRole('search', { name: '对话内查找' });
    await expect(find.getByText('已加载记录', { exact: true })).toBeVisible();
-   await find.getByRole('searchbox').fill('History request 5');
+   await find.getByRole('searchbox').fill('History request 20');
    await expect(find.getByTestId('conversation-find-count')).toHaveText('0 / 0');
    await page.keyboard.press('Escape');
   }
@@ -122,7 +122,8 @@ test('opens ordinary and Mandala chats at the latest page and anchors earlier hi
    await expect(page.getByRole('button', { name: '正在加载更早的记录…' })).toBeDisabled();
    const before = (await first.boundingBox())!.y;
    release();
-   await expect(messages.getByText('History request 1', { exact: true })).toBeAttached();
+   await expect(messages.getByText('History request 16', { exact: true })).toBeAttached();
+   await expect(messages.getByText('History request 15', { exact: true })).toHaveCount(0);
    await expect.poll(async () => Math.abs((await first.boundingBox())!.y - before)).toBeLessThan(3);
    await expect(latest).toHaveCount(1);
   } finally {
@@ -134,7 +135,7 @@ test('opens ordinary and Mandala chats at the latest page and anchors earlier hi
    await expect(page.locator('.task-workspace')).toBeVisible();
    await page.goBack();
    await expect(latest).toBeVisible();
-   await expect(messages.getByText('History request 5', { exact: true })).toHaveCount(0);
+   await expect(messages.getByText('History request 20', { exact: true })).toHaveCount(0);
    await expect.poll(() => scroller.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(4);
   }
  }

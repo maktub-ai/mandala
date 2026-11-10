@@ -40,3 +40,72 @@ test('the Mandala tab opens the one primary chat with owned goals and in-chat pr
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);expect(errors).toEqual([]);
  }finally{await context.close();await fixture.close();}
 });
+
+test('remote ordinary and Mandala chats load five turns and catch up after a disconnect', async ({ page, browser }) => {
+ test.setTimeout(90000);
+ const fixture = await remoteMobileFixture(), context = await browser.newContext(), computer = await context.newPage();
+ try {
+  const { config } = await ensureMandalaConfig(fixture.home);
+  const primary = ensureMandalaConversation(fixture.store, config);
+  for (const chat of [fixture.conversation, primary]) for (let i = 1; i <= 12; i++) {
+   fixture.store.appendEvent(chat.id, 'user', { text: 'Remote history request ' + i });
+   fixture.store.appendEvent(chat.id, 'text', { text: 'Remote history answer ' + i + '\n\n' + 'Example transcript text. '.repeat(16) });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await pairRemote(page, computer, fixture);
+  const messages = page.locator('.remote-messages');
+  const transport = '**/api/remote/transport';
+  let offline = false;
+  const historyReads: string[] = [];
+  await page.route(transport, async route => {
+   const { path } = fixture.inspectRequest(route.request().postDataBuffer()!.toString('utf8'));
+   if (path.includes('/history')) historyReads.push(path);
+   if (offline) await route.abort('internetdisconnected');
+   else await route.continue();
+  });
+  for (const id of [primary.id, fixture.conversation.id]) {
+   if (id !== primary.id) {
+    await page.getByRole('button', { name: '对话列表', exact: true }).click();
+    await page.getByRole('button', { name: /手机端合成对话/ }).click();
+   }
+   const request = (n: number) => messages.getByText('Remote history request ' + n, { exact: true });
+   await expect(request(12)).toBeVisible();
+   await expect(request(8)).toBeAttached();
+   await expect(request(7)).toHaveCount(0);
+   const scroller = page.locator('.remote-chat-main');
+   const distanceFromBottom = () => scroller.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight);
+   await expect.poll(distanceFromBottom).toBeLessThan(4);
+   if (id === primary.id) {
+    await scroller.evaluate(el => { el.scrollTop = el.scrollHeight - el.clientHeight - 45; });
+    await expect.poll(distanceFromBottom).toBeGreaterThan(40);
+    const refresh = page.waitForResponse(response => {
+     if (!response.url().endsWith('/api/remote/transport')) return false;
+     return fixture.inspectRequest(response.request().postDataBuffer()!.toString('utf8')).path.includes('/history?recent=5&since=');
+    });
+    await page.getByRole('button', { name: '刷新远程工作区', exact: true }).click();
+    await (await refresh).finished();
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    expect(await distanceFromBottom()).toBeGreaterThan(40);
+   }
+   await scroller.evaluate(el => { el.scrollTop = 0; });
+   await expect(request(3)).toBeAttached();
+   await expect(request(2)).toHaveCount(0);
+   const live = fixture.store.appendEvent(id, 'user', { text: 'Remote live message ' + id });
+   await expect(messages.getByText('Remote live message ' + id, { exact: true })).toHaveCount(1);
+   offline = true;
+   await expect(page.locator('.remote-connection')).toHaveAttribute('data-state', 'offline');
+   fixture.store.database.prepare('UPDATE events SET data=? WHERE id=?').run(JSON.stringify({ text: 'Updated live message ' + id }), live.id);
+   for (let i = 1; i <= 7; i++) fixture.store.appendEvent(id, 'user', { text: 'Remote missed message ' + i });
+   offline = false;
+   await expect(messages.getByText('Remote missed message 7', { exact: true })).toHaveCount(1);
+   await expect(messages.getByText('Remote missed message 1', { exact: true })).toHaveCount(1);
+   await expect(messages.getByText('Updated live message ' + id, { exact: true })).toHaveCount(1);
+   await expect(request(3)).toHaveCount(1);
+   expect(historyReads.some(path => path.startsWith('/api/conversations/' + id + '/history?recent=5&since='))).toBe(true);
+  }
+  expect(historyReads.every(path => !path.endsWith('/history'))).toBe(true);
+ } finally {
+  await context.close();
+  await fixture.close();
+ }
+});
