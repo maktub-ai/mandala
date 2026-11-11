@@ -38,7 +38,7 @@ export default function AppNavigation({ active, disabled = false, library, modul
   const current = navigationGroup(active);
   const [accountOpen, setAccountOpen] = useState(false);
   const [updateState] = useDesktopUpdate();
-  const update = updateState?.status === 'available' ? updateState.update : null;
+  const update = updateState?.status === 'available' || updateState?.status === 'ready' ? updateState.update : null;
   const items = orderedSidebarItems(moduleOrder);
   const pinned = items.filter(item => modulePinned(item, modulePins));
   const unpinned = items.filter(item => item.id !== 'settings' && !modulePinned(item, modulePins));

@@ -111,3 +111,23 @@ test('unsupported platforms never contact the release service', async () => {
   const updates = createUpdateController({ version: '1.0.0', platform: 'linux', arch: 'x64', fetch, showMessage: vi.fn(), openExternal: vi.fn() });
   expect((await updates.check('settings')).supported).toBe(false); expect(fetch).not.toHaveBeenCalled();
 });
+
+test('downloads a local build inside Mandala and preserves its ready state during checks', async () => {
+  const candidate = { version: '1.0.3-local.main.abcdef0' };
+  const local = { check: vi.fn(() => candidate), download: vi.fn(async () => {}), ready: vi.fn(() => null) };
+  const fetch = vi.fn();
+  const { updates, onChange, openExternal } = controller(fetch, { local });
+  expect(await updates.check()).toMatchObject({ status: 'available', update: { ...candidate, local: true } });
+  await updates.download();
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ status: 'downloading' }));
+  expect(await updates.check()).toMatchObject({ status: 'ready', update: candidate });
+  expect(fetch).not.toHaveBeenCalled();
+  expect(openExternal).not.toHaveBeenCalled();
+});
+
+test('restores a staged local update on startup', () => {
+  const candidate = { version: '1.0.3-local.main.abcdef0' };
+  const local = { ready: () => candidate };
+  const { updates } = controller(vi.fn(), { local });
+  expect(updates.state()).toMatchObject({ status: 'ready', update: { ...candidate, local: true } });
+});

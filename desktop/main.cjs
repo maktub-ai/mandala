@@ -1,8 +1,10 @@
 const { app, BrowserWindow, Menu, Tray, Notification, nativeImage, nativeTheme, dialog, shell, session, ipcMain, screen } = require('electron');
-const { join, isAbsolute } = require('node:path');
+const { homedir } = require('node:os');
+const { join, isAbsolute, resolve } = require('node:path');
 const { statSync, readFileSync, writeFileSync } = require('node:fs');
-const { resolveDesktopHome, desktopEnvironment, loginShellPath, prepareDesktopHome, connectOrStartService, stopBackgroundService, readRuntimeBuild, RuntimeShutdownTimeout, allowedNavigation, readDesktopAppearance, writeDesktopAppearance, readDesktopPreferences, writeDesktopPreference, desktopCliStatus, installDesktopCli } = require('./runtime.cjs');
+const { resolveDesktopHome, desktopEnvironment, loginShellPath, prepareDesktopHome, connectOrStartService, stopBackgroundService, stopBackgroundServiceIfIdle, readRuntimeBuild, RuntimeShutdownTimeout, allowedNavigation, readDesktopAppearance, writeDesktopAppearance, readDesktopPreferences, writeDesktopPreference, desktopCliStatus, installDesktopCli } = require('./runtime.cjs');
 const { createUpdateController } = require('./updates.cjs');
+const { createLocalUpdate } = require('./local-update.cjs');
 let window, petWindow, petPosition, tray, service, confirming = false, stopping = false, finished = false, discardUnsaved = false;
 let homeError;
 const home = resolveDesktopHome();
@@ -268,7 +270,43 @@ async function start() {
   // Update state is shared by the menu, the settings page and the background schedule.
   const updateStateFile = () => join(app.getPath('userData'), 'update-state.json');
   const showSettings = () => { window.show(); window.focus(); window.webContents.send('mandala:navigate', '/settings/general'); };
-  const updates = createUpdateController({ version: app.getVersion(), platform: process.platform, arch: process.arch,
+  const local = app.isPackaged && process.platform === 'darwin' ? createLocalUpdate({
+    installed: resolve(process.resourcesPath, '../..'),
+    feed: join(homedir(), '.mandala-local-updates'),
+    swap: join(runtime, 'bin', 'swap-app'),
+    version: app.getVersion(), arch: process.arch,
+  }) : null;
+  const zh = app.getLocale?.().startsWith('zh');
+  const readyToQuit = async () => {
+    const { response } = await dialog.showMessageBox({
+      type: 'info', message: zh ? '更新已下载' : 'Update downloaded',
+      detail: zh ? '退出并重新打开 Mandala 即可使用新版。后台有活动时，安装会延后。' : 'Quit and reopen Mandala to use the new version. If the runtime is busy, installation will wait.',
+      buttons: zh ? ['稍后', '退出以更新'] : ['Later', 'Quit to update'], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    if (response === 1) quit();
+  };
+  if (local) app.on('will-quit', event => {
+    if (stopping || !local.ready()) return;
+    event.preventDefault();
+    stopping = true;
+    void (async () => {
+      try {
+        const result = await local.install(async () => await stopBackgroundServiceIfIdle(service) === 'accepted');
+        if (result === 'busy') await dialog.showMessageBox({
+          type: 'info', message: zh ? '更新已暂缓' : 'Update deferred',
+          detail: zh ? '后台仍在工作。等工作结束后，再退出并重新打开 Mandala。' : 'The runtime is still working. Quit and reopen Mandala again after it finishes.',
+          buttons: ['OK'],
+        });
+      } catch {
+        await dialog.showMessageBox({
+          type: 'warning', message: zh ? '更新安装失败' : 'Could not install update',
+          detail: zh ? '可以继续打开当前版本，并在设置中重试。' : 'You can reopen the current version and try again in Settings.',
+          buttons: ['OK'],
+        });
+      } finally { app.exit(0); }
+    })();
+  });
+  const updates = createUpdateController({ version: app.getVersion(), platform: process.platform, arch: process.arch, local, readyToQuit,
     store: { read: () => JSON.parse(readFileSync(updateStateFile(), 'utf8')), write: value => writeFileSync(updateStateFile(), JSON.stringify(value), { mode: 0o600 }) },
     isActive: () => !stopping && !finished, showMessage: options => dialog.showMessageBox(options), openExternal: url => shell.openExternal(url),
     onChange: value => { if (window && !window.isDestroyed()) window.webContents.send('mandala:update-state', value); },
@@ -289,7 +327,7 @@ async function start() {
       { label: 'Show Mandala', click: () => { window.show(); window.focus(); } },
       { label: 'Open data directory', click: () => shell.openPath(profileHome) },
       { label: 'Check for updates…', click: () => { void updates.check('menu'); } },
-      { label: 'About Mandala', click: () => dialog.showMessageBox({ title: 'Mandala', message: `Mandala ${app.getVersion()}`, detail: 'Local service and native CLI authentication stay on this computer. This preview uses manual installer upgrades.' }) },
+      { label: 'About Mandala', click: () => dialog.showMessageBox({ title: 'Mandala', message: `Mandala ${app.getVersion()}`, detail: local ? 'Local development build. Download updates in Mandala and quit to apply them.' : 'Local service and native CLI authentication stay on this computer. This preview uses manual installer upgrades.' }) },
       ...(service.upgradePending ? [{ label: upgrade.pending, click: () => dialog.showMessageBox(window, {
         type: 'info', message: upgrade.pending, detail: service.upgradePending === 'busy' ? upgrade.busy : upgrade.unknown,
       }) }] : []),

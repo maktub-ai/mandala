@@ -1,6 +1,6 @@
 // Update check: GitHub `mandala-releases` is where installers are published; the website's
 // release feed re-serves that list from one stable address, and GitHub is the fallback.
-// Installers are downloaded by the user (unsigned builds cannot replace themselves).
+// Local development builds have their own on-device update source.
 const RELEASES = 'https://github.com/maktub-ai/mandala-releases';
 const FEED = 'https://mandala.pub/api/releases';
 const GITHUB_API = 'https://api.github.com/repos/maktub-ai/mandala-releases/releases?per_page=100';
@@ -65,20 +65,36 @@ async function checkForUpdate({ version, platform, arch, fetch = globalThis.fetc
 const memoryStore = () => { let saved = {}; return { read: () => saved, write: value => { saved = value; } }; };
 // Keeps the update state for the menu, the settings page and the background schedule.
 // mode: 'auto' (silent; notifies once per version), 'menu' (native dialogs), 'settings' (the page shows the result).
-function createUpdateController({ version, platform, arch, fetch, store = memoryStore(), now = Date.now, isActive = () => true, showMessage, openExternal, notify = () => {}, onChange = () => {} }) {
+function createUpdateController({ version, platform, arch, fetch, local, readyToQuit = () => {}, store = memoryStore(), now = Date.now, isActive = () => true, showMessage, openExternal, notify = () => {}, onChange = () => {} }) {
   let saved = {};
   try { const value = store.read(); if (value && typeof value === 'object') saved = value; } catch { /* Start fresh. */ }
   const supported = platform === 'darwin' || platform === 'win32';
-  let state = { supported, current: version, status: 'idle', update: null, checkedAt: Number.isFinite(saved.checkedAt) ? saved.checkedAt : null, autoCheck: saved.autoCheck !== false, error: null };
+  const localInfo = build => build && { version: build.version, local: true };
+  const staged = localInfo(local?.ready());
+  let state = { supported, current: version, status: staged ? 'ready' : 'idle', update: staged ?? null, checkedAt: Number.isFinite(saved.checkedAt) ? saved.checkedAt : null, autoCheck: saved.autoCheck !== false, error: null };
   let pending = null;
   const persist = () => { try { store.write({ autoCheck: state.autoCheck, checkedAt: state.checkedAt, notified: saved.notified ?? null }); } catch { /* Convenience only. */ } };
   const set = patch => { state = { ...state, ...patch }; if (isActive()) onChange(state); };
-  const download = async () => { if (state.update && isActive()) await openExternal(state.update.url); };
+  const download = async () => {
+    if (state.status !== 'available' || !isActive()) return;
+    const { update } = state;
+    if (!local) return openExternal(update.url);
+    set({ status: 'downloading' });
+    try {
+      await local.download(update);
+      set({ status: 'ready' });
+    } catch (error) {
+      set({ status: 'available' });
+      throw error;
+    }
+    if (isActive()) await readyToQuit();
+  };
   // One request at a time; callers that arrive meanwhile share its result.
   const refresh = () => pending ??= (async () => {
+    if (state.status === 'ready' || state.status === 'downloading') return;
     set({ status: 'checking', error: null });
     try {
-      const update = await checkForUpdate({ version, platform, arch, fetch });
+      const update = local ? localInfo(local.check()) : await checkForUpdate({ version, platform, arch, fetch });
       set({ status: update ? 'available' : 'current', update, checkedAt: now() });
       persist();
     } catch { set({ status: 'error', error: 'Could not reach the release service.' }); }
@@ -88,10 +104,15 @@ function createUpdateController({ version, platform, arch, fetch, store = memory
     if (mode === 'auto') {
       if (status === 'available' && saved.notified !== update.version) { saved.notified = update.version; persist(); notify(update); }
     } else if (mode === 'menu') {
-      if (status === 'error') await showMessage({ type: 'warning', title: 'Could not check for updates', message: 'Check your connection and try again later. You can keep using Mandala.', buttons: ['OK'] });
+      if (status === 'ready') await readyToQuit();
+      else if (status === 'downloading') return;
+      else if (status === 'error') await showMessage({ type: 'warning', title: 'Could not check for updates', message: 'Check your connection and try again later. You can keep using Mandala.', buttons: ['OK'] });
       else if (status === 'available') {
-        const answer = await showMessage({ type: 'info', title: 'Mandala update available', message: `Mandala ${update.version} is available`, detail: 'Download the installer, then use “Stop runtime and quit…” before replacing Mandala.', buttons: ['Later', 'Download update'], defaultId: 0, cancelId: 0 });
-        if (answer.response === 1) await download();
+        const answer = await showMessage({ type: 'info', title: 'Mandala update available', message: `Mandala ${update.version} is available`, detail: local ? 'Download this local build in Mandala. Quit and reopen to apply it.' : 'Download the installer, then use “Stop runtime and quit…” before replacing Mandala.', buttons: ['Later', 'Download update'], defaultId: 0, cancelId: 0 });
+        if (answer.response === 1) {
+          try { await download(); }
+          catch { if (isActive()) await showMessage({ type: 'warning', title: 'Could not download the update', message: 'Check for updates again and retry.', buttons: ['OK'] }); }
+        }
       } else await showMessage({ type: 'info', title: 'Mandala is up to date', message: `Mandala ${version} is the newest version for this computer.`, buttons: ['OK'] });
     }
   };

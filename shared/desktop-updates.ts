@@ -1,7 +1,7 @@
 // What the desktop app reports about installer updates (see desktop/updates.cjs).
-export type DesktopUpdate = { version: string; url: string; notes: string; size: number };
+export type DesktopUpdate = { version: string } & ({ local: true } | { local?: false; url: string; notes: string; size: number });
 export type DesktopUpdateState = {
-  supported: boolean; current: string; status: 'idle' | 'checking' | 'available' | 'current' | 'error';
+  supported: boolean; current: string; status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'current' | 'error';
   update: DesktopUpdate | null; checkedAt: number | null; autoCheck: boolean; error: string | null;
 };
 export type DesktopUpdates = {

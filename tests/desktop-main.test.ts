@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -6,10 +6,10 @@ import { EventEmitter } from 'node:events';
 const require = createRequire(import.meta.url);
 const source = readFileSync('desktop/main.cjs', 'utf8');
 const tick = () => new Promise<void>(r => setImmediate(r));
-async function fixture(pending = false, platform = 'darwin', dark = false, initialAppearance: string | null = null, packaged = false) {
+async function fixture(pending = false, platform = 'darwin', dark = false, initialAppearance: string | null = null, packaged = false, localUpdate: unknown = null) {
   const app: any = new EventEmitter(), child: any = new EventEmitter();
   child.exitCode = null; child.signalCode = null; child.pid = 99999999;
-  const events = { quit: 0, errors: [] as unknown[], stop: 0, shown: 0, icons: [] as string[], reloads: 0, prompts: [] as unknown[] };
+  const events = { quit: 0, exit: 0, idleStop: 0, errors: [] as unknown[], stop: 0, shown: 0, icons: [] as string[], reloads: 0, prompts: [] as unknown[] };
   const nativeTheme = Object.assign(new EventEmitter(), { shouldUseDarkColors: dark });
   app.nativeTheme = nativeTheme;
   app.dock = { setIcon: (icon: string) => events.icons.push(icon) };
@@ -19,7 +19,8 @@ async function fixture(pending = false, platform = 'darwin', dark = false, initi
   const timers: any[] = [];
   app.isPackaged = packaged;
   app.setPath = app.setName = () => {}; app.requestSingleInstanceLock = () => true;
-  app.whenReady = () => Promise.resolve(); app.getVersion = () => 'synthetic'; app.quit = () => events.quit++;
+  app.whenReady = () => Promise.resolve(); app.getVersion = () => 'synthetic'; app.getPath = () => '/private/tmp/synthetic';
+  app.quit = () => events.quit++; app.exit = () => events.exit++;
   const dialog = { showErrorBox: (...a: unknown[]) => events.errors.push(a), showMessageBox: (...args: unknown[]) => { events.prompts.push(args); return new Promise(r => resolveConfirm = r); } };
   class BrowserWindow extends EventEmitter {
     webContents: any = new EventEmitter();
@@ -37,8 +38,8 @@ async function fixture(pending = false, platform = 'darwin', dark = false, initi
   (electron.session as any).fromPartition=()=>electron.session.defaultSession;
   const service = { child, origin: 'http://127.0.0.1:54321' };
   const commandCalls:string[]=[];
-  const runtime = { RuntimeShutdownTimeout: Error, readRuntimeBuild: () => packaged ? { version: '1.0.0', commit: 'a'.repeat(40) } : undefined, desktopCliStatus:()=>{commandCalls.push('status');return {installed:false};},installDesktopCli:()=>{commandCalls.push('install');return {installed:true};},resolveDesktopHome: () => '/private/tmp/synthetic', desktopEnvironment: () => ({}), loginShellPath: () => '', assertHomeAvailable() {}, prepareDesktopHome() {}, connectOrStartService: (_options: any) => { return pending ? new Promise(r => resolveStart = r) : Promise.resolve(service); }, stopBackgroundService: async () => { events.stop++; child.exitCode = 0; child.emit('exit', 0); }, forceStopService: async () => {}, allowedNavigation: (url: string, origin: string) => url.startsWith(origin + '/'), readDesktopPreferences:()=>({...preferences}),writeDesktopPreference:(_home:string,key:string,value:string)=>{if(key==='unknown')throw Error('Invalid key');preferences[key]=value;},readDesktopAppearance: () => appearance, writeDesktopAppearance: (_home: string, value: string) => { if (value === 'invalid') throw Error('Invalid appearance'); appearance = value; } };
-  vm.runInNewContext(source, { require: (p: string) => p === 'electron' ? electron : p === './runtime.cjs' ? runtime : p === './updates.cjs' ? require('../desktop/updates.cjs') : require(p), __dirname: '/private/tmp/synthetic', fetch:async()=>({ok:true,json:async()=>({partition:'signin',home:'/private/tmp/synthetic'})}), process: { platform, arch: 'arm64', resourcesPath: '/private/tmp/synthetic' }, console, setImmediate, URL, setTimeout: (_fn: Function, delay: number) => { const timer = { delay, unref() {}, cleared: false }; timers.push(timer); return timer; }, setInterval: (_fn: Function, delay: number) => { const timer = { delay, unref() {}, cleared: false }; timers.push(timer); return timer; }, clearTimeout: (timer: any) => { timer.cleared = true; }, clearInterval: (timer: any) => { timer.cleared = true; } });
+  const runtime = { RuntimeShutdownTimeout: Error, readRuntimeBuild: () => packaged ? { version: '1.0.0', commit: 'a'.repeat(40) } : undefined, desktopCliStatus:()=>{commandCalls.push('status');return {installed:false};},installDesktopCli:()=>{commandCalls.push('install');return {installed:true};},resolveDesktopHome: () => '/private/tmp/synthetic', desktopEnvironment: () => ({}), loginShellPath: () => '', assertHomeAvailable() {}, prepareDesktopHome() {}, connectOrStartService: (_options: any) => { return pending ? new Promise(r => resolveStart = r) : Promise.resolve(service); }, stopBackgroundServiceIfIdle: async () => { events.idleStop++; return 'accepted'; }, stopBackgroundService: async () => { events.stop++; child.exitCode = 0; child.emit('exit', 0); }, forceStopService: async () => {}, allowedNavigation: (url: string, origin: string) => url.startsWith(origin + '/'), readDesktopPreferences:()=>({...preferences}),writeDesktopPreference:(_home:string,key:string,value:string)=>{if(key==='unknown')throw Error('Invalid key');preferences[key]=value;},readDesktopAppearance: () => appearance, writeDesktopAppearance: (_home: string, value: string) => { if (value === 'invalid') throw Error('Invalid appearance'); appearance = value; } };
+  vm.runInNewContext(source, { require: (p: string) => p === 'electron' ? electron : p === './runtime.cjs' ? runtime : p === './updates.cjs' ? require('../desktop/updates.cjs') : p === './local-update.cjs' ? { createLocalUpdate: () => localUpdate } : require(p), __dirname: '/private/tmp/synthetic', fetch:async()=>({ok:true,json:async()=>({partition:'signin',home:'/private/tmp/synthetic'})}), process: { platform, arch: 'arm64', resourcesPath: '/private/tmp/synthetic' }, console, setImmediate, URL, setTimeout: (_fn: Function, delay: number) => { const timer = { delay, unref() {}, cleared: false }; timers.push(timer); return timer; }, setInterval: (_fn: Function, delay: number) => { const timer = { delay, unref() {}, cleared: false }; timers.push(timer); return timer; }, clearTimeout: (timer: any) => { timer.cleared = true; }, clearInterval: (timer: any) => { timer.cleared = true; } });
   await tick(); await tick();
   const appearanceRequest = (request: unknown, override = {}) => { const event = { sender: browserWindow.webContents, senderFrame: browserWindow.webContents.mainFrame, returnValue: undefined, ...override }; electron.ipcMain.emit('mandala:appearance', event, request); return event.returnValue; };
   const preferenceRequest=(request:unknown,override={})=>{const event={sender:browserWindow.webContents,senderFrame:browserWindow.webContents.mainFrame,returnValue:undefined,...override};electron.ipcMain.emit('mandala:preferences',event,request);return event.returnValue;};
@@ -181,4 +182,20 @@ test('packaged App schedules update checks after startup and clears them on quit
   expect(f.timers.map(t => t.delay)).toEqual([30000, 21600000]);
   f.app.emit('will-quit'); expect(f.timers.every(t => t.cleared)).toBe(true);
   expect((await fixture()).timers).toEqual([]);
+});
+
+test('a ready local update applies only after the app confirms quit', async () => {
+  const install = vi.fn(async (stop: () => Promise<boolean>) => await stop() ? 'installed' : 'busy');
+  const f = await fixture(false, 'darwin', false, null, true, { ready: () => ({ version: 'next' }), install });
+  f.quit(); f.unload(() => {}); await tick(); f.confirm(0); await tick();
+  expect(install).not.toHaveBeenCalled();
+  expect(f.events.idleStop).toBe(0);
+  f.quit();
+  const preventDefault = vi.fn();
+  f.app.emit('will-quit', { preventDefault });
+  await tick();
+  expect(preventDefault).toHaveBeenCalledOnce();
+  expect(install).toHaveBeenCalledOnce();
+  expect(f.events.idleStop).toBe(1);
+  expect(f.events.exit).toBe(1);
 });

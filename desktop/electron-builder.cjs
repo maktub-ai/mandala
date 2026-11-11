@@ -2,7 +2,7 @@ module.exports = {
   appId: 'com.maktubcn.mandala',
   productName: 'Mandala',
   directories: { app: '.app', output: '../release/desktop' },
-  files: ['main.cjs', 'updates.cjs', 'preload.cjs', 'runtime.cjs', 'tray.png', 'tray-color.png', 'icon-light.png', 'icon-dark.png', 'package.json'],
+  files: ['main.cjs', 'updates.cjs', 'local-update.cjs', 'preload.cjs', 'runtime.cjs', 'tray.png', 'tray-color.png', 'icon-light.png', 'icon-dark.png', 'package.json'],
   extraResources: [{ from: '.runtime', to: 'runtime' }, { from: '.runtime/node_modules', to: 'runtime/node_modules', filter: ['**/*'] }],
   npmRebuild: false,
   asar: true,

@@ -142,10 +142,9 @@ export async function connectOrStartService(options: Parameters<typeof startServ
   }
   if (existing) {
     if (!options.build || sameBuild(options.build, existing.build)) return existing;
-    const result = existing.canStopIfIdle ? (await requestUpgradeStop(existing, 'stop-if-idle')).idleStop : 'unknown';
+    const result = await stopBackgroundServiceIfIdle(existing, options.shutdownTimeoutMs);
     if (result === 'busy') return { ...existing, upgradePending: 'busy' };
-    if (result === 'accepted') await waitForBackgroundShutdown(existing, options.shutdownTimeoutMs);
-    else {
+    if (result !== 'accepted') {
       if (!await options.confirmLegacy?.(existing)) return { ...existing, upgradePending: 'confirmation' };
       await requestUpgradeStop(existing, 'stop');
       await waitForBackgroundShutdown(existing, options.shutdownTimeoutMs);
@@ -176,6 +175,11 @@ async function requestUpgradeStop(service: BackgroundService, action: 'stop' | '
     if (error instanceof TypeError || (error as Error).name === 'TimeoutError') throw new RuntimeShutdownTimeout();
     throw error;
   }
+}
+export async function stopBackgroundServiceIfIdle(service: BackgroundService, timeoutMs?: number) {
+  const result = service.canStopIfIdle ? (await requestUpgradeStop(service, 'stop-if-idle')).idleStop : 'unknown';
+  if (result === 'accepted') await waitForBackgroundShutdown(service, timeoutMs);
+  return result;
 }
 export async function stopBackgroundService(service: BackgroundService, timeoutMs?: number): Promise<void> {
   // A confirmation may stay open while the verified process finishes independently.
