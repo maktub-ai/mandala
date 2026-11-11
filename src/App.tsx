@@ -362,6 +362,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     [checkingCli, setCheckingCli] = useState(false),
     [cliPanel, setCliPanel] = useState(false),
     [cliCheck, setCliCheck] = useState(0);
+  const canCheckCli = historyReady || cliPanel;
   const navigationVersion = useRef(0);
   const retrySubmissions = useRef(new Map<string, SubmissionRecovery & { view: number; conversationId: string; text: string; files: File[]; references: ComposerReferenceItem[]; attachments: Attachment[]; commandKey: string; draftFingerprint?:string; action: "queue" | "continue" | "interrupt" }>());
   const composerReady = useRef<{id:string;resolve:(draft:ReturnType<typeof useComposerDraft>)=>void;reject:(error:Error)=>void}|null>(null);
@@ -490,6 +491,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   }, [settingsPath]);
   useEffect(() => {
     if (!cli || !chatActive || !configLoaded || selected && chat?.id !== selected) return;
+    if (selected && !canCheckCli) { setCliStatus(null); setCheckingCli(true); return; }
     let active = true;
     setCliStatus(null);
     setCheckingCli(true);
@@ -511,9 +513,9 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     return () => {
       active = false;
     };
-  }, [projectId, agentId, statusCli, cliCheck, chatActive, configLoaded, selected, chat?.id, workspaceId, directory, JSON.stringify([config.runtimeDefaults, config.agents.find(a => a.id === agentId)?.runtime])]);
+  }, [projectId, agentId, statusCli, cliCheck, chatActive, configLoaded, selected, canCheckCli, chat?.id, workspaceId, directory, JSON.stringify([config.runtimeDefaults, config.agents.find(a => a.id === agentId)?.runtime])]);
   useEffect(() => {
-    if (!cli || !chatActive || !configLoaded || selected && chat?.id !== selected) {
+    if (!cli || !chatActive || !configLoaded || selected && (chat?.id !== selected || !historyReady)) {
       setModelCatalog({ context: modelContext, models: [] });
       return;
     }
@@ -529,7 +531,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     return () => {
       active = false;
     };
-  }, [projectId, agentId, cli, chatActive, configLoaded, selected, chat?.id, config, workspaceId, directory]);
+  }, [projectId, agentId, cli, chatActive, configLoaded, selected, historyReady, chat?.id, config, workspaceId, directory]);
   useEffect(() => {
     setSubmittingApproval("");
     setStopping(false);
@@ -1119,7 +1121,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     const run = presentRun(turn);
     return { turn, run, replyText: run.answers.map(message => message.text).join("\n\n") };
   }), [turns]);
-  const executionResults=useExecutionResults(chatActive&&agent?.systemRole==='mandala'?selected:'');
+  const executionResults=useExecutionResults(chatActive&&historyReady&&chat?.id===selected&&agent?.systemRole==='mandala'?selected:'');
   const resultGroups=useMemo(()=>{
     const presented=new Set(turns.flatMap(turn=>turn.messages.flatMap(message=>message.source?.kind==='coordination'?message.source.receiptIds:[])));
     const groups=new Map<number|null,typeof executionResults.items>();
@@ -1150,7 +1152,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   },[selected,historyReady,events,routeLocation,earlierState]);
   const chatMessages = useMemo(() => turns.flatMap(turn => turn.messages), [turns]);
   const verifiedFiles = useVerifiedConversationFiles(chatActive ? selected : "", chatMessages);
-  const publishedFiles=usePublishedConversationFiles(chatActive?selected:'',chat?.updatedAt??'');
+  const publishedFiles=usePublishedConversationFiles(chatActive&&historyReady&&chat?.id===selected?selected:'',chat?.updatedAt??'');
   const operationTasks=useOperationTasks(events,selected);
   const publishedFilesByRun=useMemo(()=>new Map([['',publishedFiles],...[...new Set(publishedFiles.flatMap(file=>file.runId?[file.runId]:[]))].map(runId=>[runId,publishedFiles.filter(file=>!file.runId||file.runId===runId)] as const)]),[publishedFiles]);
   // Read only when the context popover opens.
@@ -1431,7 +1433,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   // The chat's context glance: in the desktop titlebar beside the panel button, otherwise at the end of the chat bar.
   // A remote workspace's CLI status comes from its machine, so the notice points to that machine rather than local CLI setup.
   const statusMachine = chat?.executionLocation ? { name: chat.executionLocation.machineName } : workspace?.machineId !== undefined ? { name: config.executionMachines?.find(item => item.id === workspace.machineId)?.name ?? localize("执行机器不可用", "Machine unavailable") } : undefined;
-  const contextPopover = selected && !workbench && !mandalaMain ? <ConversationContextPopover conversationId={selected} executionLocation={chat?.executionLocation} activityVersion={chat?.updatedAt} running={chat?.status==='running'} capabilitiesQuery={effectiveQuery} loadFiles={loadChatFiles} hasEarlier={earlierBefore !== null} onContent={openContent} onPanel={tab=>{setWorkspaceTab(tab);setEffectiveOpen(true);}} onDocument={doc=>openContent({kind:'asset',assetId:doc.assetId,versionId:doc.versionId,fileId:doc.files?.[0]?.fileId??'',title:doc.title})}/> : null;
+  const contextPopover = selected && historyReady && chat?.id === selected && !workbench && !mandalaMain ? <ConversationContextPopover conversationId={selected} executionLocation={chat?.executionLocation} activityVersion={chat?.updatedAt} running={chat?.status==='running'} capabilitiesQuery={effectiveQuery} loadFiles={loadChatFiles} hasEarlier={earlierBefore !== null} onContent={openContent} onPanel={tab=>{setWorkspaceTab(tab);setEffectiveOpen(true);}} onDocument={doc=>openContent({kind:'asset',assetId:doc.assetId,versionId:doc.versionId,fileId:doc.files?.[0]?.fileId??'',title:doc.title})}/> : null;
   const environmentPanel = cli && <>{!selected && <p className="effective-scope">{agent?.name}{project && <> / {project.name}</>}</p>}<EffectivePanel visible={effectiveOpen && (!selected || !!workbench || workspaceTab === "configuration")} view={selected ? "capabilities" : "all"} projectId={projectId} agentId={agentId} cli={chat?.cli ?? cli} conversationId={selected || undefined} workspaceId={workspace?.id ?? null} cwd={!project ? directory : undefined} references={selected ? referenceItems : undefined} onReference={selected ? addCatalogReference : undefined} /></>;
   return withPalette(
     <ContentPreviewContext.Provider value={selected && !workbench ? openContent : null}><div className="product-frame"><div className="app-shell">
