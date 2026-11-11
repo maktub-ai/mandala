@@ -22,6 +22,7 @@ test('summary is conversation-scoped and remains separate from the composer refe
  const linked=createTaskWithExecutions(store,manager.taskService,root,{goal:'Linked work'},[id],'linked');createTaskWithExecutions(store,manager.taskService,root,{goal:'Other work'},[other.id],'other');
  const response=await fetch(base+'/api/conversations/'+id+'/reference-summary');expect(response.status).toBe(200);
  expect(await response.json()).toEqual({tasks:[{id:linked.id,goal:'Linked work',state:'todo'}],documents:[],memories:[],truncated:false});
+ const outputs=await fetch(base+'/api/conversations/'+id+'/reference-summary?view=outputs');expect(outputs.status).toBe(200);expect(await outputs.json()).toEqual({tasks:[],documents:[],memories:[],truncated:false});
  expect(Array.isArray((await (await fetch(base+'/api/conversations/'+id+'/references')).json()).items)).toBe(true);
  expect((await fetch(base+'/api/conversations/'+id+'/reference-summary',{headers:{Origin:'https://other.example'}})).status).toBe(403);
 });

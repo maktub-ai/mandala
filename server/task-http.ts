@@ -11,7 +11,7 @@ import { DomainError } from '../shared/workspace-contracts';
 import type {Task} from '../shared/tasks';
 const invalid=()=>{throw new DomainError('invalid_task_request',422,'Invalid task request');};
 const fields=(data:any,allowed:string[])=>{if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(k=>!allowed.includes(k)))invalid();};
-export function createTaskHttp(home:string,manager:SessionManager,store:Store,draftGenerate?:TaskDraftGenerator){
+export function createTaskHttp(home:string,manager:SessionManager,store:Store,draftGenerate?:TaskDraftGenerator,readScope:<T>(read:()=>T)=>T=read=>read()){
  const tasks=manager.taskService,p=workspacePrincipal(store),assets=createAssets(store,createAssetFiles(home));
  const readableTask=(task:Task):Task=>{const executions=task.executions.filter(execution=>{
   try{manager.authorizeConversationRead(execution.conversationId);return true;}
@@ -47,13 +47,13 @@ export function createTaskHttp(home:string,manager:SessionManager,store:Store,dr
    }
   } else if(req.method==='GET'&&!parts.length){
    if([...url.searchParams.keys()].some(k=>!['projectId','conversationId'].includes(k)))invalid();
-   result=tasks.listTasks(p).map(readableTask).filter(t=>(!url.searchParams.has('projectId')||t.projectId===url.searchParams.get('projectId'))&&(!url.searchParams.has('conversationId')||t.conversationIds.includes(url.searchParams.get('conversationId')!))).map(task=>{
+   result=readScope(()=>tasks.listTasks(p).map(readableTask).filter(t=>(!url.searchParams.has('projectId')||t.projectId===url.searchParams.get('projectId'))&&(!url.searchParams.has('conversationId')||t.conversationIds.includes(url.searchParams.get('conversationId')!))).map(task=>{
     const conversationId=tasks.listRunControls(p,task.id).at(-1)?.routing?.executionConversationId;
     let executionTitle:string|null=null;
     if(conversationId)try{manager.authorizeConversationRead(conversationId);executionTitle=store.getConversation(conversationId)?.title?.trim()||null;}
     catch(error){if(!(error instanceof DomainError)||![403,404].includes(error.status))throw error;}
     return executionTitle?{...task,executionTitle}:task;
-   });
+   }));
   } else if(req.method==='GET'&&parts.length===2&&action==='runs'){result=tasks.listRuns(p,id);
   } else if(req.method==='GET'&&parts.length===2&&action==='control') {
    const t=tasks.getTask(p,id);result={taskId:t.id,state:t.state,waitingReason:t.waitingReason,revision:t.revision,runs:tasks.listRunControls(p,id).map(r=>({monitor:r.monitor,id:r.id,state:r.state,waitingForDirectory:r.waitingForDirectory,attempt:r.attempt,routing:r.routing}))};
@@ -92,7 +92,7 @@ export function createTaskHttp(home:string,manager:SessionManager,store:Store,dr
    } else invalid();
    if(parts.length===2&&['move','mark-completed','accept','cancel'].includes(action))manager.presentTaskDecision(id);
   } else {status=405;result={error:'Method not allowed'};}
-  if(Array.isArray(result))result=result.map(item=>item&&typeof item==='object'&&'executions' in item&&'goal' in item?readableTask(item as Task):item);
+  if(Array.isArray(result)&&!(req.method==='GET'&&!parts.length))result=result.map(item=>item&&typeof item==='object'&&'executions' in item&&'goal' in item?readableTask(item as Task):item);
   if(result&&typeof result==='object'&&'executions' in result&&'goal' in result)result=readableTask(result as Task);
   res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(result));return true;
  };

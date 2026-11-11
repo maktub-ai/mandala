@@ -15,15 +15,16 @@ export function useExecutionResults(conversationId:string){
  const [revision,setRevision]=useState(0);
  useEffect(()=>{
   if(!conversationId)return;
+  const controller=new AbortController();
   let active=true,inFlight=false;
   const load=async()=>{
    if(inFlight||document.hidden)return;inFlight=true;
-   try{const items=await api<ConversationResult[]>('/conversations/'+conversationId+'/results');if(active)setValue({id:conversationId,items,error:''});}
+   try{const items=await api<ConversationResult[]>('/conversations/'+conversationId+'/results','GET',undefined,controller.signal);if(active)setValue({id:conversationId,items,error:''});}
    catch(error){if(active)setValue({id:conversationId,items:[],error:(error as Error).message});}
    finally{inFlight=false;}
   };
   void load();const timer=setInterval(load,3000);document.addEventListener('visibilitychange',load);
-  return()=>{active=false;clearInterval(timer);document.removeEventListener('visibilitychange',load);};
+  return()=>{active=false;controller.abort();clearInterval(timer);document.removeEventListener('visibilitychange',load);};
  },[conversationId,revision]);
  return {...(value.id===conversationId?value:{items:[],error:''}),retry:()=>setRevision(v=>v+1)};
 }

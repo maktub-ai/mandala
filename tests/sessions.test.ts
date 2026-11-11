@@ -1898,3 +1898,14 @@ it('recovers the original coordinator context after restart without adopting a d
  expect(manager.taskService.getContextSnapshot({userId:store.ownerUserId},coordinator.id)?.input).toMatch(/^Original coordinator objective/);
  expect(manager.taskService.getContextSnapshot({userId:store.ownerUserId},coordinator.id)?.requiredOutputAssetIds).toEqual([]);
 });
+
+it.each(['getCliStatus','listModels'] as const)('%s reads runtime settings without hydrating unrelated Skill history',async method=>{
+ await manager.close();
+ manager=createSessionManager(store,async readOptions=>{
+  if(readOptions?.hydrateSkills!==false)throw new Error('Slow Skill history hydration reached');
+  return {...config,runtimeDefaults:{codex:{args:['--strict-config']}}};
+ },factory,undefined,home);
+ const result=await manager[method]('p','codex',{agentId:'a'});
+ expect(result).toEqual(method==='listModels'?[{id:'native-model',label:'Native'}]:{status:'ready',version:'0.154.0'});
+ expect(options.extraArgs).toEqual(['--strict-config']);
+});

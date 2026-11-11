@@ -44,3 +44,25 @@ test('opt-in request timeout bounds a stalled response body and preserves caller
   const cancelledCheck=expect(cancelled).rejects.toBe(reason);controller.abort(reason);await cancelledCheck;
   vi.useRealTimers();
 });
+
+test('concurrent panel lists share work but renew after completion and cancel independently',async()=>{
+ let finish!:(response:Response)=>void;
+ const fetcher=vi.fn((_url,options)=>new Promise<Response>((resolve,reject)=>{finish=resolve;options.signal.addEventListener('abort',()=>reject(options.signal.reason));}));
+ vi.stubGlobal('fetch',fetcher);
+ const a=new AbortController(),b=new AbortController();
+ const first=api('/v2/tasks','GET',undefined,a.signal),second=api('/v2/tasks','GET',undefined,b.signal);
+ expect(fetcher).toHaveBeenCalledTimes(1);
+ const cancelled=expect(first).rejects.toMatchObject({name:'AbortError'});a.abort();await cancelled;
+ expect(fetcher.mock.calls[0][1].signal.aborted).toBe(false);
+ finish(new Response('[{"id":"fresh"}]'));await expect(second).resolves.toEqual([{id:'fresh'}]);
+ const next=api('/v2/tasks');expect(fetcher).toHaveBeenCalledTimes(2);finish(new Response('[]'));await expect(next).resolves.toEqual([]);
+});
+
+test('abandoning all list readers aborts their fetch and the next reader starts fresh',async()=>{
+ const fetcher=vi.fn((_url,options)=>new Promise<Response>((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(options.signal.reason))));vi.stubGlobal('fetch',fetcher);
+ const a=new AbortController(),first=api('/conversation-progress','GET',undefined,a.signal);
+ const cancelled=expect(first).rejects.toMatchObject({name:'AbortError'});a.abort();await cancelled;
+ expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
+ const b=new AbortController(),next=api('/conversation-progress','GET',undefined,b.signal);
+ expect(fetcher).toHaveBeenCalledTimes(2);const again=expect(next).rejects.toMatchObject({name:'AbortError'});b.abort();await again;
+});

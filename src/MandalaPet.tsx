@@ -53,12 +53,13 @@ export function usePetStatus(active = true, intervalMs = 4000): PetStatus {
   const timeline = useRef({ state: 'idle' as PetState, since: Date.now(), busyAt: Date.now() });
   useEffect(() => {
     if (!active) return;
+    const controller=new AbortController();
     let live = true, pending = false;
     const read = async () => {
       if (pending) return; pending = true;
       let summary: PetSummary;
       try {
-        const [rows, tasks, mandala] = await Promise.all([api<ConversationProgress[]>('/conversation-progress'), api<Task[]>('/v2/tasks'), api<{ conversation?: Conversation }>('/mandala').catch(() => ({ conversation: undefined }))]);
+        const [rows, tasks, mandala] = await Promise.all([api<ConversationProgress[]>('/conversation-progress','GET',undefined,controller.signal), api<Task[]>('/v2/tasks','GET',undefined,controller.signal), api<{ conversation?: Conversation }>('/mandala','GET',undefined,controller.signal).catch(() => ({ conversation: undefined }))]);
         summary = summarizePet({ rows, tasks, mandalaStatus: mandala.conversation?.status });
       } catch { summary = summarizePet({ rows: [], tasks: [], offline: true }); }
       finally { pending = false; }
@@ -68,7 +69,7 @@ export function usePetStatus(active = true, intervalMs = 4000): PetStatus {
     };
     void read();
     const timer = setInterval(() => void read(), intervalMs);
-    return () => { live = false; clearInterval(timer); };
+    return () => { live = false; controller.abort(); clearInterval(timer); };
   }, [active, intervalMs]);
   return status;
 }

@@ -29,7 +29,35 @@ export async function requestJson<T>(
   return data;
 }
 
+// Only simultaneous bulk-list readers share a request. No response survives its
+// completion, and leaving one view must not cancel another view's active read.
+const listReads=new Map<string,{controller:AbortController;read:Promise<unknown>;readers:number}>();
+function readList<T>(path:string,signal?:AbortSignal):Promise<T>{
+  if(signal?.aborted)return Promise.reject(signal.reason);
+  let shared=listReads.get(path);
+  if(!shared){
+    const controller=new AbortController();
+    const entry={controller,read:requestJson('/api'+path,{method:'GET',signal:controller.signal}),readers:0};
+    shared=entry;listReads.set(path,entry);
+    const clear=()=>{if(listReads.get(path)===entry)listReads.delete(path);};
+    void entry.read.then(clear,clear);
+  }
+  const entry=shared;entry.readers++;
+  return new Promise<T>((resolve,reject)=>{
+    let done=false;
+    const release=()=>{
+      if(done)return false;done=true;signal?.removeEventListener('abort',cancel);
+      if(--entry.readers===0){if(listReads.get(path)===entry)listReads.delete(path);entry.controller.abort();}
+      return true;
+    };
+    const cancel=()=>{if(release())reject(signal?.reason);};
+    signal?.addEventListener('abort',cancel,{once:true});
+    void entry.read.then(value=>{if(release())resolve(value as T);},error=>{if(release())reject(error);});
+  });
+}
+
 export function api<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
+  if(method==='GET'&&body===undefined&&['/v2/tasks','/conversation-progress'].includes(path))return readList<T>(path,signal);
   return requestJson('/api' + path, { method, signal, ...(body === undefined ? {} : {
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }) });

@@ -38,16 +38,17 @@ export default function MandalaPanels({conversationId,config,references,onRefere
  useEffect(()=>{setTaskScope('conversation');setSearch('');},[conversationId]);
  const generation=useRef(0);
  const goalIdentity=goals.map(goal=>goal.taskId).join(',');
- useEffect(()=>{if(goalIdentity)onCatalogRefresh();},[goalIdentity,onCatalogRefresh]);
+ const previousGoals=useRef<string|null>(null);
+ useEffect(()=>{if(loading)return;if(previousGoals.current!==null&&previousGoals.current!==goalIdentity)onCatalogRefresh();previousGoals.current=goalIdentity;},[goalIdentity,loading,onCatalogRefresh]);
  useEffect(()=>{
-  if(!visible)return;const version=++generation.current;let pending=false;
+  if(!visible)return;const version=++generation.current,controller=new AbortController();let pending=false;
   const reload=async()=>{if(pending||document.hidden)return;pending=true;try{
-   const [g,t,p,s]=await Promise.all([api<MandalaGoal[]>('/mandala/goals'),api<Task[]>('/v2/tasks'),api<ConversationProgress[]>('/conversation-progress'),api<AutomationState>('/automations')]);
+   const [g,t,p,s]=await Promise.all([api<MandalaGoal[]>('/mandala/goals','GET',undefined,controller.signal),api<Task[]>('/v2/tasks','GET',undefined,controller.signal),api<ConversationProgress[]>('/conversation-progress','GET',undefined,controller.signal),api<AutomationState>('/automations','GET',undefined,controller.signal)]);
    if(generation.current===version){setGoals(g);setTasks(t);setRows(p);setSchedules(s);setError('');}
   }catch(reason){if(generation.current===version){setGoals([]);setTasks([]);setRows([]);setSchedules({version:1,automations:[],runs:[]});setError((reason as Error).message);}}
   finally{pending=false;if(generation.current===version)setLoading(false);}};
   void reload();const interval=setInterval(()=>void reload(),3000),changed=()=>void reload();document.addEventListener('visibilitychange',changed);
-  return()=>{generation.current++;clearInterval(interval);document.removeEventListener('visibilitychange',changed);};
+  return()=>{generation.current++;controller.abort();clearInterval(interval);document.removeEventListener('visibilitychange',changed);};
  },[visible,retry,config]);
  const {agents,groups}=maintainedTeams(config),owned=new Set(goals.flatMap(goal=>[...goalTaskIds(goal.taskId)]));
  const maintainedRows=rows.filter(row=>agents.some(agent=>agent.id===row.agentId));

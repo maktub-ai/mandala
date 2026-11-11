@@ -223,6 +223,14 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const historyAnchor = useRef<{ element: HTMLElement; top: number } | null>(null);
   const lastScrollTop = useRef(0);
   const historyReady = !selected || historyReadyConversation === selected;
+  const [settledChat,setSettledChat]=useState<string|null>(null);
+  useEffect(()=>{
+    if(!historyReady)return;
+    // Leave the first paint and rapid navigation free of auxiliary work.
+    const timer=setTimeout(()=>setSettledChat(selected),200);
+    return()=>{clearTimeout(timer);setSettledChat(null);};
+  },[selected,historyReady]);
+  const auxiliaryReady=historyReady&&(!selected||settledChat===selected);
   const readerConversation = useRef("");
   const [contentRequest, setContentRequest] = useState<{ conversationId: string; target: ContentTarget } | null>(null);
   const [workspaceTab, setWorkspaceTab] = useState<ConversationWorkspaceTab>("files");
@@ -291,19 +299,17 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const referencePath = selected ? `/conversations/${selected}/references` : '/composer-references?' + new URLSearchParams({
     projectId, agentId, cli, ...(workspaceId !== undefined ? { workspaceId: workspaceId ?? '' } : {}), ...(!projectId && directory ? { cwd: directory } : {}),
   });
-  const refreshReferenceCatalog=useCallback(()=>{
-    const view=navigationVersion.current;void api<{items:ComposerReferenceItem[]}>(referencePath).then(result=>{if(view===navigationVersion.current)setReferenceItems(result.items);}).catch(reason=>{if(view===navigationVersion.current)setReferencesError(reason.message);});
-  },[referencePath]);
+  const refreshReferenceCatalog=useCallback(()=>setReferenceReload(value=>value+1),[]);
   const chatActive = location.pathname === '/' || location.pathname === '/mandala';
   useEffect(() => {
-    if (!chatActive || !configLoaded) return;
+    if (!chatActive || !configLoaded || !historyReady) return;
     const controller = new AbortController();
     let active = true; setReferenceItems([]); setReferencesLoading(true); setReferencesError('');
     requestJson<{ items: ComposerReferenceItem[] }>('/api' + referencePath, {signal:controller.signal}, 10000)
       .then(result => { if (active) setReferenceItems(result.items); })
       .catch(reason => { if (active) setReferencesError(reason.message?.includes('timed out') ? localize('引用读取超时，请重试。', 'Loading references timed out. Please retry.') : reason.message); }).finally(() => { if (active) setReferencesLoading(false); });
     return () => { active = false; controller.abort(); };
-  }, [referencePath, chatActive, configLoaded, config, referenceReload]);
+  }, [referencePath, chatActive, configLoaded, historyReady, config, referenceReload]);
   useEffect(() => { if (!selected && !pending) { setSelectedReferences([]); } }, [projectId, agentId, cli, workspaceId, directory]);
   useEffect(() => { if (!text) setReferenceQuery(null); }, [text]);
   const addReference = useCallback((reference: string) => {
@@ -362,7 +368,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     [checkingCli, setCheckingCli] = useState(false),
     [cliPanel, setCliPanel] = useState(false),
     [cliCheck, setCliCheck] = useState(0);
-  const canCheckCli = historyReady || cliPanel;
+  const canCheckCli = auxiliaryReady || cliPanel;
   const navigationVersion = useRef(0);
   const retrySubmissions = useRef(new Map<string, SubmissionRecovery & { view: number; conversationId: string; text: string; files: File[]; references: ComposerReferenceItem[]; attachments: Attachment[]; commandKey: string; draftFingerprint?:string; action: "queue" | "continue" | "interrupt" }>());
   const composerReady = useRef<{id:string;resolve:(draft:ReturnType<typeof useComposerDraft>)=>void;reject:(error:Error)=>void}|null>(null);
@@ -492,6 +498,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   useEffect(() => {
     if (!cli || !chatActive || !configLoaded || selected && chat?.id !== selected) return;
     if (selected && !canCheckCli) { setCliStatus(null); setCheckingCli(true); return; }
+    const controller=new AbortController();
     let active = true;
     setCliStatus(null);
     setCheckingCli(true);
@@ -499,7 +506,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       "/cli/status?cli=" + statusCli + (agentId ? "&agentId=" + encodeURIComponent(agentId) : "") +
         (projectId ? "&projectId=" + encodeURIComponent(projectId) : "") +
         (workspaceId !== undefined ? "&workspaceId=" + encodeURIComponent(workspaceId ?? "") : "") +
-        (!projectId && directory ? "&cwd=" + encodeURIComponent(directory) : ""),
+        (!projectId && directory ? "&cwd=" + encodeURIComponent(directory) : ""), "GET", undefined, controller.signal,
     )
       .then((status) => {
         if (active) setCliStatus(status);
@@ -511,17 +518,18 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
         if (active) setCheckingCli(false);
       });
     return () => {
-      active = false;
+      active = false;controller.abort();
     };
   }, [projectId, agentId, statusCli, cliCheck, chatActive, configLoaded, selected, canCheckCli, chat?.id, workspaceId, directory, JSON.stringify([config.runtimeDefaults, config.agents.find(a => a.id === agentId)?.runtime])]);
   useEffect(() => {
-    if (!cli || !chatActive || !configLoaded || selected && (chat?.id !== selected || !historyReady)) {
+    if (!cli || !chatActive || !configLoaded || selected && (chat?.id !== selected || !auxiliaryReady)) {
       setModelCatalog({ context: modelContext, models: [] });
       return;
     }
+    const controller=new AbortController();
     let active = true;
     setModelCatalog({ context: modelContext, models: [] });
-    api<ModelChoice[]>(modelsPath)
+    api<ModelChoice[]>(modelsPath,"GET",undefined,controller.signal)
       .then((list) => {
         if (active) setModelCatalog({ context: modelContext, models: list });
       })
@@ -529,9 +537,9 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
         if (active) setError(e.message);
       });
     return () => {
-      active = false;
+      active = false;controller.abort();
     };
-  }, [projectId, agentId, cli, chatActive, configLoaded, selected, historyReady, chat?.id, config, workspaceId, directory]);
+  }, [projectId, agentId, cli, chatActive, configLoaded, selected, auxiliaryReady, chat?.id, config, workspaceId, directory]);
   useEffect(() => {
     setSubmittingApproval("");
     setStopping(false);
@@ -1121,7 +1129,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     const run = presentRun(turn);
     return { turn, run, replyText: run.answers.map(message => message.text).join("\n\n") };
   }), [turns]);
-  const executionResults=useExecutionResults(chatActive&&historyReady&&chat?.id===selected&&agent?.systemRole==='mandala'?selected:'');
+  const executionResults=useExecutionResults(chatActive&&auxiliaryReady&&chat?.id===selected&&agent?.systemRole==='mandala'?selected:'');
   const resultGroups=useMemo(()=>{
     const presented=new Set(turns.flatMap(turn=>turn.messages.flatMap(message=>message.source?.kind==='coordination'?message.source.receiptIds:[])));
     const groups=new Map<number|null,typeof executionResults.items>();
@@ -1152,8 +1160,8 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   },[selected,historyReady,events,routeLocation,earlierState]);
   const chatMessages = useMemo(() => turns.flatMap(turn => turn.messages), [turns]);
   const verifiedFiles = useVerifiedConversationFiles(chatActive ? selected : "", chatMessages);
-  const publishedFiles=usePublishedConversationFiles(chatActive&&historyReady&&chat?.id===selected?selected:'',chat?.updatedAt??'');
-  const operationTasks=useOperationTasks(events,selected);
+  const publishedFiles=usePublishedConversationFiles(chatActive&&auxiliaryReady&&chat?.id===selected?selected:'',chat?.updatedAt??'');
+  const operationTasks=useOperationTasks(auxiliaryReady?events:[],selected);
   const publishedFilesByRun=useMemo(()=>new Map([['',publishedFiles],...[...new Set(publishedFiles.flatMap(file=>file.runId?[file.runId]:[]))].map(runId=>[runId,publishedFiles.filter(file=>!file.runId||file.runId===runId)] as const)]),[publishedFiles]);
   // Read only when the context popover opens.
   const loadChatFiles = useCallback(() => conversationFiles(chatMessages, selected, verifiedFiles), [chatMessages, selected, verifiedFiles]);
@@ -1433,7 +1441,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   // The chat's context glance: in the desktop titlebar beside the panel button, otherwise at the end of the chat bar.
   // A remote workspace's CLI status comes from its machine, so the notice points to that machine rather than local CLI setup.
   const statusMachine = chat?.executionLocation ? { name: chat.executionLocation.machineName } : workspace?.machineId !== undefined ? { name: config.executionMachines?.find(item => item.id === workspace.machineId)?.name ?? localize("执行机器不可用", "Machine unavailable") } : undefined;
-  const contextPopover = selected && historyReady && chat?.id === selected && !workbench && !mandalaMain ? <ConversationContextPopover conversationId={selected} executionLocation={chat?.executionLocation} activityVersion={chat?.updatedAt} running={chat?.status==='running'} capabilitiesQuery={effectiveQuery} loadFiles={loadChatFiles} hasEarlier={earlierBefore !== null} onContent={openContent} onPanel={tab=>{setWorkspaceTab(tab);setEffectiveOpen(true);}} onDocument={doc=>openContent({kind:'asset',assetId:doc.assetId,versionId:doc.versionId,fileId:doc.files?.[0]?.fileId??'',title:doc.title})}/> : null;
+  const contextPopover = selected && auxiliaryReady && chat?.id === selected && !workbench && !mandalaMain ? <ConversationContextPopover conversationId={selected} executionLocation={chat?.executionLocation} activityVersion={chat?.updatedAt} running={chat?.status==='running'} capabilitiesQuery={effectiveQuery} loadFiles={loadChatFiles} hasEarlier={earlierBefore !== null} onContent={openContent} onPanel={tab=>{setWorkspaceTab(tab);setEffectiveOpen(true);}} onDocument={doc=>openContent({kind:'asset',assetId:doc.assetId,versionId:doc.versionId,fileId:doc.files?.[0]?.fileId??'',title:doc.title})}/> : null;
   const environmentPanel = cli && <>{!selected && <p className="effective-scope">{agent?.name}{project && <> / {project.name}</>}</p>}<EffectivePanel visible={effectiveOpen && (!selected || !!workbench || workspaceTab === "configuration")} view={selected ? "capabilities" : "all"} projectId={projectId} agentId={agentId} cli={chat?.cli ?? cli} conversationId={selected || undefined} workspaceId={workspace?.id ?? null} cwd={!project ? directory : undefined} references={selected ? referenceItems : undefined} onReference={selected ? addCatalogReference : undefined} /></>;
   return withPalette(
     <ContentPreviewContext.Provider value={selected && !workbench ? openContent : null}><div className="product-frame"><div className="app-shell">
@@ -1814,7 +1822,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
         </>}
       </main>
       <WorkspaceInspector returnFocusRef={selected && !workbench ? contentPanelTrigger : undefined} compact={!!selected && !workbench} id="chat-environment-panel" title={t(selected && !workbench ? "右侧栏" : "上下文与能力")} className={selected && !workbench ? "chat-workspace-inspector" : ""} preserveContent={!!selected && !workbench} resizable={!!selected && !workbench} open={effectiveOpen} onClose={()=>setEffectiveOpen(false)}>
-        {mandalaMain ? <MandalaPanels conversationId={selected} config={config} onCatalogRefresh={refreshReferenceCatalog} references={referenceItems} onReference={addCatalogReference} onOpen={openWorkspacePath} visible={effectiveOpen}/> : selected && !workbench ? chat && readerConversation.current === selected && <ConversationWorkspace key={selected} conversationId={selected} projectId={projectId} activityVersion={chat?.updatedAt} config={config} theme={theme} configuration={environmentPanel} contextSources={<><p className="effective-scope">{project?.name ?? t("不关联项目")} / {agent?.name ?? runtimeName(chat?.cli ?? cli)}</p><EffectivePanel visible={effectiveOpen && workspaceTab === "configuration"} view="sources" projectId={projectId} agentId={agentId} cli={chat!.cli} conversationId={selected} workspaceId={workspace?.id ?? null} cwd={!project ? directory : undefined}/></> } onCloseTerminal={() => { setEffectiveOpen(false); requestAnimationFrame(() => { if(document.activeElement===document.body||document.activeElement?.closest("#chat-environment-panel"))contentPanelTrigger.current?.focus(); }); }} onReference={addReference} initialTab={workspaceTab} onTabChange={setWorkspaceTab} requestedContent={contentRequest?.conversationId === selected ? contentRequest.target : null} /> : environmentPanel}
+        {mandalaMain ? <MandalaPanels conversationId={selected} config={config} onCatalogRefresh={refreshReferenceCatalog} references={referenceItems} onReference={addCatalogReference} onOpen={openWorkspacePath} visible={effectiveOpen&&auxiliaryReady}/> : selected && !workbench ? chat && readerConversation.current === selected && <ConversationWorkspace key={selected} conversationId={selected} projectId={projectId} activityVersion={chat?.updatedAt} config={config} theme={theme} configuration={environmentPanel} contextSources={<><p className="effective-scope">{project?.name ?? t("不关联项目")} / {agent?.name ?? runtimeName(chat?.cli ?? cli)}</p><EffectivePanel visible={effectiveOpen && workspaceTab === "configuration"} view="sources" projectId={projectId} agentId={agentId} cli={chat!.cli} conversationId={selected} workspaceId={workspace?.id ?? null} cwd={!project ? directory : undefined}/></> } onCloseTerminal={() => { setEffectiveOpen(false); requestAnimationFrame(() => { if(document.activeElement===document.body||document.activeElement?.closest("#chat-environment-panel"))contentPanelTrigger.current?.focus(); }); }} onReference={addReference} initialTab={workspaceTab} onTabChange={setWorkspaceTab} requestedContent={contentRequest?.conversationId === selected ? contentRequest.target : null} /> : environmentPanel}
       </WorkspaceInspector>
       {folderOpen && <FolderPicker initialPath={directory} purpose="conversation" onClose={() => setFolderOpen(false)} onSelect={path => { setDirectory(path); setWorkspaceId(null); setFolderOpen(false); const query = new URLSearchParams({project: projectId, agent: agentId, cwd: path}); history.replaceState(null, "", "/?" + query); }} />}
       {agentDetail && (() => {

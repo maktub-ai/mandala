@@ -112,7 +112,7 @@ export interface SessionManager {
   fileMaintenance: FileMaintenance;
   knowledgeBase: KnowledgeBase;
   codeGraph: CodeGraphService;
-  listReferenceSummary(id:string):Promise<ConversationReferenceSummary>;
+  listReferenceSummary(id:string,outputsOnly?:boolean):Promise<ConversationReferenceSummary>;
   startDurableTask(taskId:string,expectedRevision:number,commandKey:string,conversationId?:string|null,coordination?:{continuation:Continuation;assertActive:()=>void;agentId?:string;projectId?:string|null;request?:string;criteria?:import('../shared/tasks').Criterion[]}):Promise<Run>;
   stopDurableTask(taskId:string,expectedRevision?:number,cancel?:boolean):Promise<{taskId:string;status:'stopped'|'cancelled'|'already_finished';runId:string|null}>;
   getCliStatus(projectId?: string, cli?: Cli, environment?: { workspaceId?: string | null; cwd?: string; agentId?: string }, scope?: "runtime" | "system"): Promise<CliStatus>;
@@ -166,7 +166,7 @@ export interface SessionManager {
 }
 export function createSessionManager(
   store: Store,
-  loadConfig: () => Promise<Config>,
+  loadConfig: (options?: { hydrateSkills?: boolean }) => Promise<Config>,
   clientFactory: typeof startCodex = startCodex,
   ompFactory: typeof startOmp = startOmp,
   home = productEnv('HOME') ?? "",
@@ -1664,7 +1664,7 @@ export function createSessionManager(
       if(['completed','cancelled'].includes(task.state))messages.stop(id,taskId);
       presentTaskReceipts(taskId,id,task.state==='completed');
     },
-    listReferenceSummary: async id=>createConversationReferences({store,assets,attachments:attachmentAssets,tasks,memory:memoryRuntime?.memory,authorize:authorizeConversationRead})(id,memoryRuntime?await memoryRuntime.reading():[]),
+    listReferenceSummary: async (id,outputsOnly=false)=>createConversationReferences({store,assets,attachments:attachmentAssets,tasks,memory:memoryRuntime?.memory,authorize:authorizeConversationRead})(id,!outputsOnly&&memoryRuntime?await memoryRuntime.reading():[],outputsOnly),
     fileMaintenance,
     knowledgeBase,
     codeGraph,
@@ -1759,7 +1759,8 @@ export function createSessionManager(
       setImmediate(()=>{if(!closed)void pump(run.routing!.executionConversationId);});return run;
     },
     async getCliStatus(projectId, cli = "codex", environment, scope = "runtime") {
-      const config = await loadConfig();
+      // Discovery needs runtime routing, not executable Skill bodies or their history.
+      const config = await loadConfig({hydrateSkills:false});
       const context = projectId || environment ? conversationContext(config, { projectId: projectId ?? "", ...environment }, "") : undefined;
       const project = context?.project;
       const cwd = project?.cwd || await mkdtemp(join(tmpdir(), "mana-catalog-"));
@@ -1786,7 +1787,8 @@ export function createSessionManager(
     },
     async listModels(projectId, cli = "codex", environment, scope = "runtime") {
       if (closed) throw new Error("service closed");
-      const config = await loadConfig();
+      // Discovery needs runtime routing, not executable Skill bodies or their history.
+      const config = await loadConfig({hydrateSkills:false});
       const context = projectId || environment ? conversationContext(config, { projectId: projectId ?? "", ...environment }, "") : undefined;
       const project = context?.project;
       const cwd = project?.cwd || await mkdtemp(join(tmpdir(), "mana-catalog-"));

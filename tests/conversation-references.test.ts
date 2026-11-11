@@ -101,3 +101,16 @@ test('a task output is associated with its execution and destination conversatio
  f.store.database.prepare("INSERT INTO task_runs (id,task_id,execution_id,attempt,state,artifact_versions,created_at,routing) VALUES (?,?,?,1,'succeeded','[]',?,?)").run('task-run',task.id,execution.id,new Date().toISOString(),JSON.stringify({executionConversationId:f.other.id,destinationConversationId:f.chat.id,mode:'dedicated'}));
  const result=f.summary(f.chat.id);expect(result.tasks).toContainEqual({id:task.id,goal:'Dispatched work',state:'todo'});expect(result.documents).toContainEqual(expect.objectContaining({assetId:output.asset.id,versionId:output.version.id,relations:['output']}));
 });
+
+test('published-file projection avoids full transcript, task and memory reads while retaining output authorization',async()=>{
+ const f=await fixture(),s=profiles(f),output=await f.publish('Visible output','output-run');
+ f.store.database.prepare('INSERT INTO file_execution_scopes VALUES (?,?,?,?,?)').run('output-run',f.root.userId,'a','p',f.chat.id);
+ const history=vi.spyOn(f.store,'listEvents'),memory=vi.spyOn(s.memory,'profile');
+ const result=s.summary(f.chat.id,[],true);
+ expect(result.documents).toEqual([expect.objectContaining({assetId:output.asset.id,versionId:output.version.id,relations:['output'],files:[{name:'Visible output.md',fileId:'0'}]})]);
+ expect(result.tasks).toEqual([]);expect(result.memories).toEqual([]);
+ expect(history).not.toHaveBeenCalled();expect(memory).not.toHaveBeenCalled();expect(f.tasks.listLinkedTasks).not.toHaveBeenCalled();
+ f.assets.setLifecycle(f.root,output.asset.id,'retracted',f.assets.getAuthorizedAsset(f.root,output.asset.id).revision);
+ expect(s.summary(f.chat.id,[],true).documents).toEqual([]);
+ expect(()=>s.summary(f.other.id,[],true)).toThrow('forbidden');
+});

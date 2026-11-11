@@ -20,10 +20,10 @@ export function useOperationTasks(events:DisplayEvent[],conversationId:string):O
  const [value,setValue]=useState<OperationTasks>({tasks:[],rows:[],stale:false,conversationId});
  const version=events.filter(event=>event.kind==='metadata'&&(event.data as {operationResult?:OperationResult}).operationResult?.kind==='task').map(event=>event.id).join(',');
  useEffect(()=>{
-  if(!version)return;let active=true,pending=false;
-  const load=async()=>{if(pending||document.hidden)return;pending=true;try{const [tasks,rows]=await Promise.all([api<Task[]>('/v2/tasks'),api<ConversationProgress[]>('/conversation-progress')]);if(active)setValue({tasks,rows,stale:false,conversationId});}catch{if(active)setValue({tasks:[],rows:[],stale:true,conversationId});}finally{pending=false;}};
+  if(!version)return;const controller=new AbortController();let active=true,pending=false;
+  const load=async()=>{if(pending||document.hidden)return;pending=true;try{const [tasks,rows]=await Promise.all([api<Task[]>('/v2/tasks','GET',undefined,controller.signal),api<ConversationProgress[]>('/conversation-progress','GET',undefined,controller.signal)]);if(active)setValue({tasks,rows,stale:false,conversationId});}catch{if(active)setValue({tasks:[],rows:[],stale:true,conversationId});}finally{pending=false;}};
   void load();const timer=setInterval(()=>void load(),3000);document.addEventListener('visibilitychange',load);
-  return()=>{active=false;clearInterval(timer);document.removeEventListener('visibilitychange',load);};
+  return()=>{active=false;controller.abort();clearInterval(timer);document.removeEventListener('visibilitychange',load);};
  },[version,conversationId]);
  return value.conversationId===conversationId?value:{tasks:[],rows:[],stale:false,conversationId};
 }

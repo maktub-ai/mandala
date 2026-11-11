@@ -591,3 +591,31 @@ it('previews effective default references and marks changed workspace defaults p
   expect((await preview()).runtime).toMatchObject({fullAccess:true,status:'pending'});
  }finally{delete process.env.RUNTIME_PREVIEW_REFERENCE;}
 });
+
+it('lets selected history overtake a burst of bulk list reads',async()=>{
+ const {IncomingMessage,ServerResponse}=await import('node:http'),{Socket}=await import('node:net');
+ const chat=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null});
+ store.appendEvent(chat.id,'user',{text:'hi'});
+ const completed:string[]=[];
+ const dispatch=(path:string)=>new Promise<void>(resolve=>{
+  const req=new IncomingMessage(new Socket());req.method='GET';req.url='/api'+path;req.headers={host:new URL(url).host};
+  const res=new ServerResponse(req);res.end=((..._args:unknown[])=>{completed.push(path);resolve();return res;}) as typeof res.end;
+  server.emit('request',req,res);
+ });
+ await Promise.all([...Array.from({length:8},()=>dispatch('/v2/tasks')),dispatch('/conversations/'+chat.id)]);
+ expect(completed.indexOf('/conversations/'+chat.id)).toBeLessThan(8);
+ expect(completed.filter(path=>path==='/v2/tasks')).toHaveLength(8);
+});
+
+it('skips an abandoned queued list and continues serving later reads',async()=>{
+ const {IncomingMessage,ServerResponse}=await import('node:http'),{Socket}=await import('node:net');
+ const list=vi.spyOn(manager.taskService,'listTasks');
+ try{
+  const req=new IncomingMessage(new Socket());req.method='GET';req.url='/api/v2/tasks';req.headers={host:new URL(url).host};
+  const res=new ServerResponse(req);server.emit('request',req,res);res.destroy();
+  const next=await fetch(url+'/api/v2/tasks');expect(next.status).toBe(200);expect(await next.json()).toEqual([]);
+  expect(list).toHaveBeenCalledTimes(1);
+  expect((await fetch(url+'/api/v2/tasks?invalid=1')).status).toBe(422);
+  expect((await fetch(url+'/api/v2/tasks')).status).toBe(200);
+ }finally{list.mockRestore();}
+});

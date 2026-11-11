@@ -17,7 +17,7 @@ for(const entry of ['cold','switch','mandala'])test(entry+' shows short history 
  const history=new Promise<void>(resolve=>releaseHistory=resolve),auxiliary=new Promise<void>(resolve=>releaseAuxiliary=resolve);
  await page.route('**/api/**',async route=>{
   const path=new URL(route.request().url()).pathname;
-  if(['/api/models','/api/cli/status'].includes(path)||new RegExp('/'+conversation.id+'/(environment|reference-summary|results)$').test(path)){
+  if(['/api/models','/api/cli/status','/api/v2/tasks','/api/conversation-progress','/api/mandala/goals','/api/automations'].includes(path)||new RegExp('/'+conversation.id+'/(references|environment|reference-summary|results)$').test(path)){
    ancillary.push(path);await auxiliary;await route.continue();return;
   }
   await route.fallback();

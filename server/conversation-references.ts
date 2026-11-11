@@ -15,7 +15,7 @@ export function createConversationReferences({store,assets,attachments,tasks,mem
  tasks:Pick<ReturnType<typeof createTasks>,'listLinkedTasks'|'getTask'>;memory?:MemoryStore;authorize:(id:string)=>void;
 }) {
  const root=workspacePrincipal(store),limit=100;
- return (id:string,memoryKinds:('request'|'session')[]=['request','session']):ConversationReferenceSummary=>{
+ return (id:string,memoryKinds:('request'|'session')[]=['request','session'],outputsOnly=false):ConversationReferenceSummary=>{
   authorize(id);const chat=store.getConversation(id)!;
   const documents=new Map<string,ReferenceDocument>();
   const add=(ref:VersionRef,relation:ReferenceDocument['relations'][number])=>{
@@ -27,6 +27,7 @@ export function createConversationReferences({store,assets,attachments,tasks,mem
     documents.set(key,{...ref,title:asset.title,ordinal:version.ordinal,relations:[relation],files:version.files.map((file,index)=>({name:file.path,fileId:String(index)})),runId:version.provenance.runId,...(attachment?{attachmentId:attachment.attachment_id as string}:{})});
    }catch(error){if(!(error instanceof DomainError))throw error;}
   };
+  if(!outputsOnly){
   for(const ref of attachments.lineage(root,id,authorize).refs)add(ref,'input');
   for(const event of store.listEvents(id,0)){
    if(event.kind!=='metadata')continue;
@@ -34,11 +35,13 @@ export function createConversationReferences({store,assets,attachments,tasks,mem
    if(data.actualUse==='acknowledged')for(const ref of data.sourceVersions??[])add(ref,'context');
    if(data.memoryRecall&&data.status==='completed')for(const ref of data.entries??[])if(ref.assetId&&ref.versionId)add(ref,'context');
   }
+  }
   const outputRows=store.database.prepare(`SELECT v.asset_id,v.id FROM asset_versions v
    WHERE EXISTS (SELECT 1 FROM file_execution_scopes s WHERE s.invocation_id=json_extract(v.data,'$.provenance.runId') AND s.user_id=? AND s.conversation_id=?)
    OR EXISTS (SELECT 1 FROM task_runs r JOIN work_tasks t ON t.id=r.task_id WHERE r.id=json_extract(v.data,'$.provenance.runId') AND t.owner_user_id=? AND (json_extract(r.routing,'$.executionConversationId')=? OR json_extract(r.routing,'$.destinationConversationId')=?))
    ORDER BY v.rowid DESC LIMIT ?`).all(root.userId,id,root.userId,id,id,limit+1);
   for(const row of outputRows)add({assetId:row.asset_id as string,versionId:row.id as string},'output');
+  if(outputsOnly){authorize(id);return {tasks:[],documents:[...documents.values()].slice(0,limit),memories:[],truncated:outputRows.length>limit};}
   const memories:ConversationReferenceSummary['memories']=[];
   if(memory&&memoryKinds.includes('request'))memory.withAuthorityQuery(()=>{
    const scope={projectId:chat.projectId||null,agentId:chat.agentId||null},reader={...root,...scope.agentId?{agentId:scope.agentId}:{}};

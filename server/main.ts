@@ -53,7 +53,7 @@ const trackSystemWork = (work: Promise<void>) => {
 };
 const manager = createSessionManager(
   store,
-  async () => (await readConfig(home)).config,
+  async options => (await readConfig(home,options)).config,
   undefined,
   undefined,
   home,

@@ -11,7 +11,7 @@ export function usePublishedConversationFiles(conversationId:string,activityVers
  useEffect(()=>{
   if(!conversationId)return;
   const controller=new AbortController();
-  void fetch('/api/conversations/'+encodeURIComponent(conversationId)+'/reference-summary',{signal:controller.signal}).then(async response=>{
+  void fetch('/api/conversations/'+encodeURIComponent(conversationId)+'/reference-summary?view=outputs',{signal:controller.signal}).then(async response=>{
    if(!response.ok)throw new Error('Published files unavailable');
    const data=await response.json() as ConversationReferenceSummary;
    const files=data.documents.filter(doc=>doc.relations.includes('output')).flatMap(doc=>(doc.files??[]).map(file=>({...file,assetId:doc.assetId,versionId:doc.versionId,runId:doc.runId})));
