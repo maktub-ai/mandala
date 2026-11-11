@@ -617,7 +617,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       earlierRequest = controller;
       setEarlierState('loading');
       void api<ChatHistoryPage>(
-        path + "/history?recent=" + CHAT_HISTORY_PAGE_TURNS + "&before=" + before, "GET", undefined, controller.signal,
+        path + "/history?recent=" + CHAT_HISTORY_PAGE_TURNS + "&compact=1&before=" + before, "GET", undefined, controller.signal,
       ).then(page => {
         if (!active) return;
         const viewport = messagesRoot.current?.closest('.conversation');
@@ -637,7 +637,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
         .finally(() => { earlierRequest = undefined; });
     };
     load();
-    const stream = new EventSource("/api" + path + "/events?recent=" + CHAT_HISTORY_PAGE_TURNS);
+    const stream = new EventSource("/api" + path + "/events?recent=" + CHAT_HISTORY_PAGE_TURNS + "&compact=1");
     stream.addEventListener('history-window', (message: MessageEvent<string>) => {
       if (!active || initialReplayComplete) return;
       before = (JSON.parse(message.data) as { before: number | null }).before;
@@ -1296,6 +1296,14 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const openMandala = async () => {
     if (navigationLocked || objectSaveGuard || mandalaLoading) return;
     if (settingsPath && !closeSettings(false)) return;
+    const open = (conversation:Conversation) => {
+      navigate('',conversation.id,conversation.agentId);
+      history.replaceState(null,'','/mandala?'+new URLSearchParams({conversation:conversation.id}));
+      setRouteLocation(location.pathname+location.search);setCli(conversation.cli);
+      return conversation.id;
+    };
+    const known=chats.find(chat=>chat.purpose==='mandala-main'&&!chat.archivedAt&&chat.agentId===config.mandala?.agentId);
+    if(known)return open(known); // The selected chat still performs fresh history/approval authorization.
     setMandalaLoading(true); const view=navigationVersion.current;
     try {
       const result=await api<{config:Config;conversation:Conversation|null}>('/mandala');
@@ -1304,10 +1312,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       const conversation=result.conversation;
       if(!conversation){navigate('','','');history.replaceState(null,'','/?welcome=1');setRouteLocation('/?welcome=1');return;}
       setChats(list=>[conversation,...list.filter(item=>item.id!==conversation.id)]);
-      navigate('',conversation.id,conversation.agentId);
-      history.replaceState(null,'','/mandala?'+new URLSearchParams({conversation:conversation.id}));
-      setRouteLocation(location.pathname+location.search);setCli(conversation.cli);
-      return conversation.id;
+      return open(conversation);
     } catch(reason){setError((reason as Error).message);} finally{setMandalaLoading(false);}
   };
   // First use ends by adopting the chosen CLI everywhere it is needed, then handing off; nothing is sent.

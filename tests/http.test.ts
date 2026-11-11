@@ -178,6 +178,66 @@ it("replays_events_after_cursor_without_duplicate_execution", async () => {
   expect(text).toContain('event: history-ready\ndata: {"cursor":4}');
   expect(store.listConversations()).toHaveLength(1);
 });
+it('does not reauthorize an idle stream but checks fresh authority before delivering new content',async()=>{
+ const chat=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null});
+ store.appendEvent(chat.id,'text',{text:'Initial answer'});
+ const authorize=vi.spyOn(manager,'authorizeConversationRead'),controller=new AbortController();
+ const response=await fetch(url+'/api/conversations/'+chat.id+'/events?recent=5',{signal:controller.signal});
+ const reader=response.body!.getReader(),decoder=new TextDecoder();let frames='';
+ try{
+  while(!frames.includes('event: history-ready')){const {value,done}=await reader.read();if(done)throw Error('Missing history');frames+=decoder.decode(value);}
+  const checked=authorize.mock.calls.length;
+  await new Promise(resolve=>setTimeout(resolve,450));
+  expect(authorize.mock.calls.length).toBe(checked);
+  authorize.mockImplementation(()=>{throw Error('revoked');});
+  store.appendEvent(chat.id,'text',{text:'New private content'});
+  for(;;){const {value,done}=await reader.read();if(done)break;frames+=decoder.decode(value);}
+  expect(frames).not.toContain('New private content');
+  expect(authorize.mock.calls.length).toBeGreaterThan(checked);
+ }finally{controller.abort();authorize.mockRestore();}
+});
+it('compacts history replay while preserving cursor continuity and unabridged live events',async()=>{
+ const chat=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null}),path=url+'/api/conversations/'+chat.id;
+ const user=store.appendEvent(chat.id,'user',{text:'Request',runId:'r'});
+ const deltas=Array.from({length:600},()=>store.appendEvent(chat.id,'tool',{method:'item/reasoning/textDelta',runId:'r',params:{itemId:'thought',delta:'part '}}));
+ const snapshot=store.appendEvent(chat.id,'tool',{method:'item/completed',runId:'r',params:{item:{id:'thought',type:'reasoning',content:['Full reasoning']}}});
+ const tail=Array.from({length:300},(_,i)=>store.appendEvent(chat.id,'text',{text:'Answer '+i,runId:'r'}));
+ const controller=new AbortController(),response=await fetch(path+'/events?recent=5&compact=1',{signal:controller.signal});
+ const reader=response.body!.getReader(),decoder=new TextDecoder();let frames='';
+ const through=async(marker:string)=>{while(!frames.includes(marker)){const {value,done}=await reader.read();if(done)throw Error('Stream ended');frames+=decoder.decode(value);}const result=frames;frames='';return result;};
+ try{
+  const replay=await through('event: history-ready');
+  expect([...replay.matchAll(/^id: (\d+)$/gm)].map(match=>Number(match[1]))).toEqual([user.id,deltas[0].id,snapshot.id,...tail.map(event=>event.id)]);
+  expect(replay).toContain('"cursor":'+tail.at(-1)!.id);
+  const page=await(await fetch(path+'/history?recent=5&compact=1')).json();
+  expect(page.events.map((e:{id:number})=>e.id)).toEqual([user.id,deltas[0].id,snapshot.id,...tail.map(event=>event.id)]);
+  const live=store.appendEvent(chat.id,'tool',{method:'item/reasoning/textDelta',runId:'r',params:{itemId:'live',delta:'Live delta'}});
+  store.appendEvent(chat.id,'tool',{method:'item/completed',runId:'r',params:{item:{id:'live',type:'reasoning',content:['Complete live reasoning']}}});
+  expect(await through('Complete live reasoning')).toContain('id: '+live.id+'\n');
+  expect(store.listEvents(chat.id,0)).toHaveLength(904);
+  const resume=new AbortController();
+  try{
+   const response=await fetch(path+'/events?recent=5&compact=1',{headers:{'Last-Event-ID':String(deltas[0].id)},signal:resume.signal});
+   const reader=response.body!.getReader();let resumed='';
+   while(!resumed.includes('event: history-ready')){const {value,done}=await reader.read();if(done)throw Error('Missing resumed history');resumed+=decoder.decode(value);}
+   expect([...resumed.matchAll(/^id: (\d+)$/gm)].map(match=>Number(match[1]))).toEqual([snapshot.id,...tail.map(event=>event.id),live.id,live.id+1]);
+   expect(resumed).not.toContain('event: history-window');
+  }finally{resume.abort();}
+ }finally{controller.abort();}
+});
+it('does not repeat snapshot authorization for every socket drain during a large replay',async()=>{
+ const chat=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null});
+ store.transaction(()=>{for(let i=0;i<600;i++)store.appendEvent(chat.id,'text',{text:'x'.repeat(4096),itemId:String(i)});});
+ const authorize=vi.spyOn(manager,'authorizeConversationRead'),controller=new AbortController();
+ const response=await fetch(url+'/api/conversations/'+chat.id+'/events?recent=5',{signal:controller.signal});
+ const reader=response.body!.getReader(),decoder=new TextDecoder();let frames='';
+ try{
+  while(!frames.includes('event: history-ready')){const {value,done}=await reader.read();if(done)throw Error('Missing history');frames+=decoder.decode(value);}
+  const ids=[...frames.matchAll(/^id: (\d+)$/gm)].map(match=>Number(match[1]));
+  expect(ids).toEqual(store.listEvents(chat.id,0).map(event=>event.id));
+  expect(authorize.mock.calls.length).toBeLessThanOrEqual(5);
+ }finally{controller.abort();authorize.mockRestore();}
+});
 it("pages recent conversation turns and resumes live events from the last received ID", async () => {
   const chat = store.createConversation({ projectId: "p", agentId: "a", cli: "codex", model: null });
   const path = url + "/api/conversations/" + chat.id;

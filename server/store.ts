@@ -33,9 +33,9 @@ export interface Store {
   renameConversation(id: string, title: string, source?: Conversation["titleSource"]): void;
   setAutomaticTitle(id: string, title: string): boolean;
   appendEvent(id: string, kind: EventKind, data: unknown, observedAt?: string): DisplayEvent;
-  listEvents(id: string, afterId: number, limit?: number): DisplayEvent[];
+  listEvents(id: string, afterId: number, limit?: number, compact?: boolean): DisplayEvent[];
   historyWindowStart(id: string, before: number, turns: number): number | null;
-  listEarlierEvents(id: string, from: number, before: number): DisplayEvent[];
+  listEarlierEvents(id: string, from: number, before: number, compact?: boolean): DisplayEvent[];
   listAgentHistory(id: string, afterId: number, latest: boolean): DisplayEvent[];
   replaceHistory(id: string, fromEventId: number, nativeId: string | null): number;
   createTask(input: Pick<Task, "projectId" | "sourceConversationId" | "targetConversationId" | "kind" | "request"> & Pick<Task, "continuationEpoch" | "autoResume">): Task;
@@ -49,6 +49,24 @@ export interface Store {
 const agentReplyAnchor = `(kind='metadata' AND json_extract(data,'$.agentMessage.direction')='reply'
   AND length(trim(json_extract(data,'$.agentMessage.reply')))>0)`;
 const historyAnchor = `(kind='user' OR (kind='metadata' AND json_extract(data,'$.execution')='started') OR ${agentReplyAnchor})`;
+// The final native snapshot replaces these deltas in the renderer. Keep incomplete,
+// legacy and later deltas, and never compact against a snapshot outside this page.
+const compactHistory = `NOT EXISTS (SELECT 1 FROM events AS complete
+  WHERE e.kind='tool' AND json_extract(e.data,'$.method') IN ('item/reasoning/textDelta','item/reasoning/summaryTextDelta')
+    AND json_type(e.data,'$.runId')='text' AND json_type(e.data,'$.params.itemId')='text'
+    AND EXISTS (SELECT 1 FROM events AS first
+      WHERE first.conversationId=e.conversationId AND first.superseded=0 AND first.id<e.id
+        AND first.kind='tool' AND json_extract(first.data,'$.method') IN ('item/reasoning/textDelta','item/reasoning/summaryTextDelta')
+        AND json_extract(first.data,'$.runId')=json_extract(e.data,'$.runId')
+        AND json_extract(first.data,'$.params.itemId')=json_extract(e.data,'$.params.itemId'))
+    AND complete.conversationId=e.conversationId AND complete.superseded=0 AND complete.id>e.id AND complete.id<?
+    AND complete.kind='tool' AND json_extract(complete.data,'$.method')='item/completed'
+    AND json_extract(complete.data,'$.params.item.type')='reasoning'
+    AND json_extract(complete.data,'$.runId')=json_extract(e.data,'$.runId')
+    AND json_extract(complete.data,'$.params.item.id')=json_extract(e.data,'$.params.itemId')
+    AND CASE WHEN json_array_length(complete.data,'$.params.item.summary')>0
+      THEN length(json_extract(complete.data,'$.params.item.summary[0]'))>0
+      ELSE length(json_extract(complete.data,'$.params.item.content[0]'))>0 END)`;
 const decodeEvent = (row: Record<string, unknown>) => ({ ...row, data: JSON.parse(row.data as string) }) as DisplayEvent;
 const decodeTask = (data: string): Task => {
   const task = JSON.parse(data) as Task;
@@ -123,6 +141,14 @@ export function openStore(home: string, maintenanceToken?:symbol): Store {
     WHERE superseded=0 AND kind='user';
     CREATE INDEX IF NOT EXISTS events_chat_agent_replies ON events(conversationId,json_extract(data,'$.agentMessage.id'),id)
     WHERE superseded=0 AND ${agentReplyAnchor};`);
+  db.exec(`CREATE INDEX IF NOT EXISTS events_reasoning_snapshots ON events(conversationId,json_extract(data,'$.runId'),json_extract(data,'$.params.item.id'),id)
+    WHERE superseded=0 AND kind='tool' AND json_extract(data,'$.method')='item/completed'
+      AND json_extract(data,'$.params.item.type')='reasoning'
+      AND CASE WHEN json_array_length(data,'$.params.item.summary')>0
+        THEN length(json_extract(data,'$.params.item.summary[0]'))>0
+        ELSE length(json_extract(data,'$.params.item.content[0]'))>0 END`);
+  db.exec(`CREATE INDEX IF NOT EXISTS events_reasoning_deltas ON events(conversationId,json_extract(data,'$.runId'),json_extract(data,'$.params.itemId'),id)
+    WHERE superseded=0 AND kind='tool' AND json_extract(data,'$.method') IN ('item/reasoning/textDelta','item/reasoning/summaryTextDelta')`);
   // Digest invalidation follows the affected transcript, including writes from other connections.
   db.exec(`CREATE TABLE IF NOT EXISTS event_revisions (conversation_id TEXT PRIMARY KEY, revision INTEGER NOT NULL);
     CREATE TRIGGER IF NOT EXISTS event_revision_insert AFTER INSERT ON events BEGIN
@@ -307,12 +333,12 @@ export function openStore(home: string, maintenanceToken?:symbol): Store {
       };
       return kind==='status'&&(data as {status?:string}).status==='idle'&&!db.isTransaction?transaction(append):append();
     },
-    listEvents(conversationId, afterId, limit) {
+    listEvents(conversationId, afterId, limit, compact = false) {
       return db
         .prepare(
-          "SELECT id,conversationId,kind,data,createdAt FROM events WHERE conversationId=? AND id>? AND superseded=0 ORDER BY id LIMIT ?",
+          `SELECT id,conversationId,kind,data,createdAt FROM events AS e WHERE conversationId=? AND id>? AND superseded=0 ${compact ? 'AND '+compactHistory : ''} ORDER BY id LIMIT ?`,
         )
-        .all(conversationId, afterId, limit ?? -1)
+        .all(conversationId, afterId, ...(compact ? [Number.MAX_SAFE_INTEGER] : []), limit ?? -1)
         .map(decodeEvent);
     },
     historyWindowStart(id, before, turns) {
@@ -336,10 +362,10 @@ export function openStore(home: string, maintenanceToken?:symbol): Store {
       }
       return Number(oldest.id);
     },
-    listEarlierEvents(id, from, before) {
-      return db.prepare(`SELECT id,conversationId,kind,data,createdAt FROM events
-        WHERE conversationId=? AND id>=? AND id<? AND superseded=0 ORDER BY id`)
-        .all(id, from, before).map(decodeEvent);
+    listEarlierEvents(id, from, before, compact = false) {
+      return db.prepare(`SELECT id,conversationId,kind,data,createdAt FROM events AS e
+        WHERE conversationId=? AND id>=? AND id<? AND superseded=0 ${compact ? 'AND '+compactHistory : ''} ORDER BY id`)
+        .all(id, from, before, ...(compact ? [before] : [])).map(decodeEvent);
     },
     listAgentHistory(id, afterId, latest) {
       const rows = db.prepare(`SELECT id,conversationId,kind,data,createdAt FROM events

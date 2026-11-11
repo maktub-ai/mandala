@@ -122,7 +122,7 @@ const server = createServer(async(req,res)=>{
   if(await mandalaPanelsFixture(req,res,home,store,manager,automations))return;
   if(await conversationActivityFixture(req,res,store,manager,native))return;
   if(await liveOutputFixture(req,res,store,manager,native))return;
-  if (req.method === 'POST' && req.url === '/__test__/chat-history') {
+  if (req.method === 'POST' && (req.url === '/__test__/chat-history'||req.url === '/__test__/chat-history-dense')) {
     const { ensureMandalaConfig } = await import('../../server/config');
     const { ensureMandalaConversation } = await import('../../server/mandala');
     const { config } = await ensureMandalaConfig(home);
@@ -130,9 +130,14 @@ const server = createServer(async(req,res)=>{
       store.createConversation({ projectId: '', agentId: '', cli: 'codex', model: null, workspaceId: null }),
       ensureMandalaConversation(store, config),
     ];
+    if(req.url.endsWith('-dense'))store.renameConversation(chats[0].id,'Dense history','user');
     for (const chat of chats) for (let i = 1; i <= 25; i++) {
       const runId = 'history-' + i;
       store.appendEvent(chat.id, 'user', { text: 'History request ' + i, runId });
+      if(req.url.endsWith('-dense')&&i===25)store.transaction(()=>{
+        for(let n=0;n<6000;n++)store.appendEvent(chat.id,'tool',{runId,method:'item/reasoning/textDelta',params:{itemId:'thought',delta:'Synthetic reasoning delta. '}});
+        store.appendEvent(chat.id,'tool',{runId,method:'item/completed',params:{item:{id:'thought',type:'reasoning',content:['Synthetic final reasoning']}}});
+      });
       store.appendEvent(chat.id, 'text', { text: 'History answer ' + i, runId });
       store.appendEvent(chat.id, 'status', { status: 'idle', runId });
     }

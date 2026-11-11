@@ -672,7 +672,7 @@ export function createHttpServer({
             // Re-read the previous live window so in-place updates and retired events
             // are reflected, including when a disconnect spans more than one page.
             const from = since === undefined ? start ?? 0 : Math.min(since, start ?? 0);
-            return json(res, 200, { events: store.listEarlierEvents(id, from, before), before: start });
+            return json(res, 200, { events: store.listEarlierEvents(id, from, before, url.searchParams.get('compact')==='1'), before: start });
           }
           const after = Number(url.searchParams.get('after') ?? 0);
           if (!Number.isSafeInteger(after) || after < 0) throw new Error('invalid event cursor');
@@ -880,12 +880,16 @@ export function createHttpServer({
           const pump = () => {
             if(res.destroyed||res.writableEnded||res.writableNeedDrain)return;
             if(access&&!access.authorize(req)){res.end();return;}
-            // Recheck current recursive Asset ACL before each replay/new-body batch.
-            try {manager.authorizeConversationRead(id);}catch {res.end();return;}
-            const batch=store.listEvents(id,cursor,256);
-            for (const event of batch) {
-              cursor = event.id;
-              if(!res.write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`))return;
+            const batch=store.listEvents(id,cursor,256,replaying&&recent!==null&&url.searchParams.get('compact')==='1');
+            // Idle polls have no content to disclose. Recheck recursive Asset ACL
+            // before every nonempty batch, including after an idle period.
+            if(batch.length)try {manager.authorizeConversationRead(id);}catch {res.end();return;}
+            if(batch.length){
+              // A write accepts the whole chunk even when backpressure is signalled.
+              // Keep the authorized batch together instead of re-reading its tail
+              // and rechecking the same snapshot on every socket drain.
+              cursor=batch.at(-1)!.id;
+              if(!res.write(batch.map(event=>`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`).join('')))return;
             }
             if(batch.length===256)setImmediate(pump);
             else if (replaying) {

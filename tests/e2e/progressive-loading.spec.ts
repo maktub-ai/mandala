@@ -1,9 +1,8 @@
 import { test, expect } from './helpers/execution-fixture';
 
 for(const entry of ['mandala','chat','remembered'])test(entry+' opens before the sidebar activity lists finish',async({page,request})=>{
- const {config}=await(await request.get('/api/config')).json();
- const chat=await(await request.post('/api/conversations',{data:{projectId:'',agentId:'',cli:'codex',workspaceId:null}})).json();
- await page.route('**/api/mandala',route=>route.fulfill({json:{config,conversation:{...chat,purpose:'mandala-main'}}}));
+ const chat=entry==='mandala'?(await(await request.get('/api/mandala')).json()).conversation:
+  await(await request.post('/api/conversations',{data:{projectId:'',agentId:'',cli:'codex',workspaceId:null}})).json();
  if(entry==='remembered')await page.addInitScript(id=>localStorage.setItem('mana-chat',id),chat.id);
  const event={id:1,conversationId:chat.id,kind:'user',data:{text:'Mandala opening request'},createdAt:'2026-10-01T00:00:00.000Z'};
  await page.route('**/api/conversations/'+chat.id+'/events?*',route=>route.fulfill({contentType:'text/event-stream',body:'data: '+JSON.stringify(event)+'\n\nevent: history-ready\ndata: {}\n\n'}));
