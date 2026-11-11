@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { openStore } from '../server/store';
 import { asyncQuestions, initializeAsyncQuestions } from '../server/async-questions';
 
@@ -16,6 +16,15 @@ afterEach(()=>{store.close();rmSync(home,{recursive:true,force:true});});
 const emit=(turnId='turn-1',patch:Record<string,unknown>={})=>store.appendEvent(id,'tool',{
   runId:turnId,method:'item/completed',params:{threadId:'native',turnId,
     item:{id:'same-item',type:'agentMessage',delivery:'async',questions:[{title:'Drink?',options:['Tea','Coffee']}],...patch}},
+});
+it('finds question messages through a filtered index instead of scanning command output',()=>{
+ store.transaction(()=>{for(let i=0;i<300;i++)store.appendEvent(id,'tool',{method:'item/completed',params:{item:{id:'command-'+i,type:'commandExecution',aggregatedOutput:'Synthetic output'}}});});
+ emit();
+ const prepare=store.database.prepare.bind(store.database);let query='';
+ const spy=vi.spyOn(store.database,'prepare').mockImplementation(sql=>{if(sql.startsWith('SELECT data FROM events')&&sql.includes("'agentMessage'"))query=sql;return prepare(sql);});
+ try{expect(asyncQuestions(store,id)).toHaveLength(1);}finally{spy.mockRestore();}
+ const plan=prepare('EXPLAIN QUERY PLAN '+query).all(id,0).map(row=>row.detail).join('\n');
+ expect(plan).toContain('events_async_question_messages');
 });
 it('keeps item identities distinct across turns and retires only the answered form',()=>{
   emit();emit('turn-2');

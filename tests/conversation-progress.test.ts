@@ -1,5 +1,5 @@
 import {createTaskWithExecutions} from './helpers/task-executions';
-import {afterEach,beforeEach,expect,test} from 'vitest';
+import {afterEach,beforeEach,expect,test,vi} from 'vitest';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -14,6 +14,30 @@ afterEach(async()=>{await manager.close();store.close();rmSync(home,{recursive:t
 function chat(title:string,status:Conversation['status']='idle',agentId=''){
  const c=store.createConversation({projectId:'',agentId,cli:'codex',model:null});store.renameConversation(c.id,title);store.appendEvent(c.id,'user',{text:title},old);store.updateConversation(c.id,{status});store.database.prepare("UPDATE conversations SET updated_at=?,data=json_set(data,'$.createdAt',?) WHERE id=?").run(old,old,c.id);return c;
 }
+test('unchanged progress polls do not rescan transcript activity, while edits invalidate it',()=>{
+ const c=chat('Cached activity'),prepare=store.database.prepare.bind(store.database);
+ const reads=vi.fn();
+ const spy=vi.spyOn(store.database,'prepare').mockImplementation(sql=>{
+  const statement=prepare(sql);
+  if(sql.includes('AS message_at')){const get=statement.get.bind(statement);vi.spyOn(statement,'get').mockImplementation((...args)=>{reads();return get(...args);});}
+  return statement;
+ });
+ try{
+  const p=createConversationProgress(store,manager);
+  expect(p.list({now})[0].activityAt).toBe(old);
+  expect(p.list({now})[0].activityAt).toBe(old);
+  expect(reads).toHaveBeenCalledTimes(1);
+  store.database.prepare("UPDATE events SET createdAt=? WHERE conversationId=? AND kind='user'").run(now,c.id);
+  expect(p.list({now})[0].activityAt).toBe(now);
+  expect(reads).toHaveBeenCalledTimes(2);
+  store.appendEvent(c.id,'user',{text:'Another request'},now);
+  expect(p.list({now})[0].requestPreview).toBe('Another request');
+  expect(reads).toHaveBeenCalledTimes(3);
+  store.database.prepare('UPDATE events SET superseded=1 WHERE conversationId=?').run(c.id);
+  expect(p.list({now})[0].activityAt).toBe(old);
+  expect(reads).toHaveBeenCalledTimes(4);
+ }finally{spy.mockRestore();}
+});
 test.each(['idle','running','approval','interrupted'] as const)('primary coordination chat is absent from task progress even when %s',status=>{
  const primary=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null,purpose:'mandala-main'}),execution=chat('Mandala execution','running');
  store.updateConversation(primary.id,{status});

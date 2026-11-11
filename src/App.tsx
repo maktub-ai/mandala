@@ -434,31 +434,34 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     settingsSaved.current = config; setDraft(structuredClone(config)); setSettingsRevision(configRevision.current);
   }, [settingsPath, workbench, settingsRevision, configLoaded]);
   const refresh = async (initial = false) => {
-    const activity = Promise.allSettled([api<Conversation[]>('/conversations?origin=all'), api<Task[]>('/tasks?view=control')]);
+    const startedAt=location.pathname+location.search;
+    const restoringChat=initial&&!initialRoute.current.explicit&&location.pathname==='/'&&initialChat.current;
+    const chatRead=api<Conversation[]>('/conversations?origin=all').then(list=>{
+      setChats(list);
+      return list;
+    });
+    const taskRead=api<Task[]>('/tasks?view=control').then(setTasks);
+    const activity=Promise.allSettled([chatRead,taskRead]);
     const c = await api<{config:Config;revision:string}>('/config');
     configRevision.current = c.revision; setConfig(c.config);
-    const [chatResult, taskResult] = await activity;
-    if (chatResult.status === 'rejected') throw chatResult.reason;
-    if (taskResult.status === 'rejected') throw taskResult.reason;
-    const list = chatResult.value, taskList = taskResult.value;
-
-    setChats(list);
-    setTasks(taskList);
     if (!(initial && initialRoute.current.explicit && initialRoute.current.conversation)) {
       setAgentId(a => selected ? a : projectAgentChoice(c.config, projectId, a,
         initial && !new URLSearchParams(location.search).has("agent") ? rememberedAgents.current : {}));
     }
-    if (initial) {
-      const last = initialChat.current;
-      if (last && list.some((x) => x.id === last)) setSelected(last);
-      if (!restoreChoices.current && !(initialRoute.current.explicit && initialRoute.current.conversation)) {
-        const initialAgentId = projectAgentChoice(c.config, projectId, agentId, new URLSearchParams(location.search).has("agent") ? {} : rememberedAgents.current);
-        const initialAgent = c.config.agents.find(a => a.id === initialAgentId);
-        const enabled = enabledRuntimes(c.config);
-        setCli(initialAgent?.defaultCli ?? enabled[0] ?? "");
-      }
+    if (initial && !restoreChoices.current && !(initialRoute.current.explicit && initialRoute.current.conversation)) {
+      const initialAgentId = projectAgentChoice(c.config, projectId, agentId, new URLSearchParams(location.search).has("agent") ? {} : rememberedAgents.current);
+      const initialAgent = c.config.agents.find(a => a.id === initialAgentId);
+      const enabled = enabledRuntimes(c.config);
+      setCli(initialAgent?.defaultCli ?? enabled[0] ?? "");
+    }
+    // Only restoring a remembered chat needs the chat list; unrelated sidebar reads
+    // must not keep the selected conversation or another workspace behind a spinner.
+    if(restoringChat){
+      const list=await chatRead;
+      if(location.pathname+location.search===startedAt&&list.some(chat=>chat.id===restoringChat))setSelected(restoringChat);
     }
     setConfigLoaded(true);
+    for(const result of await activity)if(result.status==='rejected')throw result.reason;
   };
   const loadInitialConfig = async () => {
     if (initialConfigPending.current) return;

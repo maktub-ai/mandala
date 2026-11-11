@@ -5,7 +5,10 @@ import type { Store } from './store';
 
 export function initializeAsyncQuestions(store:Store) {
   store.database.exec(`CREATE TABLE IF NOT EXISTS async_question_migration(singleton INTEGER PRIMARY KEY CHECK(singleton=1),event_id INTEGER NOT NULL);
-    INSERT OR IGNORE INTO async_question_migration SELECT 1,COALESCE(MAX(id),0) FROM events;`);
+    INSERT OR IGNORE INTO async_question_migration SELECT 1,COALESCE(MAX(id),0) FROM events;
+    CREATE INDEX IF NOT EXISTS events_async_question_messages ON events(conversationId,id)
+      WHERE kind='tool' AND superseded=0 AND json_extract(data,'$.method')='item/completed'
+        AND json_extract(data,'$.params.item.type')='agentMessage';`);
 }
 
 // Async questions are messages, not live RPC requests. Read their durable events

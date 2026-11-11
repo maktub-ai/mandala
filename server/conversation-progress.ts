@@ -48,15 +48,21 @@ export function createConversationProgress(store:Store,manager:SessionManager){
  const preview=db.prepare("SELECT SUBSTR(json_extract(data,'$.text'),1,240) AS text FROM events WHERE conversationId=? AND superseded=0 AND kind='user' AND json_extract(data,'$.agentMessage') IS NULL AND json_extract(data,'$.task') IS NULL ORDER BY id DESC LIMIT 1");
  const explicitProgress=db.prepare("SELECT id,data,createdAt FROM events WHERE conversationId=? AND kind='progress' AND superseded=0 ORDER BY id DESC LIMIT 1");
  const turnHead=db.prepare("SELECT id,data FROM events WHERE conversationId=? AND superseded=0 AND (kind='user' OR kind='metadata' AND json_extract(data,'$.execution')='started') ORDER BY id DESC LIMIT 1");
- const latestOutputs=new Map<string,{cursor:number;status:string;value:LatestProgress|null}>();
- const read=(id:string)=>activity.get(id)!;
+ const latestOutputs=new Map<string,{revision:number;status:string;value:LatestProgress|null}>();
+ const eventRevision=db.prepare('SELECT revision FROM event_revisions WHERE conversation_id=?');
+ const activityCache=new Map<string,{revision:number;events:NonNullable<ReturnType<typeof activity.get>>}>();
+ const read=(id:string)=>{
+  const revision=Number(eventRevision.get(id)?.revision??0),cached=activityCache.get(id);
+  if(cached?.revision===revision)return cached;
+  const value={revision,events:activity.get(id)!};activityCache.set(id,value);return value;
+ };
  return {
   list({now=new Date().toISOString(),windowMinutes=360}:{now?:string;windowMinutes?:number}={}):ConversationProgress[]{
    const tasks=manager.taskService.listTasks(workspacePrincipal(store)),rows:ConversationProgress[]=[];
    for(const chat of store.listConversations()){
     if(chat.archivedAt||chat.purpose==='mandala-main')continue;
     try{manager.authorizeConversationRead(chat.id);}catch{continue;}
-    const events=read(chat.id),marker=db.prepare('SELECT * FROM conversation_progress WHERE conversation_id=?').get(chat.id);
+    const {events,revision}=read(chat.id),marker=db.prepare('SELECT * FROM conversation_progress WHERE conversation_id=?').get(chat.id);
     const inputs=inputStates.get(chat.id)!,approvals=manager.getApprovals(chat.id);
     const completed=!!marker?.completed_at&&Number(events.user_cursor)<=Number(marker.user_cursor)&&Number(userInputCursor.get(chat.id)!.cursor)<=Number(marker.input_cursor);
     const helper=db.prepare("SELECT MAX(state='unknown' OR reply_state='queued' AND EXISTS(SELECT 1 FROM task_user_inputs i WHERE i.id=agent_messages.reply_input_id AND i.state='unknown')) AS unknown_helper,MAX(state IN ('queued','running') OR reply_state='queued' AND auto_resume_allowed=1 AND EXISTS(SELECT 1 FROM task_user_inputs i WHERE i.id=agent_messages.reply_input_id AND i.state IN ('queued','running'))) AS live_helper FROM agent_messages WHERE source_conversation_id=? AND (state IN ('queued','running','unknown') AND reply_state<>'parked' OR reply_state='queued' AND auto_resume_allowed=1) HAVING COUNT(*)>0").get(chat.id);
@@ -77,8 +83,8 @@ export function createConversationProgress(store:Store,manager:SessionManager){
     const related=new Set<string>();
     for(const m of db.prepare('SELECT source_conversation_id,target_conversation_id FROM agent_messages WHERE source_conversation_id=? OR target_conversation_id=?').all(chat.id,chat.id))related.add((m.source_conversation_id===chat.id?m.target_conversation_id:m.source_conversation_id) as string);
     const relatedConversationIds=[...related].filter(id=>{try{manager.authorizeConversationRead(id);return true;}catch{return false;}});
-    const cached=latestOutputs.get(chat.id),cursor=Number(events.cursor??0);
-    let latestProgress=cached?.cursor===cursor&&cached.status===chat.status?cached.value:undefined;
+    const cached=latestOutputs.get(chat.id);
+    let latestProgress=cached?.revision===revision&&cached.status===chat.status?cached.value:undefined;
     if(latestProgress===undefined){
      const report=explicitProgress.get(chat.id);
      const data=report?JSON.parse(report.data as string) as {text:string;source:'cli';runId:string;steps?:import('../shared/conversation-progress').ProgressStep[]}:undefined;
@@ -88,7 +94,7 @@ export function createConversationProgress(store:Store,manager:SessionManager){
      latestProgress=turn?presentTurnText(turn,chat.status).latestProgress:null;
      if(report&&data&&(!runId||data.runId===runId)&&(!latestProgress||Number(report.id)>latestProgress.sourceEventId))latestProgress={text:data.text,updatedAt:report.createdAt as string,source:data.source,runId:data.runId,sourceEventId:Number(report.id),...(data.steps?{steps:data.steps}:{}),historical:false};
      if(latestProgress&&!latestProgress.runId)latestProgress.runId=runId??'';
-     latestOutputs.set(chat.id,{cursor,status:chat.status,value:latestProgress});
+     latestOutputs.set(chat.id,{revision,status:chat.status,value:latestProgress});
     }
     if(latestProgress)latestProgress={...latestProgress};
     if(latestProgress)latestProgress.historical=!['running','approval'].includes(chat.status)||!manager.executionId(chat.id)||manager.executionId(chat.id)!==latestProgress.runId;
