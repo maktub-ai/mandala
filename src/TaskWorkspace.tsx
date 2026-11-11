@@ -1,4 +1,3 @@
-import TelegramTaskNotification from './TelegramTaskNotification';
 import {weekdayText} from './schedule-view';
 import {isSystemAgent} from '../shared/chat-context';
 import type {ConversationProgress as Progress} from '../shared/conversation-progress';
@@ -203,7 +202,6 @@ function TaskView({id,action,config,onCloseAction,onEditingChange,onChanged,prog
    {!['completed','cancelled'].includes(control.state)&&<>{control.runs.some(run=>['queued','starting','running','approval','unknown'].includes(run.state))&&<Button disabled={busy} onClick={()=>void act('stop')}><Icon name="stop" size={15}/>{say('停止本次执行','Stop current run')}</Button>}</>}
 
   </div></div>}
-  {task&&!editing&&<TelegramTaskNotification key={task.id} taskId={task.id} disabled={busy||ruleEditing}/>}
   {task&&!editing&&<section className="task-executions-section task-core-section" aria-label={say('执行对话','Execution chats')}><div className="task-section-heading"><h2>{say('执行对话','Execution chats')}</h2>{taskProgressRows.length>0&&<small>{taskProgressRows.length}</small>}</div>
    {taskProgressRows.length?<><TaskProgressSummary rows={taskProgressRows}/><ExecutionChats rows={taskProgressRows} tasks={executionTasks} config={config} onOpen={navigateAssetPage}/></>:<p className="task-delivery-note">{say('还没有执行对话。开始任务或让 Mandala 分派后会出现在这里。','No execution chats yet. They appear here once the task starts or Mandala delegates it.')}</p>}
   </section>}

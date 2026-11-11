@@ -112,72 +112,19 @@ test('Telegram messages retain their human bubble and source in the main chat',a
  await expect(message).not.toContainText('自动后台输入');
 });
 
-test('an eligible task exposes a persisted phone completion preference',async({page,request})=>{
- const {goalId}=await (await request.post('/__test__/mandala-panels')).json();
- let enabled=false;
- await page.route('**/api/mandala/telegram/tasks/'+goalId,route=>{
-  if(route.request().method()==='PUT')enabled=route.request().postDataJSON().enabled;
-  return route.fulfill({json:{available:true,enabled}});
- });
- await page.goto('/tasks/'+goalId);
- const checkbox=page.getByLabel('完成后通知手机',{exact:true}).first();
- await checkbox.click();
- await expect.poll(()=>enabled).toBe(true);
- await page.reload();
- await expect(page.getByLabel('完成后通知手机',{exact:true}).first()).toBeChecked();
-});
-
-test('phone-origin tasks explain their automatic completion replies',async({page,request})=>{
- const {goalId}=await (await request.post('/__test__/mandala-panels')).json();
- await page.route('**/api/mandala/telegram/tasks/'+goalId,route=>route.fulfill({json:{available:true,enabled:true,automatic:true}}));
- await page.goto('/tasks/'+goalId);
- await expect(page.getByLabel('完成后通知手机',{exact:true}).first()).toBeChecked();
- await expect(page.getByLabel('完成后通知手机',{exact:true}).first()).toBeDisabled();
- await expect(page.getByText('手机发起的任务会自动回复',{exact:true}).first()).toBeVisible();
-});
-
-test('unlink invalidation during a pending task update cannot restore an obsolete enabled checkbox',async({page,request})=>{
- const {goalId}=await (await request.post('/__test__/mandala-panels')).json();
- let available=true,release:undefined|(()=>void);
- await page.route('**/api/mandala/telegram/tasks/'+goalId,async route=>{
-  if(route.request().method()==='PUT'){
-   await new Promise<void>(resolve=>{release=resolve;});
-   return route.fulfill({json:{available:true,enabled:true}});
-  }
-  return route.fulfill({json:{available,enabled:false}});
- });
- await page.goto('/tasks/'+goalId);
- await page.getByLabel('完成后通知手机',{exact:true}).first().click();
- await expect.poll(()=>!!release).toBe(true);
- available=false;
- await page.evaluate(()=>window.dispatchEvent(new Event('mandala-telegram-changed')));
- release!();
- await expect(page.getByLabel('完成后通知手机',{exact:true})).toHaveCount(0);
-});
-
-test('closing settings during unlink still refreshes the visible task preference',async({page,request})=>{
- await request.post('/__test__/task-operation-cards');
- let available=true,release:undefined|(()=>void);
- await page.route('**/api/mandala/telegram**',async route=>{
-  if(new URL(route.request().url()).pathname.includes('/tasks/'))return route.fulfill({json:{available,enabled:false}});
-  if(route.request().method()==='DELETE'){
-   await new Promise<void>(resolve=>{release=resolve;});available=false;
-   return route.fulfill({json:{configured:false,state:'unconfigured',attention:true}});
-  }
-  return route.fulfill({json:{configured:true,state:'connected',attention:true,binding:{userId:42,chatId:42,name:'测试用户'}}});
- });
- // Keep the main chat's task card mounted behind its settings dialog.
+test('task cards and details do not offer a Telegram completion subscription',async({page,request})=>{
+ const {goalId}=await (await request.post('/__test__/task-operation-cards')).json();
+ const endpoint='/api/mandala/telegram/tasks/'+goalId;
+ expect((await request.get(endpoint)).status()).toBe(404);
+ expect((await request.put(endpoint,{data:{enabled:true}})).status()).toBe(404);
+ const subscription=page.getByRole('checkbox',{name:'完成后通知手机',exact:true});
  await page.goto('/mandala');
- await expect(page.getByLabel('完成后通知手机',{exact:true}).first()).toBeVisible();
- await page.getByRole('button',{name:'Mandala 设置',exact:true}).click();
- const dialog=page.getByRole('dialog',{name:'Mandala 设置'});
- await dialog.getByText('手机连接 · Telegram',{exact:true}).click();
- await dialog.getByRole('button',{name:'解除绑定',exact:true}).click();
- await dialog.getByRole('button',{name:'确认解除绑定',exact:true}).click();
- await expect.poll(()=>!!release).toBe(true);
- await dialog.getByRole('button',{name:'取消',exact:true}).click();
- release!();
- await expect(page.getByLabel('完成后通知手机',{exact:true})).toHaveCount(0);
+ const row=page.locator('[data-task-id="'+goalId+'"]');
+ await expect(row.first()).toContainText('验证关联卡片');
+ await expect(subscription).toHaveCount(0);
+ await page.goto('/tasks/'+goalId);
+ await expect(page.getByText('验证关联卡片',{exact:true}).first()).toBeVisible();
+ await expect(subscription).toHaveCount(0);
 });
 
 test('reopening a connection while unlink finishes rejects the earlier status snapshot',async({page})=>{

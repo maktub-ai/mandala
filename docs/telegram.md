@@ -54,11 +54,11 @@ Results list available output filenames and sizes. Only choosing **Send file** u
 | Reply to a phone request; final result of phone-origin work | Return to Telegram |
 | Mandala or its explicitly owned tasks need input or approval | Notify when **Notify my phone when I need to act** is enabled (default on) |
 | A failure needs user intervention | Same attention setting |
-| A desktop-origin task completes | Only when **Notify my phone on completion** is enabled for that task |
+| A desktop-origin task completes | The result stays on the desktop |
 | Normal progress, internal delegation replies, automatic retries | No unsolicited notification |
 | An item already resolved on the computer | No stale attention alert |
 
-Task completion preference is available on eligible task cards/details. Other Agents' unrelated tasks are not exposed through this channel. A final reply and task completion must not generate duplicate notifications for the same result. Desktop activity does not silently suppress notifications. Sound and lock-screen appearance remain Telegram/OS preferences.
+Other Agents' unrelated tasks are not exposed through this channel. A final reply and task completion must not generate duplicate notifications for the same result. Desktop activity does not silently suppress notifications. Sound and lock-screen appearance remain Telegram/OS preferences.
 
 ## Offline and uncertain delivery
 
@@ -80,10 +80,10 @@ Automated checks use isolated homes, synthetic identities, a fake Telegram trans
 - Routing: same Mandala history, source label, ordinary desktop silence, queued concurrent input, no repeated execution after duplicate update/restart.
 - Decisions: choice/free text/multiple questions, secret-input exclusion, single approval, desktop-only grants, stale/changed/revoked callbacks, simultaneous desktop decision.
 - Attachments: draft/description/send/cancel, count and size bounds, download errors, desktop visibility, explicit output download, missing/oversized output.
-- Notifications: attention settings, task opt-in, phone task results, unrelated task exclusion, suppression of stale/duplicate alerts.
+- Notifications: attention settings, desktop task completion silence, phone task results, unrelated task exclusion, suppression of stale/duplicate alerts.
 - Recovery: offline quarantine, confirm/discard, existing request reconciliation, stale click rejection, known failure vs uncertain delivery.
 - UI: initial/error/paired/expired states, Chinese labels, keyboard access, light/dark and narrow screens.
 
-**Real-phone release gate:** With a user-owned dedicated bot, verify computer-origin task → completion notification enabled → leave computer → answer a question and approve a single operation on phone → receive result/file → confirm identical history on desktop. Also test sleep/restart/reconnect and revocation. Automated or local-browser fixtures do not establish this external acceptance. No real-phone acceptance is asserted by this document.
+**Real-phone release gate:** With a user-owned dedicated bot, verify start a task in Telegram → leave computer → answer a question and approve a single operation on phone → receive result/file → confirm identical history on desktop. Also test sleep/restart/reconnect and revocation. Automated or local-browser fixtures do not establish this external acceptance. No real-phone acceptance is asserted by this document.
 
 The feature is opt-in. Existing installations have no Telegram connection until configured. Disable/unlink to stop the channel; conversations, tasks and outputs remain normal Mandala data. App installation and real-phone setup are separate from source delivery.

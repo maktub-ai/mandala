@@ -66,8 +66,7 @@ it('requires a local owner session and verifies CSRF before persisting a private
   expect((await stat(credential)).mode&0o777).toBe(0o600);
   expect(JSON.parse(await readFile(credential,'utf8')).token).toBe(token);
   expect(await (await fetch(base,{headers})).text()).not.toContain(token);
-  expect((await fetch(base+'/tasks/ordinary',{headers})).status).toBe(200);
-  expect(await (await fetch(base+'/tasks/ordinary',{headers})).json()).toEqual({available:false,enabled:false});
+  expect((await fetch(base+'/tasks/ordinary',{headers})).status).toBe(404);
   expect(remoteRequestAllowed('GET','/api/mandala/telegram')).toBe(false);
   expect(remoteRequestAllowed('POST','/api/mandala/telegram/configure',{token})).toBe(false);
   expect((await fetch(base,{method:'DELETE',headers})).status).toBe(200);
@@ -82,7 +81,7 @@ it('starts polling on a configured listener and aborts the outstanding request o
   expect(pollSignal?.aborted).toBe(true);
 });
 
-it('returns current status on local changes and rejects stale candidates and unowned task writes',async()=>{
+it('returns current status on local changes and rejects stale candidates and the retired task preference',async()=>{
   const headers=await login();
   await post(base+'/configure',{token},headers);
   const pair=await post(base+'/pair',{},headers);
@@ -91,7 +90,7 @@ it('returns current status on local changes and rejects stale candidates and uno
   expect((await post(base+'/test',{},headers)).status).toBe(422);
   const patch=await fetch(base+'/notifications',{method:'PATCH',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({attention:false})});
   expect(await patch.json()).toMatchObject({attention:false,configured:true});
-  const put=await fetch(base+'/tasks/unowned',{method:'PUT',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({enabled:true})});
+  const put=await fetch(base+'/tasks/ordinary',{method:'PUT',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({enabled:true})});
   expect(put.status).toBe(404);
   expect((await fetch(base+'/unknown',{headers})).status).toBe(404);
   expect((await fetch(base+'?token='+token,{headers})).status).toBe(422);

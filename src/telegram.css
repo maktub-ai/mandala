@@ -10,7 +10,5 @@
 .telegram-candidate { display:grid; gap:8px; }
 .telegram-candidate > button { justify-self:start; }
 .telegram-option { display:flex; align-items:center; gap:8px; font-size:var(--type-ui); min-height:var(--control-height); cursor:pointer; }
-.telegram-task-notification { padding:4px 0; }
-.turn-change > .telegram-task-notification { padding-inline:12px; }
 .telegram-source { display:block; color:var(--muted); font-size:var(--type-meta); margin-bottom:4px; }
 @media (pointer:coarse) { .telegram-option { min-height:44px; } }

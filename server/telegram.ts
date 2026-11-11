@@ -4,7 +4,7 @@ import { hostname } from 'node:os';
 import { basename, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { NativeQuestion } from '../shared/questions';
-import type { TelegramBot, TelegramIdentity, TelegramStatus, TelegramTaskStatus } from '../shared/telegram';
+import type { TelegramBot, TelegramIdentity, TelegramStatus } from '../shared/telegram';
 import { DomainError } from '../shared/workspace-contracts';
 import { MAX_ATTACHMENT_SIZE, MAX_ATTACHMENTS } from './attachments';
 import type { Store } from './store';
@@ -23,8 +23,7 @@ export type TelegramWorkspace = {
   primary(assertActive:()=>void): Promise<string>;
   enqueue(conversationId:string,text:string,requestId:string,bindingId:string,attachments:string[]): string;
   result(conversationId:string,inputId:string): TelegramResult | undefined;
-  cards(bindingId:string,since:string,taskEnabled:(id:string)=>boolean,attention:boolean): TelegramCard[];
-  task(id:string): {originBinding?:string} | undefined;
+  cards(bindingId:string,since:string,attention:boolean): TelegramCard[];
   attachment(conversationId:string,name:string,bytes:Buffer,assertActive:()=>void):Promise<string>;
   file(file:TelegramFile,assertActive:()=>void):Promise<TelegramDocument>;
   discardAttachments?(id:string,attachments:string[]):Promise<void>;
@@ -87,10 +86,21 @@ export function createTelegramService({home,store,workspace,fetch:fetcher=fetch,
     CREATE TABLE IF NOT EXISTS telegram_deliveries (id TEXT PRIMARY KEY,state TEXT NOT NULL,data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS telegram_buttons (id TEXT PRIMARY KEY,delivery_id TEXT NOT NULL,chat_id INTEGER NOT NULL,message_id INTEGER NOT NULL,data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS telegram_replies (message_id INTEGER PRIMARY KEY,data TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS telegram_task_notices (id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
     CREATE INDEX IF NOT EXISTS telegram_request_status ON telegram_requests(status);
     CREATE INDEX IF NOT EXISTS telegram_delivery_state ON telegram_deliveries(state);
   `);
+  // Retire unsent desktop completion notices when upgrading from per-task subscriptions.
+  store.transaction(()=>{
+    if(!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='telegram_task_notices'").get())return;
+    db.exec(`
+      DELETE FROM telegram_deliveries
+      WHERE state <> 'sent' AND EXISTS (
+        SELECT 1 FROM telegram_task_notices
+        WHERE instr(json_extract(telegram_deliveries.data,'$.validity'),'task-completed:'||telegram_task_notices.id||':')=1
+      );
+      DROP TABLE telegram_task_notices;
+    `);
+  });
   const get = ():Saved => JSON.parse(db.prepare('SELECT data FROM telegram_settings WHERE singleton=1').get()?.data as string ?? '{"attention":true}');
   const set = (saved:Saved) => db.prepare('INSERT OR REPLACE INTO telegram_settings VALUES (1,?)').run(JSON.stringify(saved));
   const readCredential = (id?:string):string|undefined => {
@@ -156,7 +166,7 @@ export function createTelegramService({home,store,workspace,fetch:fetcher=fetch,
     }
   };
   const reset = () => {
-    db.exec('DELETE FROM telegram_buttons; DELETE FROM telegram_deliveries; DELETE FROM telegram_requests; DELETE FROM telegram_task_notices; DELETE FROM telegram_replies;');
+    db.exec('DELETE FROM telegram_buttons; DELETE FROM telegram_deliveries; DELETE FROM telegram_requests; DELETE FROM telegram_replies;');
   };
   const guard = (signal:AbortSignal,bindingId?:string) => () => {
     if (stopped||signal.aborted||(bindingId&&get().binding?.id!==bindingId)) throw revoked;
@@ -174,13 +184,7 @@ export function createTelegramService({home,store,workspace,fetch:fetcher=fetch,
       ...(saved.lastConnectedAt?{lastConnectedAt:saved.lastConnectedAt}:{}),...(deliveries.length?{deliveries}:{})};
   };
   const pendingRequests = (state:Request['status'],limit=50):Request[] => db.prepare('SELECT data FROM telegram_requests WHERE status=? ORDER BY rowid LIMIT ?').all(state,limit).map(row=>JSON.parse(row.data as string));
-  const taskStatus = (id:string):TelegramTaskStatus => {
-    const binding=get().binding,task=token&&binding?workspace.task(id):undefined;
-    if(!task||!binding)return {available:false,enabled:false};
-    if(task.originBinding===binding.id)return {available:true,enabled:true,automatic:true};
-    return {available:true,enabled:db.prepare('SELECT enabled FROM telegram_task_notices WHERE id=?').get(id)?.enabled===1};
-  };
-  const currentCards = (binding:NonNullable<Saved['binding']>, attention=get().attention) => workspace.cards(binding.id,iso(binding.at),id=>taskStatus(id).enabled,attention);
+  const currentCards = (binding:NonNullable<Saved['binding']>, attention=get().attention) => workspace.cards(binding.id,iso(binding.at),attention);
   const pendingCards=(binding:NonNullable<Saved['binding']>,attention:boolean)=>currentCards(binding,attention).filter(card=>
     !card.completion||!db.prepare("SELECT 1 FROM telegram_deliveries WHERE state='sent' AND json_extract(data,'$.validity')=? LIMIT 1").get(card.key));
   const requireScopedConfirmation=(text:string,binding:NonNullable<Saved['binding']>)=>{
@@ -606,7 +610,7 @@ export function createTelegramService({home,store,workspace,fetch:fetcher=fetch,
     return {id:bot.id,name:preview(bot.first_name,200),username:bot.username!};
   };
   return {
-    status,poll,taskStatus,
+    status,poll,
     hasActiveWork:()=>processingUpdate||!!configuring,
     start(){if(!started&&!stopped){started=true;void loop();}},
     stop(){stopped=true;configuring?.abort();invalidate();},
@@ -704,14 +708,6 @@ export function createTelegramService({home,store,workspace,fetch:fetcher=fetch,
       if (typeof attention!=='boolean') fail('请指定是否接收提醒。');
       set({...get(),attention:attention as boolean});
       return status();
-    },
-    taskNotifications(id:string,enabled:unknown) {
-      if (typeof enabled!=='boolean') fail('请指定是否接收任务完成提醒。');
-      const status=taskStatus(id);
-      if (!status.available) throw new DomainError('telegram_task_unavailable',404,'此任务不在 Telegram 的 Mandala 协调范围内。');
-      if(status.automatic)return status;
-      db.prepare('INSERT OR REPLACE INTO telegram_task_notices VALUES (?,?)').run(id,Number(enabled));
-      return taskStatus(id);
     },
   };
 }

@@ -53,7 +53,7 @@ function approval(params:Record<string,unknown>={}) {
   events.onApproval({id:'command-1',method:'item/commandExecution/requestApproval',
     params:{threadId:'telegram-native',turnId:'turn-1',itemId:'item-1',command:'printf hello',cwd:home,...params}});
 }
-const cards=()=>workspace.cards(binding,new Date(0).toISOString(),()=>false,true);
+const cards=()=>workspace.cards(binding,new Date(0).toISOString(),true);
 
 describe('Mandala routing for Telegram',()=>{
   it('supports single command approval when Codex offers cancel instead of decline',async()=>{
@@ -170,11 +170,8 @@ const newGoal=(goal:string)=>({goal,criteria:[{id:'evidence',text:'Show evidence
 it('scopes task attention and replies to the owned task revision',async()=>{
   await begin();
   const source=coordinationSource(),task=await manager.coordination.create(source,newGoal('Owned task'),'create-owned');
-  const unrelated=manager.taskService.createTask({userId:store.ownerUserId},newGoal('Unrelated task'),'unrelated');
-  expect(workspace.task(task.id)?.originBinding).toBe(binding);
-  expect(workspace.task(unrelated.id)).toBeUndefined();
   const waiting=await manager.coordination.request(source,{taskId:task.id,expectedRevision:task.revision,text:'Choose the Singapore region'},'request-owned');
-  expect(workspace.cards(binding,new Date(0).toISOString(),()=>false,false)).toEqual([]);
+  expect(workspace.cards(binding,new Date(0).toISOString(),false)).toEqual([]);
   const card=cards().find(card=>card.taskId===task.id)!;
   expect(card.text).toContain('Choose the Singapore region');
   expect(card.reply).toEqual({taskId:task.id,revision:waiting.revision});
@@ -184,12 +181,32 @@ it('scopes task attention and replies to the owned task revision',async()=>{
   expect(()=>workspace.taskReply!(card.reply!,'yes')).toThrow();
 });
 
+it('does not send a completion card for desktop-origin tasks',async()=>{
+  manager.enqueueUserInput(primary,'desktop request','desktop-1');
+  await vi.waitFor(()=>expect(store.getConversation(primary)?.turnId).toBe('turn-1'));
+  const task=await manager.coordination.create(coordinationSource(),newGoal('Desktop task'),'desktop-task');
+  const actor={userId:store.ownerUserId},review=manager.taskService.userCommand(actor,task.id,task.revision,'complete');
+  manager.taskService.userCommand(actor,task.id,review.revision,'accept');
+  expect(workspace.cards(binding,new Date(0).toISOString(),true)).toEqual([]);
+});
+
+it('sends a later completion for a Telegram task even with attention alerts disabled',async()=>{
+  await begin();
+  const task=await manager.coordination.create(coordinationSource(),newGoal('Later Telegram task'),'later-telegram-task');
+  end('Task started');
+  const actor={userId:store.ownerUserId},review=manager.taskService.userCommand(actor,task.id,task.revision,'complete');
+  manager.taskService.userCommand(actor,task.id,review.revision,'accept');
+  expect(workspace.cards(binding,new Date(0).toISOString(),false)).toEqual([
+    expect.objectContaining({completion:true,taskId:task.id,text:expect.stringContaining('Later Telegram task')}),
+  ]);
+});
+
 it('includes an already completed phone goal in the correlated answer without sending a second completion card',async()=>{
   const input=await begin();
   const task=await manager.coordination.create(coordinationSource(),newGoal('Phone task'),'phone-task');
   const actor={userId:store.ownerUserId},review=manager.taskService.userCommand(actor,task.id,task.revision,'complete');
   manager.taskService.userCommand(actor,task.id,review.revision,'accept');
-  const notifications=()=>workspace.cards(binding,new Date(0).toISOString(),()=>true,true);
+  const notifications=()=>workspace.cards(binding,new Date(0).toISOString(),true);
   expect(notifications().find(card=>card.taskId===task.id)).toBeUndefined();
   end('Finished');
   expect(workspace.result(primary,input)?.text).toContain('Phone task');

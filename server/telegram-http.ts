@@ -14,9 +14,6 @@ export async function handleTelegramRequest(service:ReturnType<typeof createTele
   };
   try {
     if(url.search) throw invalid();
-    const task=path.match(/^\/tasks\/([a-zA-Z0-9_-]{1,100})$/);
-    if(task&&method==='GET') return json(res,200,service.taskStatus(task[1]));
-    if(task&&method==='PUT') return json(res,200,service.taskNotifications(task[1],await field('enabled')));
     if(path===''&&method==='GET') return json(res,200,service.status());
     if(path===''&&method==='DELETE') return json(res,200,service.unlink());
     if(path==='/configure'&&method==='POST') return json(res,200,await service.configure(await field('token')));

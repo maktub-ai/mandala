@@ -31,7 +31,6 @@ function fixture() {
     },
     cards: () => [],
     result: () => undefined,
-    task: () => undefined,
     attachment: async (_id,name) => name,
     file: async () => {throw new Error('Unexpected file');},
     decide: async () => {throw new Error('Unexpected decision');},
@@ -347,12 +346,28 @@ it('retries a known rejected acknowledgement without enqueuing another request',
   expect(f.submitted()).toEqual(['check invoices']);
 });
 
-it('uses a task-card reply target and only opts desktop tasks into completion notices',async()=>{
+it('clears obsolete desktop completion delivery alerts on upgrade',async()=>{
   const f=fixture();await f.bind();
-  f.workspace.task=(id)=>id==='desktop'?{}:undefined;
-  f.workspace.cards=(_binding,_since,enabled,attention)=>[
+  f.service.stop();
+  const db=f.store.database;
+  db.exec(`CREATE TABLE telegram_task_notices (id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
+    INSERT INTO telegram_task_notices VALUES ('desktop',0);`);
+  const insert=db.prepare('INSERT INTO telegram_deliveries VALUES (?,?,?)');
+  for(const [taskId,state] of [['desktop','failed'],['desktop','uncertain'],['phone','failed']]){
+    const validity='task-completed:'+taskId+':'+state;
+    const id='notice:'+validity;
+    insert.run(id,state,JSON.stringify({id,state,validity,text:taskId}));
+  }
+  const restarted=f.create();clean.push(()=>restarted.stop());
+  expect(restarted.status().deliveries).toEqual([
+    {id:'notice:task-completed:phone:failed',state:'failed',summary:'phone'},
+  ]);
+});
+
+it('uses the owned task-card reply target for desktop-origin tasks',async()=>{
+  const f=fixture();await f.bind();
+  f.workspace.cards=(_binding,_since,attention)=>[
     ...(attention?[{key:'task-input',text:'Need a date',reply:{taskId:'desktop',revision:3}}]:[]),
-    ...(enabled('desktop')?[{key:'task-complete',text:'Task completed',completion:true as const}]:[]),
   ];
   f.workspace.taskReply=(target,text)=>{
     expect(target).toEqual({taskId:'desktop',revision:3});
@@ -360,14 +375,9 @@ it('uses a task-card reply target and only opts desktop tasks into completion no
   };
   f.message('/pending');await f.service.poll();
   expect(f.sends.filter(m=>m.text==='Need a date')).toHaveLength(1);
-  expect(f.sends.some(m=>m.text==='Task completed')).toBe(false);
   const question=f.sends.find(m=>m.text==='Need a date');
   f.message('Wednesday',sender,privateChat,question.id);await f.service.poll();
   expect(f.submitted()).toEqual(['Reply for desktop task: Wednesday']);
-  expect(f.service.taskNotifications('desktop',true)).toEqual({available:true,enabled:true});
-  await f.service.poll();
-  f.message('/pending');await f.service.poll();
-  expect(f.sends.filter(m=>m.text==='Task completed')).toHaveLength(1);
 });
 
 it('cleans up a saved draft when the owner cancels',async()=>{

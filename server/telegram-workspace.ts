@@ -250,10 +250,6 @@ export function createTelegramWorkspace(home:string,store:Store,manager:SessionM
       return manager.enqueueTelegramInput(id,text,requestId,attachments).id;
     },
     result,
-    task(id) {
-      const entry=owned(id);
-      return entry?{originBinding:originBinding(entry.own)}:undefined;
-    },
     async attachment(id,name,bytes,assertActive) {
       requirePrimary(id);assertActive();
       const file=await saveAttachment(home,id,name,bytes);
@@ -338,7 +334,7 @@ export function createTelegramWorkspace(home:string,store:Store,manager:SessionM
         await manager.approve(target.conversationId,target.id,decision==='reject'&&!approvalChoices(approval).includes('reject')?'reject-stop':decision);
       else throw invalid();
     },
-    cards(bindingId,since,enabled,attention) {
+    cards(bindingId,since,attention) {
       const chat=primary(),cards:TelegramCard[]=[];
       if (!chat||!readable(chat.id)) return cards;
       if (attention) {
@@ -354,7 +350,7 @@ export function createTelegramWorkspace(home:string,store:Store,manager:SessionM
         }
       }
       for (const {own,task} of ownedTasks()) {
-        if (task.state==='completed'&&enabled(task.id)&&task.completion&&task.completion.acceptedAt>=since&&!completionCovered(own,task,bindingId)) {
+        if (task.state==='completed'&&originBinding(own)===bindingId&&task.completion&&task.completion.acceptedAt>=since&&!completionCovered(own,task,bindingId)) {
           const run=task.completion.sourceRunId?tasks.getRun(root,task.completion.sourceRunId):undefined;
           const summary=run?.summary?.trim();
           const output=completionFiles(task);

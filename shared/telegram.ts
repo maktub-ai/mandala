@@ -12,4 +12,3 @@ export type TelegramStatus = {
   error?: string;
   deliveries?: {id: string; state: 'failed' | 'uncertain'; summary: string}[];
 };
-export type TelegramTaskStatus = {available: boolean; enabled: boolean; automatic?: boolean};
