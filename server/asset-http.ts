@@ -19,7 +19,7 @@ import { openLocalAsset } from './asset-local-open';
 const json=(res:ServerResponse,status:number,data:unknown)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
 const invalid=()=>new DomainError('invalid_request',422,'Invalid asset request');
 const fields=(data:any,allowed:string[])=>{if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(key=>!allowed.includes(key)))throw invalid();};
-export function createAssetHttp(home:string,store:Store,authorizeConversation:(id:string)=>void=()=>{},maintenance?:FileMaintenance){
+export function createAssetHttp(home:string,store:Store,authorizeConversation:(id:string)=>void=()=>{},maintenance?:FileMaintenance,onAccessChanged:()=>void=()=>{}){
  const files=createAssetFiles(home),assets=createAssets(store,files),principal=workspacePrincipal(store);
  store.database.exec("CREATE TABLE IF NOT EXISTS file_execution_scopes(invocation_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,agent_id TEXT NOT NULL,project_id TEXT,conversation_id TEXT NOT NULL)");
  const upkeep=maintenance??createFileMaintenance({home,store,loadConfig:async()=>(await readConfig(home)).config});
@@ -114,7 +114,8 @@ export function createAssetHttp(home:string,store:Store,authorizeConversation:(i
    if(parts.length===2&&['access','lifecycle'].includes(parts[1])&&method==='PUT'){
     const data=await body(req);fields(data,parts[1]==='access'?['policy','expectedRevision']:['lifecycle','expectedRevision']);
     if(parts[1]==='access'){fields(data.policy,['mode','agentIds','projectIds']);for(const agent of data.policy.agentIds??[])await validateTargets('agent',agent);for(const project of data.policy.projectIds??[])await validateTargets('project',project);json(res,200,assets.setAccess(principal,id,data.policy,data.expectedRevision));}
-    else json(res,200,assets.setLifecycle(principal,id,data.lifecycle,data.expectedRevision));return true;
+    else json(res,200,assets.setLifecycle(principal,id,data.lifecycle,data.expectedRevision));
+    onAccessChanged();return true;
    }
    if(parts[1]==='bindings'&&parts.length===2&&(method==='POST'||method==='DELETE')){
     const data=await body(req);fields(data,['ownerType','ownerId','versionPolicy','versionId']);await validateTargets(data.ownerType,data.ownerId);

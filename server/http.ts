@@ -165,7 +165,7 @@ export function createHttpServer({
     const output = await nativeGenerate({ ...execution, cli:execution.cli, runtimeDefaults: config.runtimeDefaults }, prompt, AbortSignal.timeout(15000));
     return JSON.parse(output.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/, '$1'));
   }),readScope);
-  const handleAssetRequest = createAssetHttp(home, store, id=>manager.authorizeConversationRead?.(id),manager.fileMaintenance);
+  const handleAssetRequest = createAssetHttp(home, store, id=>manager.authorizeConversationRead?.(id),manager.fileMaintenance,()=>manager.wakeBlockedReceiptReports?.());
   const handleKnowledgeBaseRequest=manager.knowledgeBase?createKnowledgeBaseHttp(manager.knowledgeBase,workspacePrincipal(store)):undefined;
   const cliReceipt = createCliReceipts(store);
   const skillManagement=createSkillManagement(home,store);

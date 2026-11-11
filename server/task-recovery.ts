@@ -70,7 +70,7 @@ export function createTaskRecovery({store,tasks,scheduler,inspect,wake,onInputRe
    conversations.add(input.conversation_id as string);
   }
   for(const row of db.prepare("SELECT DISTINCT conversation_id FROM task_user_inputs WHERE state='queued'").all())conversations.add(row.conversation_id as string);
-  for(const row of db.prepare("SELECT DISTINCT destination_conversation_id FROM task_receipts WHERE delivery_state IN ('pending','presented') AND destination_conversation_id IS NOT NULL").all())conversations.add(row.destination_conversation_id as string);
+  for(const row of db.prepare("SELECT DISTINCT destination_conversation_id FROM task_receipts WHERE (delivery_state IN ('pending','presented') OR (delivery_state='parked' AND claim_error='forbidden' AND claimed_by_run_id IS NULL)) AND destination_conversation_id IS NOT NULL").all())conversations.add(row.destination_conversation_id as string);
   for(const id of conversations){
    const uncertain=hasUnprovenNativeOccupancy(store,id);
    // A plain interrupted conversation has no correlated terminal proof and stays interrupted.

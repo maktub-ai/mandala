@@ -105,6 +105,7 @@ export interface SessionManager {
   coordination: ReturnType<typeof createMandalaCoordination>;
   setAutomationService(service:import('./automations').Automations):void;
   reconcileRuns(hostId:string):Promise<RecoveryReport>;
+  wakeBlockedReceiptReports():void;
   startAutomationTask(taskId:string,input:AutomationRun):Promise<Run>;
   retryTask(taskId:string,expectedRevision:number,commandKey:string):Promise<Run>;
   resolveUnknownInput(id:string,action:'dismiss'|'retry',commandKey:string):QueuedInput;
@@ -240,12 +241,32 @@ export function createSessionManager(
   const directoryRoots = new Map<string,{roots:string[];conversationOutputRoot?:string}>();
   const files = createAssetFiles(home);
   store.database.exec("CREATE TABLE IF NOT EXISTS file_execution_scopes(invocation_id TEXT PRIMARY KEY,user_id TEXT NOT NULL,agent_id TEXT NOT NULL,project_id TEXT,conversation_id TEXT NOT NULL)");
-  const assets = createAssets(store, files, p => {
+  const assets: ReturnType<typeof createAssets> = createAssets(store, files, p => {
     if (!p.runId || !p.agentId) return undefined;
     const row = store.database.prepare("SELECT e.project_id FROM task_runs r JOIN task_executions e ON e.id=r.execution_id JOIN work_tasks t ON t.id=r.task_id WHERE r.id=? AND e.agent_id=? AND t.owner_user_id=?").get(p.runId, p.agentId, p.userId);
     if(row)return row.project_id as string | undefined;
     const scope=store.database.prepare('SELECT project_id FROM file_execution_scopes WHERE invocation_id=? AND user_id=? AND agent_id=?').get(p.runId,p.userId,p.agentId);
     return scope?.project_id as string | undefined;
+  },(p,asset,version):boolean=>{
+    if(!p.agentId||!asset.owner.agentId||!version.provenance.runId)return false;
+    const row=store.database.prepare(`
+      SELECT receipt.task_id,receipt.destination_conversation_id AS destination
+      FROM task_receipts receipt JOIN task_runs run ON run.id=receipt.source_run_id
+      JOIN task_executions execution ON execution.id=run.execution_id
+      WHERE run.id=? AND receipt.task_id=run.task_id AND receipt.execution_id=execution.id
+        AND execution.agent_id=? AND execution.created_by_agent_id=?
+        AND json_extract(run.continuation,'$.taskId')=receipt.task_id
+        AND json_extract(run.continuation,'$.conversationId')=receipt.destination_conversation_id
+        AND json_extract(run.routing,'$.destinationConversationId')=receipt.destination_conversation_id
+        AND EXISTS (SELECT 1 FROM json_each(receipt.artifact_versions) ref
+          WHERE json_extract(ref.value,'$.assetId')=? AND json_extract(ref.value,'$.versionId')=?)
+    `).get(version.provenance.runId,asset.owner.agentId,p.agentId,asset.id,version.id);
+    if(!row)return false;
+    const recipient=store.getConversation(row.destination as string);
+    const owner=coordination.ownership(row.task_id as string);
+    if(recipient?.purpose!=='mandala-main'||recipient.agentId!==p.agentId||owner?.agentId!==p.agentId||owner.conversationId!==recipient.id)return false;
+    try{return tasks.getTask(p,row.task_id as string).originConversationId===recipient.id;}
+    catch(error){if(error instanceof DomainError&&error.status===403)return false;throw error;}
   });
   const authorizeKnowledgeConversation=(p:Principal,id:string,sharedProjectId?:string)=>{
     const c=chat(id);
@@ -539,18 +560,13 @@ export function createSessionManager(
   const presentTaskReceipts=(taskId:string,targetId:string,succeeded:boolean)=>{
     queueMicrotask(() => {
       if (closed) return;
-      try { for (const receipt of tasks.listReceipts(root, taskId)) {
-        if (!receipt.destinationConversationId) continue;
-        const destination = receipt.destinationConversationId;
-        if (receipt.deliveryState === "pending") {
-          scheduler.presentReceipt(receipt.id);
-          store.appendEvent(destination, "task", { taskId: taskId, receiptId: receipt.id,
-            status: succeeded ? "completed" : "failed", from: targetId, to: destination });
+      for(const row of store.database.prepare("SELECT id,destination_conversation_id,delivery_state FROM task_receipts WHERE task_id=? AND destination_conversation_id IS NOT NULL").all(taskId)){
+        const destination=row.destination_conversation_id as string,receiptId=row.id as string;
+        if(row.delivery_state==='pending'){
+          scheduler.presentReceipt(receiptId);
+          store.appendEvent(destination,'task',{taskId,receiptId,status:succeeded?'completed':'failed',from:targetId,to:destination});
         }
         void pump(destination);
-      } } catch (error) {
-        if (!(error instanceof DomainError) || error.status !== 403) throw error;
-        store.appendEvent(targetId,"metadata",{receiptPresentation:"forbidden",taskId:taskId});
       }
     });
   };
@@ -627,7 +643,7 @@ export function createSessionManager(
     const invocationId=task?.id??randomUUID();
     const messageOrigin=queuedInputId?messages.metadata(queuedInputId):undefined;
     const inputSource=queuedInputId?scheduler.listUserInputs(id).find(i=>i.id===queuedInputId)?.source:undefined;
-    if(isHumanInput({task,agentMessage:messageOrigin,source:inputSource})&&hasRevokedReceiptHistory(id)) {
+    if((inputSource?.kind==='coordination'||isHumanInput({task,agentMessage:messageOrigin,source:inputSource}))&&hasRevokedReceiptHistory(id)) {
       try{await resetRevokedContext(id,queuedInputId);before=chat(id);}
       catch(error){if(queuedInputId&&scheduler.requeueUnsubmittedInput(queuedInputId,'context_rebuild_deferred'))resources.releaseUnsubmitted('input',queuedInputId);throw error;}
     }
@@ -1246,7 +1262,9 @@ export function createSessionManager(
       const error = e as Error;
       const reloadBlocked=backgroundNotConfirmed(error)&&!turnSubmitted;
       const recoveredReceipt=!turnSubmitted&&!!current.queuedInputId&&scheduler.recoverReceiptInput(current.queuedInputId,invocationId);
-      if(recoveredReceipt)current.queuedInputId=undefined;
+      const deferredReceipt=!turnSubmitted&&!recoveredReceipt&&inputSource?.kind==='coordination'&&!!current.queuedInputId&&
+        error instanceof DomainError&&error.status===403&&hasRevokedReceiptHistory(id)&&scheduler.requeueUnsubmittedInput(current.queuedInputId,'context_rebuild_deferred');
+      if(recoveredReceipt||deferredReceipt)current.queuedInputId=undefined;
       revokeBusinessCli(current);
       if(!turnSubmitted){resources.releaseUnsubmitted(owner.kind,owner.id);queueMicrotask(()=>{void wakeDirectories();});}
       if (memoryTrace && !memoryLoaded) appendEvent(id, "metadata", { ...memoryTrace, status: "failed",
@@ -1277,7 +1295,7 @@ export function createSessionManager(
         current.finishStop?.();
         if (chat(id).status !== "interrupted") state(id, current.stopRequested ? "interrupted" : "error");
       }
-      if(recoveredReceipt&&!current.stopRequested){state(id,'idle');queueMicrotask(()=>{void pump(id);});}
+      if((recoveredReceipt||deferredReceipt)&&!current.stopRequested){state(id,'idle');queueMicrotask(()=>{void pump(id);});}
       throw e;
     } finally {
       if (!turnSubmitted && current.runId === invocationId) revokeBusinessCli(current);
@@ -1334,11 +1352,16 @@ export function createSessionManager(
     }
     if(config.mandala?.agentId===chat(id).agentId&&!coordination.deliveryPaused(id)){
       const receipts:import('../shared/tasks').Receipt[]=[];
-      for(const row of store.database.prepare("SELECT id,task_id FROM task_receipts WHERE destination_conversation_id=? AND delivery_state IN ('pending','presented') AND claimed_by_run_id IS NULL ORDER BY rowid").all(id)){
+      for(const row of store.database.prepare(`
+        SELECT r.id,r.task_id FROM task_receipts r
+        WHERE r.destination_conversation_id=? AND r.claimed_by_run_id IS NULL
+          AND (r.delivery_state IN ('pending','presented') OR (? AND r.delivery_state='parked' AND r.claim_error='forbidden'))
+          AND NOT EXISTS (SELECT 1 FROM task_receipt_inputs i WHERE i.receipt_id=r.id)
+        ORDER BY r.rowid`).all(id,Number(chat(id).purpose==='mandala-main'))){
         const owner=row.task_id?coordination.ownership(row.task_id as string):undefined;
         if(owner&&owner.conversationId!==id)continue;
         try{receipts.push(tasks.authorizeReceiptDelivery({...root,agentId:chat(id).agentId},row.id as string,id));}
-        catch(error){if(!(error instanceof DomainError)||![403,409].includes(error.status))throw error;store.database.prepare("UPDATE task_receipts SET delivery_state='parked',claim_error=? WHERE id=?").run(error.code,row.id as string);}
+        catch(error){if(!(error instanceof DomainError)||![403,409].includes(error.status))throw error;store.database.prepare("UPDATE task_receipts SET delivery_state='parked',claim_error=? WHERE id=? AND (delivery_state<>'parked' OR claim_error IS NOT ?)").run(error.code,row.id as string,error.code);}
       }
       scheduler.enqueueReceiptInput(id,receipts);
     }
@@ -1654,6 +1677,17 @@ export function createSessionManager(
         });
       }
       return recovery;
+    },
+    wakeBlockedReceiptReports(){
+      if(closed)return;
+      for(const row of store.database.prepare(`
+        SELECT destination_conversation_id AS id FROM task_receipts
+        WHERE delivery_state='parked' AND claim_error='forbidden' AND claimed_by_run_id IS NULL AND destination_conversation_id IS NOT NULL
+        UNION SELECT conversation_id FROM task_user_inputs WHERE state='queued' AND json_extract(source,'$.kind')='coordination'
+      `).all()){
+        const id=row.id as string;
+        if(store.getConversation(id)?.purpose==='mandala-main')void pump(id).catch(error=>{if(!closed)store.appendEvent(id,'error',{message:(error as Error).message});});
+      }
     },
     startAutomationTask:prepareAutomation,
     taskService: tasks,

@@ -1,6 +1,6 @@
 import {ensureConfiguredMandala} from './configured-mandala';
 import {afterEach,expect,it,vi} from 'vitest';
-import {mkdtemp,mkdir,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {openStore} from '../server/store';
@@ -113,6 +113,109 @@ it('merges notify receipts into a durable nonhuman main input without changing g
  const accepted=await manager.callBoundTool(entries.at(-1)!.token,'task_mark_completed',{taskId:goal.id,expectedRevision:manager.taskService.getTask({userId:store.ownerUserId},goal.id).revision},'accept');expect(accepted).toMatchObject({state:'completed',assigneeAgentId:null});
  expect(manager.taskService.listRuns({userId:store.ownerUserId},goal.id).some(run=>run.routing?.executionConversationId===chat.id)).toBe(false);
 });
+it.each(['ready','source-blocked','output-blocked','recovered'] as const)('reports the exact delegated delivery to Mandala once (%s)',async mode=>{
+ const {manager,chat,entries,finish,store,home,factory}=await setup(),root={userId:store.ownerUserId};
+ let active=manager;
+ const {createAssets}=await import('../server/assets'),{createAssetFiles}=await import('../server/asset-files');
+ const files=createAssetFiles(home),assets=createAssets(store,files);
+ const {createHttpServer}=await import('../server/http');
+ const http=createHttpServer({requireIdentity:false,home,store,manager});
+ await new Promise<void>(resolve=>http.listen(0,'127.0.0.1',resolve));
+ cleanup.push(async()=>{http.closeAllConnections();await new Promise<void>(resolve=>http.close(()=>resolve()));});
+ const api='http://127.0.0.1:'+(http.address() as {port:number}).port+'/api';
+ const source=(mode==='source-blocked'||mode==='recovered')?await (async()=>{
+  await writeFile(join(home,'input.txt'),'Protected input');
+  const stage=await files.stageFiles(root,null,[{allowedRoot:home,relativePath:'input.txt',manifestPath:'input.txt'}]);
+  const item=assets.importAsset(root,{kind:'file',title:'Source',agentId:'worker',submissionId:stage.submissionId},'source');
+  assets.bind(root,{ownerType:'agent',ownerId:'worker',assetId:item.asset.id,versionPolicy:'latest'});
+  return item;
+ })():null;
+ await manager.send(chat.id,'Coordinate');
+ const goal=await manager.callBoundTool(entries[0].token,'mandala_create',{goal:'Review deployment',criteria,projectId:null},'goal') as {id:string};
+ const run=await manager.callBoundTool(entries[0].token,'mandala_delegate',{taskId:goal.id,targetAgentId:'worker',projectId:null,request:'Deliver',criteria},'worker') as import('../shared/tasks').Run;
+ await expect.poll(()=>entries.length).toBe(2);
+ const outputRoot=join(home,'outputs',run.id);
+ await writeFile(join(outputRoot,'report.txt'),'Deployment report with two findings');
+ const output=await manager.callBoundTool(entries[1].token,'artifact_publish',{title:'Delivery',files:[{path:'report.txt'}]},'publish') as {asset:import('../shared/assets').Asset;version:import('../shared/assets').AssetVersion};
+ const ref={assetId:output.asset.id,versionId:output.version.id};
+ const restricted=mode==='output-blocked'?assets.setAccess(root,output.asset.id,{mode:'owner'},output.asset.revision):
+  mode==='recovered'&&source?assets.setLifecycle(root,source.asset.id,'retracted',source.asset.revision):source?.asset;
+ entries[1].options.onEvent({method:'item/completed',params:{threadId:entries[1].native,turnId:entries[1].native+'-turn-1',item:{id:'answer',type:'agentMessage',phase:'final_answer',text:'Two deployment findings'}}});
+ finish(entries[1]);finish(entries[0]);
+ const receipt=()=>active.taskService.listReceipts(root,goal.id)[0];
+ if(restricted){
+  const parked=()=>store.database.prepare('SELECT id,claim_error,created_at FROM task_receipts WHERE source_run_id=?').get(run.id);
+  await expect.poll(()=>parked()?.claim_error).toBe('forbidden');
+  expect(manager.listUserInputs(chat.id).filter(input=>input.source?.kind==='coordination')).toEqual([]);
+  const results=await (await fetch(api+'/conversations/'+chat.id+'/results')).json();
+  expect(results).toContainEqual(expect.objectContaining({id:parked()?.id,reportAccessBlocked:true}));
+  const policy={mode:'selected' as const,agentIds:['worker',chat.agentId]};
+  if(mode==='recovered'){
+   // Older runtimes retained a link to a cancelled, provably unsubmitted automatic input.
+   const oldId='legacy-retired-input',receiptId=parked()!.id as string;
+   expect(results.find((item:{id:string})=>item.id===receiptId)).toMatchObject({summary:'',artifactCount:0});
+   expect(results.find((item:{id:string})=>item.id===receiptId)).not.toHaveProperty('conversationId');
+   store.transaction(()=>{
+    store.database.prepare("INSERT INTO task_user_inputs(id,owner_user_id,conversation_id,text,command_key,state,created_at,source) VALUES (?,?,?,?,?,'cancelled',?,?)").run(oldId,root.userId,chat.id,'Old queued report','receipts:'+receiptId,parked()!.created_at,JSON.stringify({kind:'coordination',receiptIds:[receiptId]}));
+    store.database.prepare('INSERT INTO task_receipt_inputs VALUES (?,?)').run(receiptId,oldId);
+    store.enqueueOutbox({type:'task.receipt_input_recovered',aggregateId:oldId,aggregateRevision:1,causationId:oldId,payload:{inputId:oldId,retired:[{id:receiptId,reason:'forbidden'}]}});
+   });
+   await manager.close();
+   const restored=assets.setLifecycle(root,restricted.id,'active',restricted.revision);
+   assets.setAccess(root,restricted.id,policy,restored.revision);
+   active=createSessionManager(store,async()=>(await readConfig(home)).config,factory,undefined,home);
+   cleanup.push(()=>active.close());
+   await active.reconcileRuns('local');
+  }else{
+   const grant=await fetch(api+'/v2/assets/'+restricted.id+'/access',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedRevision:restricted.revision,policy})});
+   expect(grant.status).toBe(200);
+  }
+ }
+ await expect.poll(()=>receipt()?.deliveryState,{timeout:4000}).toBe('consumed');
+ const inputs=active.listUserInputs(chat.id).filter(input=>input.source?.kind==='coordination'&&input.state!=='cancelled');
+ expect(inputs).toHaveLength(1);
+ expect(inputs[0].source).toEqual({kind:'coordination',receiptIds:[receipt().id]});
+ expect(inputs[0].text).toContain('Two deployment findings');
+ expect(receipt().artifactVersions).toEqual([ref]);
+ expect(active.taskService.listRuns(root,goal.id).map(item=>item.id)).toEqual([run.id]);
+ await expect(active.callBoundTool(entries.at(-1)!.token,'artifact_read',{...ref,fileId:'0'},'read-delivery')).resolves.toMatchObject({text:'Deployment report with two findings'});
+});
+
+it('rebuilds revoked receipt history before reporting a different authorized delivery',async()=>{
+ const {manager,chat,entries,finish,store,home}=await setup(),root={userId:store.ownerUserId};
+ const {createAssets}=await import('../server/assets'),{createAssetFiles}=await import('../server/asset-files');
+ const assets=createAssets(store,createAssetFiles(home));
+ await manager.send(chat.id,'Coordinate');
+ const receipts: {taskId:string;asset:import('../shared/assets').Asset}[]=[];
+ for(const label of ['OLD_FINDING','NEW_FINDING']){
+  const token=entries[0].token,goal=await manager.callBoundTool(token,'mandala_create',{goal:label,criteria,projectId:null},'goal-'+label) as {id:string};
+  const run=await manager.callBoundTool(token,'mandala_delegate',{taskId:goal.id,targetAgentId:'worker',projectId:null,request:label,criteria},'delegate-'+label) as import('../shared/tasks').Run;
+  const execution=()=>entries.find(entry=>entry.native===store.getConversation(run.routing!.executionConversationId)?.nativeId);
+  await expect.poll(()=>execution()?.turn).toBe(1);
+  const worker=execution()!;
+  await writeFile(join(home,'outputs',run.id,'report.txt'),label);
+  const output=await manager.callBoundTool(worker.token,'artifact_publish',{title:label,files:[{path:'report.txt'}]},'publish') as {asset:import('../shared/assets').Asset};
+  const asset=label==='NEW_FINDING'?assets.setAccess(root,output.asset.id,{mode:'owner'},output.asset.revision):output.asset;
+  receipts.push({taskId:goal.id,asset});
+  worker.options.onEvent({method:'item/completed',params:{threadId:worker.native,turnId:worker.native+'-turn-1',item:{id:'answer',type:'agentMessage',phase:'final_answer',text:label}}});
+  finish(worker);
+ }
+ finish(entries[0]);
+ const receipt=(index:number)=>manager.taskService.listReceipts(root,receipts[index].taskId)[0];
+ await expect.poll(()=>receipt(0)?.deliveryState).toBe('consumed');
+ await expect.poll(()=>receipt(1)?.claimError).toBe('forbidden');
+ finish(entries.at(-1));
+ await expect.poll(()=>store.getConversation(chat.id)?.status).toBe('idle');
+ assets.setAccess(root,receipts[0].asset.id,{mode:'owner'},receipts[0].asset.revision);
+ assets.setAccess(root,receipts[1].asset.id,{mode:'selected',agentIds:['worker',chat.agentId]},receipts[1].asset.revision);
+ manager.wakeBlockedReceiptReports();
+ await expect.poll(()=>receipt(1)?.deliveryState).toBe('consumed');
+ const response=entries.at(-1)!;
+ expect(response.input).toContain('NEW_FINDING');
+ expect(response.input+' '+response.instructions).not.toContain('OLD_FINDING');
+ expect(store.listEvents(chat.id,0).some(event=>event.kind==='metadata'&&(event.data as {nativeContextReset?:unknown}).nativeContextReset)).toBe(true);
+});
+
 it('self work runs in an independent managed workspace while main remains responsive',async()=>{
  const {manager,chat,entries,store}=await setup();await manager.send(chat.id,'Coordinate');const token=entries[0].token;
  const goal=await manager.callBoundTool(token,'mandala_create',{goal:'Goal',criteria,projectId:null},'goal') as {id:string};

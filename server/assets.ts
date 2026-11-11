@@ -26,7 +26,8 @@ function canonical(value: unknown): string {
  if (value && typeof value === 'object') return `{${Object.entries(value).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`;
  return JSON.stringify(value);
 }
-export function createAssets(store: Store, files: ReturnType<typeof createAssetFiles>, trustedProject?: (principal:Principal)=>string|undefined) {
+export function createAssets(store: Store, files: ReturnType<typeof createAssetFiles>, trustedProject?: (principal:Principal)=>string|undefined,
+ canReadDeliveredVersion?: (principal:Principal,asset:Asset,version:AssetVersion)=>boolean) {
  const db=store.database;
  store.transaction(()=>{
   const key='workspace_foundation_002_assets';
@@ -57,20 +58,23 @@ export function createAssets(store: Store, files: ReturnType<typeof createAssetF
   if(a.owner.projectId)return a.owner.projectId===projectId;
   return a.accessPolicy.mode==='all' || a.accessPolicy.mode==='owner' && a.owner.agentId===agentId || a.accessPolicy.mode==='selected' && Boolean(a.accessPolicy.agentIds?.includes(agentId)||projectId&&a.accessPolicy.projectIds?.includes(projectId));
  };
- const authorize=(p:Principal,a:Asset,projectId=p.agentId!==undefined?trustedProject?.(p)??'':'')=>{if(!p.userId || p.userId!==a.owner.userId || a.lifecycle==='retracted' || (p.agentId!==undefined && !allowed(a,p.agentId,projectId))) fail('forbidden',403);};
+ const authorize=(p:Principal,a:Asset,projectId=p.agentId!==undefined?trustedProject?.(p)??'':'',delivered=false)=>{if(!p.userId || p.userId!==a.owner.userId || a.lifecycle==='retracted' || (p.agentId!==undefined && !allowed(a,p.agentId,projectId) && !delivered)) fail('forbidden',403);};
  const edit=(p:Principal,id:string,at:string)=>db.prepare('INSERT INTO asset_activity(user_id,asset_id,last_edited_at) VALUES (?,?,?) ON CONFLICT(user_id,asset_id) DO UPDATE SET last_edited_at=excluded.last_edited_at').run(p.userId,id,at);
  const write=(a:Asset)=>db.prepare('UPDATE assets SET data=? WHERE id=?').run(JSON.stringify(a),a.id);
  const read=(p:Principal,ref:VersionRef,projectId=p.agentId!==undefined?trustedProject?.(p)??'':''):AssetVersion=>withAssetVersionRead(store,()=>{
-  const queries=versionReads.get(store)!,principal=canonical([p,p.agentId!==undefined?projectId:null]);
+  const queries=versionReads.get(store)!,principal=canonical([p,p.agentId!==undefined?projectId:null,!!canReadDeliveredVersion]);
   let query=queries.get(principal);if(!query){query={visiting:new Set(),validated:new Map()};queries.set(principal,query);}
   const key=canonical([ref.assetId,ref.versionId]);if(query.visiting.has(key))return fail('asset_source_cycle',403);
   const prior=query.validated.get(key);if(prior)return prior;
   query.visiting.add(key);
   try{
    if(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='skill_publication_journal'").get()&&db.prepare("SELECT version_id FROM skill_publication_journal WHERE version_id=? AND state!='published'").get(ref.versionId))return fail('skill_version_unpublished',403);
-   const a=load(ref.assetId);authorize(p,a,projectId);
+   const a=load(ref.assetId);
    const row=db.prepare('SELECT data FROM asset_versions WHERE id=? AND asset_id=?').get(ref.versionId,ref.assetId);
    if(!row)return fail('forbidden',403);const version=JSON.parse(row.data as string) as AssetVersion;
+   // An explicitly edited access policy supersedes the default delivery access.
+   const delivered=!!(p.agentId&&p.agentId!==a.owner.agentId&&a.kind==='file'&&a.accessPolicy.mode==='owner'&&a.accessRevision===1&&canReadDeliveredVersion?.(p,a,version));
+   authorize(p,a,projectId,delivered);
    if(db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='file_maintenance_checks'").get()&&db.prepare("SELECT id FROM file_maintenance_checks WHERE json_extract(data,'$.resultVersionId')=?").get(ref.versionId)){
     const authority=maintainedVersionReaders.get(store);if(!authority)fail('maintenance_evidence_unavailable',403);authority!(p,ref);
    }

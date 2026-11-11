@@ -388,6 +388,10 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
 
     return true;
  };
+ const loadReceipt = (id:string):Receipt => {
+  const row=db.prepare('SELECT * FROM task_receipts WHERE id=?').get(id);
+  return row?receiptRow(row):fail('receipt_not_found',404);
+ };
  const requireRoot = (p: Principal) => { if (!p.userId || p.agentId !== undefined || p.runId !== undefined) fail('forbidden', 403); };
  const pendingInquiryRun=(task:Task):Run|null=>{
   const row=db.prepare('SELECT r.* FROM task_inquiry_waits w JOIN task_runs r ON r.id=w.run_id WHERE r.task_id=? AND w.task_revision=? AND w.continuation_epoch=? AND w.resumed_by_run_id IS NULL AND NOT EXISTS(SELECT 1 FROM task_receipts x WHERE x.source_run_id=r.id) ORDER BY r.attempt DESC LIMIT 1').get(task.id,task.revision,task.continuationEpoch);
@@ -694,9 +698,7 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
    return store.transaction(() => prepared.commit());
   },
   authorizeReceipt(p: Principal, id: string): Receipt {
-   const row = db.prepare('SELECT * FROM task_receipts WHERE id=?').get(id);
-   if (!row) return fail('receipt_not_found', 404);
-   const receipt = receiptRow(row);
+   const receipt=loadReceipt(id);
    // Delivery to an assigned coordinator does not grant access to input/output assets.
    if (receipt.taskId && p.runId) {
     const coordinator = loadRun(p.runId), parent = getTask(p, receipt.taskId);
@@ -708,7 +710,7 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
    return receipt;
   },
   authorizeReceiptDelivery(p: Principal, id: string, conversationId: string): Receipt {
-   const receipt=this.authorizeReceipt(p,id);
+   const receipt=loadReceipt(id);
    if(receipt.destinationConversationId!==conversationId)fail('receipt_scope_changed',409);
    if(receipt.taskId){
     const parent=getTask(p,receipt.taskId);
@@ -718,7 +720,7 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
     const run=receipt.sourceRunId?loadRun(receipt.sourceRunId):null;
     if(!run||run.snapshot?.rule?.reportConversationId!==conversationId||run.routing?.destinationConversationId!==conversationId||getTask(p,run.taskId).state==='cancelled')fail('receipt_scope_changed',409);
    }
-   return receipt;
+   return this.authorizeReceipt(p,id);
   },
   appendReceiptContext(p: Principal, runId: string, receipts: Receipt[]) {
    if (!db.isTransaction) fail('transaction_required', 500);

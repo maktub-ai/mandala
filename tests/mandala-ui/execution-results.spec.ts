@@ -35,6 +35,19 @@ test('result replies stay readable when their task is completed or reopened',asy
   await move(fixture.taskId,'todo');await expect(card.locator('.execution-result-body')).toContainText('复查完成，两项配置差异仍然存在。');
  }finally{await move(fixture.taskId,'todo');}
 });
+test('the main chat explains access-blocked reports even when the delivery is hidden',async({page,request})=>{
+ const fixture=await(await request.post('/__test__/execution-results')).json();
+ await page.route('**/conversations/'+fixture.mainId+'/results',async route=>{
+  const response=await route.fetch(),items=await response.json();
+  const last=items.at(-1);
+  delete last.conversationId;
+  await route.fulfill({response,json:[...items.slice(0,-1),{...last,reportAccessBlocked:true,summary:'',artifactCount:0}]});
+ });
+ await page.goto('/mandala');
+ const card=page.getByRole('article',{name:fixture.title+' · 执行结果',exact:true}).last();
+ await expect(card.getByText(/Mandala 缺少读取交付物或来源资料的权限/)).toBeVisible();
+ await expect(card.getByRole('link',{name:'查看执行详情'})).toHaveCount(0);
+});
 for(const mode of ['light','dark'] as const)for(const width of [1440,1024,768,390])test(`execution results persist and link to the exact continuous turn ${mode} ${width}`,async({page,request},info)=>{
  const fixture=await(await request.post('/__test__/execution-results')).json();
  await page.addInitScript(mode=>localStorage.setItem('mana-theme',mode),mode);await page.setViewportSize({width,height:900});

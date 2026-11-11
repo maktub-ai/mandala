@@ -84,6 +84,12 @@ CODEX_HOME=/absolute/temporary/native-home node --import tsx scripts/mandala-con
 
 The harness creates a separate temporary product home and synthetic team. Natural prompts are “你好” and “我的团队有哪些成员，分别在哪些项目？”. It verifies a coordinator greeting, an actual successful directory call, and current membership after a configuration update. Evidence remains in the temporary product home. It never submits real drafts or changes the real product home; native approvals are not auto-granted. Successful source and isolated runtime checks are distinct from installed-App acceptance.
 
+## Delegated task results
+
+Mandala can read the exact file versions an executor delivers in a receipt for work it delegated from the owning main chat. The receipt, execution and asset provenance identify the recipient. Source versions retain their own access policies, and an explicit asset access policy takes precedence over default delivery access.
+
+The main chat uses the existing durable queue to report the outcome, findings, follow-up and decisions that need the user. If access blocks the report, the result card explains why. After an access change or a restart, the coordinator rechecks eligible receipts and reports from the original execution when it can read the required material. Previously submitted reports and uncertain native turns are not resubmitted.
+
 ## Automation result delivery
 
 New rules record a host-owned `reportConversationId`, separate from the executor and execution Chat. Rules created by Mandala in a human chat report to that source chat; rules created through the automation page with Mandala as executor default to its primary chat. Goal-bound rules retain the goal's coordinating source. The field is not accepted from model/tool or HTTP input, and existing rules are not retroactively assigned a destination.
