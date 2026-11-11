@@ -45,7 +45,7 @@ const serviceRecord = (persistentDesktop || Boolean(process.env.MANDALA_ACCOUNT_
 await readConfig(home);
 await migrateWorkspace(home, "apply");
 const store = openStore(home);
-const memoryRuntime = createMemoryRuntime({home,store,loadConfig:async()=>(await readConfig(home)).config,authorizeConversationRead:(_p,id)=>manager.authorizeConversationRead(id)});
+const memoryRuntime = createMemoryRuntime({home,store,loadConfig:async()=>(await readConfig(home,{hydrateSkills:false})).config,authorizeConversationRead:(_p,id)=>manager.authorizeConversationRead(id)});
 let systemWork = 0;
 const trackSystemWork = (work: Promise<void>) => {
   systemWork++;

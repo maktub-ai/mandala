@@ -59,20 +59,19 @@ export function createMemoryStore(store:Store, options:Options) {
  const db=store.database;
  // Authorities are always rechecked per synchronous query. Event digests alone
  // survive unrelated writes; transcript revisions include changes from every connection.
- let eventHashes=new Map<string,Map<number,string>>();
+ const eventHashes=new Map<string,Map<number,string>>();
  const eventHashVersions=new Map<string,number>(),eventRevision=db.prepare('SELECT revision FROM event_revisions WHERE conversation_id=?');
  let queryCache:{collections:Map<string,MemoryCollection>;sources:Map<string,MemorySource>;rawSources:Map<string,MemorySource>;records:Map<string,MemoryRevision>;eventData:Map<string,{text?:unknown;agentMessage?:unknown;task?:unknown}>;eventHashes:Map<string,Map<number,string>>;permissions:Set<string>;checkedTranscripts:Set<string>}|null=null;
  const authorityQuery=<T>(fn:()=>T):T=>{
   if(queryCache){
    if(db.isTransaction&&queryCache.eventHashes===eventHashes){
-    eventHashVersions.clear();eventHashes=new Map();queryCache.eventHashes=new Map();queryCache.checkedTranscripts.clear();
+    queryCache.eventHashes=new Map();queryCache.checkedTranscripts.clear();
    }
    return fn();
   }
   const transactional=db.isTransaction;
-  // Revisions roll back with their events. Never reuse or retain digests
-  // observed in a transaction, including ones primed before that transaction.
-  if(transactional){eventHashVersions.clear();eventHashes=new Map();}
+  // Transactional digests stay private and are discarded on exit. Keep the
+  // committed cache: rolled-back revisions still describe its original events.
   queryCache={collections:new Map(),sources:new Map(),rawSources:new Map(),records:new Map(),eventData:new Map(),eventHashes:transactional?new Map():eventHashes,permissions:new Set(),checkedTranscripts:new Set()};
   try{return fn();}finally{queryCache=null;}
  };
@@ -170,7 +169,7 @@ export function createMemoryStore(store:Store, options:Options) {
   if(s.conversationId){
    if(!queryCache!.checkedTranscripts.has(s.conversationId)){
     const revision=Number(eventRevision.get(s.conversationId)?.revision??0);
-    if(eventHashVersions.get(s.conversationId)!==revision){queryCache!.eventHashes.delete(s.conversationId);if(!db.isTransaction)eventHashVersions.set(s.conversationId,revision);}
+    if(eventHashVersions.get(s.conversationId)!==revision){queryCache!.eventHashes.delete(s.conversationId);if(queryCache!.eventHashes===eventHashes)eventHashVersions.set(s.conversationId,revision);}
     queryCache!.checkedTranscripts.add(s.conversationId);
    }
    let hashes=queryCache!.eventHashes.get(s.conversationId);if(!hashes){hashes=new Map();queryCache!.eventHashes.set(s.conversationId,hashes);}

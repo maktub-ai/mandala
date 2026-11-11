@@ -2,7 +2,7 @@ import {createMemoryProfiles} from './memory-profiles';
 import { workspacePrincipal } from './workspace-identity';
 import type { Config } from '../shared/types';
 import { DomainError, type Principal } from '../shared/workspace-contracts';
-import type { MemoryProposal, MemoryProcessingResult, MemorySessionSummaryView } from '../shared/memory';
+import type { MemoryProposal, MemoryProcessingResult, MemorySessionSummaryView, MemoryProfileScope } from '../shared/memory';
 import type { Store } from './store';
 import { createAssets } from './assets';
 import { createAssetFiles } from './asset-files';
@@ -195,7 +195,10 @@ export function createMemoryRuntime({home,store,loadConfig,generate=nativeGenera
    if(!closed&&epoch===settingsEpoch&&settings.request.generate){
     memory.withAuthorityQuery(()=>{
     scheduler?.scan(now);
-    const scopes=[...memory.collections(root).filter(c=>c.projectId===null).map(c=>({projectId:c.projectId,agentId:c.agentId})),...memory.listAll(root).flatMap(r=>r.profileScope?[r.profileScope]:[]),...store.listConversations().map(chat=>({projectId:chat.projectId||null,agentId:chat.agentId||null})),...(configCache?.projects??[]).flatMap(project=>project.agentIds.map(agentId=>({projectId:project.id,agentId})))];
+    // Discover scheduling addresses without materializing every record's evidence.
+    // profiles.schedule still validates the scoped records against live authority.
+    const storedScopes=store.database.prepare("SELECT DISTINCT json_extract(data,'$.profileScope') AS scope FROM memory_records WHERE json_type(data,'$.profileScope')='object'").all().map(row=>JSON.parse(row.scope as string) as MemoryProfileScope);
+    const scopes=[...memory.collections(root).filter(c=>c.projectId===null).map(c=>({projectId:c.projectId,agentId:c.agentId})),...storedScopes,...store.listConversations().map(chat=>({projectId:chat.projectId||null,agentId:chat.agentId||null})),...(configCache?.projects??[]).flatMap(project=>project.agentIds.map(agentId=>({projectId:project.id,agentId})))];
     for(const scope of new Map(scopes.map(scope=>[JSON.stringify(scope),scope])).values())try{profiles.schedule(scope,new Date(now).toISOString());}catch(error){if(!(error instanceof DomainError))throw error;}
     });
    }
@@ -225,7 +228,7 @@ export function createMemoryRuntime({home,store,loadConfig,generate=nativeGenera
   settingsChanged,beginSettingsSave,finishSettingsSave,
   reading:async(_principal?:Principal)=>{const settings=await getSettings();return (['request','session'] as const).filter(kind=>settings[kind].read);},
   initialize:async()=>{await migrateMemory(home,store,memory);memory.repairLegacyContexts(root);memory.retireUnscopedProfiles(root);},
-  start(){if(timer||closed)return;const tick=()=>{const now=Date.now();if(now>=nextScan){nextScan=now+5000;void scan().then(drain).catch(()=>{});}else void drain().catch(()=>{});if(now>=nextIndexRefresh)void refreshVectors().catch(()=>{nextIndexRefresh=Date.now()+60000;});};tick();timer=setInterval(tick,1000);timer.unref();},
+  start(){if(timer||closed)return;const tick=()=>{const now=Date.now();if(now>=nextScan){nextScan=now+5000;void scan().then(drain).catch(()=>{});}else void drain().catch(()=>{});if(now>=nextIndexRefresh)void refreshVectors().catch(()=>{nextIndexRefresh=Date.now()+60000;});};timer=setInterval(tick,1000);timer.unref();},
   hasActiveWork:()=>!!processing||nativeGenerations.size>0,
   async close(){closed=true;if(timer)clearInterval(timer);lifetime.abort();await scanning;await processing;await indexing;await services.recall.close();await Promise.allSettled([...nativeGenerations]);},
  };

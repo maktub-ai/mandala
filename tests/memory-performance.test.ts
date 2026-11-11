@@ -142,6 +142,19 @@ test('unrelated writes and other conversations preserve evidence digests while l
   expect(()=>s.memory.source(root,source.id)).toThrow('source_changed');
  }finally{other.close();}
 });
+test.each([false,true])('unrelated transactions preserve committed evidence digests and renew authorization (nested: %s)',nested=>{
+ const authorize=vi.fn(),s=setup(authorize),c=s.memory.ensureCollection(root,{projectId:null,agentId:null});
+ const data={text:'Committed evidence survives housekeeping'};
+ s.store.appendEvent(s.chat.id,'user',data);s.store.appendEvent(s.chat.id,'status',{status:'idle'});
+ const source=s.memory.captureConversation(root,{collectionId:c.id,conversationId:s.chat.id,trigger:'explicit',kind:'request'}).sources[0];
+ s.memory.source(root,source.id);
+ const transaction=()=>s.store.transaction(()=>s.memory.source(root,source.id));
+ if(nested)s.memory.withAuthorityQuery(transaction);else transaction();
+ const parse=vi.spyOn(JSON,'parse');authorize.mockClear();
+ s.memory.source(root,source.id);
+ expect(parse.mock.calls.filter(([value])=>value===JSON.stringify(data))).toHaveLength(0);
+ expect(authorize).toHaveBeenCalledTimes(1);
+});
 test('moving an event invalidates both transcript digests',()=>{
  const s=setup(),c=s.memory.ensureCollection(root,{projectId:null,agentId:null});
  const event=s.store.appendEvent(s.chat.id,'user',{text:'Evidence in original conversation'});s.store.appendEvent(s.chat.id,'status',{status:'idle'});
@@ -273,8 +286,8 @@ test('a background scheduling pass validates shared event content once across pr
  const source=runtime.memory.captureConversation(root,{collectionId:c.id,conversationId:chat.id,trigger:'explicit',kind:'request'}).sources[0];
  runtime.memory.applyProposal(root,{collectionId:c.id,layer:'L1',contentType:'fact',text:data.text,operation:'store',replaces:[],evidence:[{sourceId:source.id,sourceRevision:source.revision}],support:[{sourceId:source.id,eventId:event.id,quote:data.text}],validUntil:null,certainty:'observed'},c.generation,'evidence_extract');
  try{
-  await runtime.scan();const parse=vi.spyOn(JSON,'parse');
-  await runtime.scan();expect(parse.mock.calls.filter(call=>call[0]===JSON.stringify(data)).length).toBeLessThanOrEqual(1);
+  await runtime.scan();const parse=vi.spyOn(JSON,'parse'),all=vi.spyOn(runtime.memory,'listAll');
+  await runtime.scan();expect(all).not.toHaveBeenCalled();expect(parse.mock.calls.filter(call=>call[0]===JSON.stringify(data)).length).toBeLessThanOrEqual(1);
  }finally{await runtime.close();}
 });
 
@@ -292,10 +305,10 @@ test('background reconciliation runs every five seconds while the worker keeps p
  const s=setup(),runtime=createMemoryRuntime({home:join(tmpdir(),'unused-synthetic-home'),store:s.store,loadConfig:async()=>({version:2,projects:[],agents:[]})});
  vi.useFakeTimers();const chats=vi.spyOn(s.store,'listConversations'),claims=vi.spyOn(runtime.jobs,'claim');
  try{
-  runtime.start();await runtime.scan();await vi.advanceTimersByTimeAsync(4200);
+  runtime.start();await vi.advanceTimersByTimeAsync(4200);
   expect(chats).toHaveBeenCalledTimes(2);expect(claims.mock.calls.length).toBeGreaterThanOrEqual(4);
   // A pass yields to real I/O; the clock assertion checks that the next pass started.
-  await vi.advanceTimersByTimeAsync(1000);expect(chats.mock.calls.length).toBeGreaterThanOrEqual(3);
+  await vi.advanceTimersByTimeAsync(2000);expect(chats.mock.calls.length).toBeGreaterThanOrEqual(3);
  }finally{await runtime.close();vi.useRealTimers();}
 });
 
@@ -305,4 +318,14 @@ test('an execution cutoff omits old inherited memory without weakening the defau
  s.store.appendEvent(s.chat.id,'metadata',{memoryUse:'acknowledged',items:[{recordId:'current',revision:3}]});
  expect(()=>memoryHistoryReferences(s.store,s.chat.id)).toThrow('legacy_memory_history_unverified');
  expect(memoryHistoryReferences(s.store,s.chat.id,boundary.id)).toEqual([{recordId:'current',revision:3,reason:'inherited_native_history'}]);
+});
+
+test('background memory work leaves the initial startup turn free and starts on its first interval',async()=>{
+ vi.useFakeTimers();
+ const s=setup(),loadConfig=vi.fn(async()=>({version:2 as const,projects:[],agents:[],system:{memory:{request:{generate:false,read:false},session:{generate:false,read:false}}}}));
+ const runtime=createMemoryRuntime({home:s.store.home,store:s.store,loadConfig});
+ try{
+  runtime.start();expect(loadConfig).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1000);expect(loadConfig).toHaveBeenCalled();
+ }finally{await runtime.close();vi.useRealTimers();}
 });

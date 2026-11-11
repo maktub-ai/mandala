@@ -1,6 +1,6 @@
 import {ensureConfiguredMandala} from './configured-mandala';
 import { legacyWiki } from './legacy-wiki-fixture';
-import {beforeEach,afterEach,expect,test} from 'vitest';
+import {beforeEach,afterEach,expect,test,vi} from 'vitest';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -13,6 +13,7 @@ import {createSkillLearning} from '../server/skill-learning';
 import {createAssets} from '../server/assets';
 import {createAssetFiles} from '../server/asset-files';
 import {createKnowledgeBase} from '../server/knowledge-base';
+import {registerSkillConversationRead} from '../server/skill-evidence';
 import {workspacePrincipal} from '../server/workspace-identity';
 import {createMemoryRuntime,memoryHistoryReferences} from '../server/memory-runtime';
 import {createSessionManager} from '../server/sessions';
@@ -121,4 +122,19 @@ test('configured system Project sharing permits Project-only support and retains
  assets.setAccess(root,file.asset.id,{mode:'owner'},assets.getAuthorizedAsset(root,file.asset.id).revision);
  await expect(service(system,'skill_read',{skillId:created.skill.id},'',()=>{},undefined,{projectId:'p'})).rejects.toMatchObject({status:403});
  const privateEvidence=evidence();await expect(service(system,'skill_register',{name:'private-dialogue',content:content.replace('name: review','name: private-dialogue')},'private-dialogue',()=>{},privateEvidence.source,{projectId:'p'})).rejects.toMatchObject({status:403});
+});
+
+test('settings-only config reads skip Skill hydration while normal reads retain fresh evidence checks',async()=>{
+ const {c,source}=evidence();await register(source);
+ const authorize=vi.fn(),release=registerSkillConversationRead(store,authorize);
+ try{
+  const settings=await readConfig(home,{hydrateSkills:false});
+  expect(settings.config.agents.map(a=>a.id)).toEqual(['a','b']);
+  expect(settings.config.skillLibrary![0].content).toBeUndefined();
+  expect(authorize).not.toHaveBeenCalled();
+  expect((await readConfig(home)).config.skillLibrary![0].content).toBe(content);
+  expect(authorize).toHaveBeenCalled();
+  store.replaceHistory(c.id,source.eventIds[0],'replaced');
+  expect((await readConfig(home)).config.skillLibrary![0].unavailable).toBe(true);
+ }finally{release();}
 });

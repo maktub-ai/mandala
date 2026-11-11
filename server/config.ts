@@ -278,6 +278,7 @@ export function validateConfig(value: unknown): asserts value is Config {
 }
 export async function readConfig(
   home: string,
+  options: { hydrateSkills?: boolean } = {},
 ): Promise<{ config: Config; revision: string }> {
   await mkdir(home, { recursive: true, mode: 0o700 });
   const path = join(home, "config.json");
@@ -300,7 +301,10 @@ export async function readConfig(
     if(!runtime || typeof runtime!=='object' || Array.isArray(runtime))continue;
     for(const value of Object.values(runtime))if(value && typeof value.gateway==='string' && value.gateway!=='native')value.gateway='unavailable';
   }
-  if(config.skillLibrary?.some(skill=>skill.versionRef)) {
+  // Background settings consumers do not execute or display Skills.
+  if(options.hydrateSkills===false){
+    config.skillLibrary=config.skillLibrary?.map(skill=>skill.versionRef?{...skill,content:undefined,unavailable:true}:skill);
+  }else if(config.skillLibrary?.some(skill=>skill.versionRef)) {
     const store=openStore(home);try{const catalog=createSkillCatalog(home,store);if(!writes.has(home))catalog.recover(config);config.skillLibrary=withSkillEvidenceRead(store,config,()=>config.skillLibrary!.map(skill=>{try{return catalog.read(skill,undefined,config);}catch{return {...skill,content:undefined,unavailable:true};}}));}finally{store.close();}
   }
   validateConfig(config);
