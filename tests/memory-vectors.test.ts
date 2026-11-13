@@ -92,7 +92,7 @@ test('runtime background indexing advances old authorized data without a query o
  const {createMemoryRuntime}=await import('../server/memory-runtime'),{readConfig}=await import('../server/config');
  const s=setup(Array.from({length:70},(_,i)=>`travels to Tokyo ${i}`)),config=(await readConfig(s.home)).config;
  let nativeCalls=0;const runtime=createMemoryRuntime({home:s.home,store:s.store,loadConfig:async()=>config,schedule:false,generate:async()=>{nativeCalls++;return '[]';},embed:async texts=>texts.map(vector)});
- try{runtime.start();await expect.poll(()=>s.store.database.prepare('SELECT COUNT(*) AS n FROM memory_vectors').get()!.n,{timeout:3000}).toBe(64);
+ try{runtime.start();await expect.poll(()=>s.store.database.prepare('SELECT COUNT(*) AS n FROM memory_vectors').get()!.n,{timeout:7000}).toBe(64);
  await runtime.refreshVectors();expect(s.store.database.prepare('SELECT COUNT(*) AS n FROM memory_vectors').get()!.n).toBe(70);expect(nativeCalls).toBe(0);
  }finally{await runtime.close();}
 });

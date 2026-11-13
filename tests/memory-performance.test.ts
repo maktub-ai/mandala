@@ -305,7 +305,7 @@ test('background reconciliation runs every five seconds while the worker keeps p
  const s=setup(),runtime=createMemoryRuntime({home:join(tmpdir(),'unused-synthetic-home'),store:s.store,loadConfig:async()=>({version:2,projects:[],agents:[]})});
  vi.useFakeTimers();const chats=vi.spyOn(s.store,'listConversations'),claims=vi.spyOn(runtime.jobs,'claim');
  try{
-  runtime.start();await vi.advanceTimersByTimeAsync(4200);
+  runtime.start();await vi.advanceTimersByTimeAsync(8200);
   expect(chats).toHaveBeenCalledTimes(2);expect(claims.mock.calls.length).toBeGreaterThanOrEqual(4);
   // A pass yields to real I/O; the clock assertion checks that the next pass started.
   await vi.advanceTimersByTimeAsync(2000);expect(chats.mock.calls.length).toBeGreaterThanOrEqual(3);
@@ -320,13 +320,17 @@ test('an execution cutoff omits old inherited memory without weakening the defau
  expect(memoryHistoryReferences(s.store,s.chat.id,boundary.id)).toEqual([{recordId:'current',revision:3,reason:'inherited_native_history'}]);
 });
 
-test('background memory work leaves the initial startup turn free and starts on its first interval',async()=>{
+test('background memory work leaves a startup grace period before polling',async()=>{
  vi.useFakeTimers();
  const s=setup(),loadConfig=vi.fn(async()=>({version:2 as const,projects:[],agents:[],system:{memory:{request:{generate:false,read:false},session:{generate:false,read:false}}}}));
  const runtime=createMemoryRuntime({home:s.store.home,store:s.store,loadConfig});
  try{
   runtime.start();expect(loadConfig).not.toHaveBeenCalled();
-  await vi.advanceTimersByTimeAsync(1000);expect(loadConfig).toHaveBeenCalled();
+  await runtime.scan();expect(loadConfig).toHaveBeenCalled();loadConfig.mockClear();
+  await runtime.refreshVectors();expect(loadConfig).toHaveBeenCalled();loadConfig.mockClear();
+  await vi.advanceTimersByTimeAsync(4999);expect(loadConfig).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);expect(loadConfig).toHaveBeenCalled();
+  await runtime.close();loadConfig.mockClear();await vi.advanceTimersByTimeAsync(10000);expect(loadConfig).not.toHaveBeenCalled();
  }finally{await runtime.close();vi.useRealTimers();}
 });
 
