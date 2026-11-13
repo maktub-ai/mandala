@@ -74,6 +74,10 @@ it("previews only a file linked in the authorized chat and rechecks access after
     store.appendEvent(chat.id, "text", { itemId: "report", text: `[说明](${path})` });
     expect(await call(chat.id, path)).toMatchObject({ status: 200, data: { name: "report.md", text: "# Synthetic report\n\nExpected file content." } });
     expect(await call(chat.id, [path, join(home,"missing.md"), "data/*.parquet"])).toMatchObject({status:200,data:{hrefs:[path]}});
+    const delta={runId:'link-check',method:'item/reasoning/textDelta',params:{itemId:'reasoning',delta:'Unrelated reasoning'}},serialized=JSON.stringify(delta);
+    store.transaction(()=>{for(let i=0;i<500;i++)store.appendEvent(chat.id,'tool',delta);store.appendEvent(chat.id,'tool',{runId:'link-check',method:'item/completed',params:{item:{id:'reasoning',type:'reasoning',content:['Completed reasoning']}}});});
+    const parse=vi.spyOn(JSON,'parse');
+    try{expect(await call(chat.id,[path])).toMatchObject({status:200,data:{hrefs:[path]}});expect(parse.mock.calls.filter(([value])=>value===serialized).length).toBeLessThanOrEqual(1);}finally{parse.mockRestore();}
     expect(await call(other.id, [path])).toMatchObject({status:200,data:{hrefs:[]}});
     expect((await call(chat.id, [path], "https://foreign.example")).status).toBe(403);
     for (const [name, link] of [["report(1).md", (path: string) => `[括号](${path})`], ["referenced.md", (path: string) => `[引用][file]\n\n[file]: ${path}`]] as const) {

@@ -62,6 +62,10 @@ export function createMemoryStore(store:Store, options:Options) {
  const eventHashes=new Map<string,Map<number,string>>();
  const eventHashVersions=new Map<string,number>(),eventRevision=db.prepare('SELECT revision FROM event_revisions WHERE conversation_id=?');
  let queryCache:{collections:Map<string,MemoryCollection>;sources:Map<string,MemorySource>;rawSources:Map<string,MemorySource>;records:Map<string,MemoryRevision>;eventData:Map<string,{text?:unknown;agentMessage?:unknown;task?:unknown}>;eventHashes:Map<string,Map<number,string>>;permissions:Set<string>;checkedTranscripts:Set<string>}|null=null;
+ // Cache data only, never an authorization result. Source writes from every connection
+ // invalidate snapshots; transaction reads cannot populate the committed cache.
+ const sourceSnapshots=new Map<string,{source:MemorySource;bytes:number}>();
+ let snapshotBytes=0,snapshotVersion=-1;
  const authorityQuery=<T>(fn:()=>T):T=>{
   if(queryCache){
    if(db.isTransaction&&queryCache.eventHashes===eventHashes){
@@ -70,6 +74,7 @@ export function createMemoryStore(store:Store, options:Options) {
    return fn();
   }
   const transactional=db.isTransaction;
+  if(!transactional){const version=Number(sourceChanges.get()!.revision);if(version!==snapshotVersion){sourceSnapshots.clear();snapshotBytes=0;snapshotVersion=version;}}
   // Transactional digests stay private and are discarded on exit. Keep the
   // committed cache: rolled-back revisions still describe its original events.
   queryCache={collections:new Map(),sources:new Map(),rawSources:new Map(),records:new Map(),eventData:new Map(),eventHashes:transactional?new Map():eventHashes,permissions:new Set(),checkedTranscripts:new Set()};
@@ -85,6 +90,11 @@ export function createMemoryStore(store:Store, options:Options) {
  CREATE TABLE IF NOT EXISTS memory_task_capture_cutoffs(task_id TEXT PRIMARY KEY,last_revision INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS memory_collections(id TEXT PRIMARY KEY REFERENCES assets(id),scope_key TEXT UNIQUE NOT NULL,data TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS memory_sources(id TEXT PRIMARY KEY,source_key TEXT UNIQUE NOT NULL,data TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS memory_source_changes(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL);
+ INSERT OR IGNORE INTO memory_source_changes VALUES(1,0);
+ CREATE TRIGGER IF NOT EXISTS memory_source_insert AFTER INSERT ON memory_sources BEGIN UPDATE memory_source_changes SET revision=revision+1 WHERE id=1; END;
+ CREATE TRIGGER IF NOT EXISTS memory_source_update AFTER UPDATE ON memory_sources BEGIN UPDATE memory_source_changes SET revision=revision+1 WHERE id=1; END;
+ CREATE TRIGGER IF NOT EXISTS memory_source_delete AFTER DELETE ON memory_sources BEGIN UPDATE memory_source_changes SET revision=revision+1 WHERE id=1; END;
  CREATE TABLE IF NOT EXISTS memory_source_revisions(source_id TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(source_id,revision));
  CREATE TABLE IF NOT EXISTS memory_records(id TEXT PRIMARY KEY,collection_id TEXT NOT NULL REFERENCES memory_collections(id),data TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS memory_records_legacy_id ON memory_records(json_extract(data,'$.legacyId'));
@@ -100,6 +110,7 @@ export function createMemoryStore(store:Store, options:Options) {
  CREATE INDEX IF NOT EXISTS memory_links_lookup ON memory_record_links(kind,target_id,record_id);
  CREATE TABLE IF NOT EXISTS memory_index(record_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,text TEXT NOT NULL);
  `);db.prepare('INSERT OR IGNORE INTO schema_migrations VALUES (?,?)').run('memory_core_001',new Date().toISOString());});
+ const sourceChanges=db.prepare('SELECT revision FROM memory_source_changes WHERE id=1');
  const principal=(p:Principal)=>{
   if(!p?.userId||p.userId!==options.localUserId)memoryFail('forbidden',403);
   if(p.runId){
@@ -131,7 +142,20 @@ export function createMemoryStore(store:Store, options:Options) {
   const key=value as string,cached=queryCache!.eventData.get(key);if(cached)return cached;
   const data=parse<{text?:unknown;agentMessage?:unknown;task?:unknown}>(value);queryCache!.eventData.set(key,data);return data;
  };
- const loadSource=(id:string):MemorySource=>{const cached=queryCache?.rawSources.get(id);if(cached)return cached;const row=db.prepare('SELECT data FROM memory_sources WHERE id=?').get(id);if(!row)memoryFail('memory_source_not_found',404);const source=parse<MemorySource>(row!.data);queryCache?.rawSources.set(id,source);return source;};
+ const sourceRow=db.prepare('SELECT data FROM memory_sources WHERE id=?');
+ const loadSource=(id:string):MemorySource=>authorityQuery(()=>{
+  const cached=queryCache?.rawSources.get(id);if(cached)return cached;
+  const snapshot=!db.isTransaction?sourceSnapshots.get(id):undefined;
+  if(snapshot){sourceSnapshots.delete(id);sourceSnapshots.set(id,snapshot);queryCache?.rawSources.set(id,snapshot.source);return snapshot.source;}
+  const row=sourceRow.get(id);if(!row)memoryFail('memory_source_not_found',404);
+  const source=JSON.parse(row!.data as string,(_key,value)=>value&&typeof value==='object'?Object.freeze(value):value) as MemorySource;queryCache?.rawSources.set(id,source);
+  const bytes=(row!.data as string).length*2,limit=128*1024*1024;
+  if(!db.isTransaction&&bytes<=limit){
+   while(snapshotBytes+bytes>limit&&sourceSnapshots.size){const key=sourceSnapshots.keys().next().value!;snapshotBytes-=sourceSnapshots.get(key)!.bytes;sourceSnapshots.delete(key);}
+   sourceSnapshots.set(id,{source,bytes});snapshotBytes+=bytes;
+  }
+  return source;
+ });
  // Verified user assertions cite their quoted events, not unrelated recalled Agent context.
  // This read projection also handles already stored broad evidence without rewriting it.
  const userEvidence=(r:MemoryRevision):EvidenceRef[]=>{
@@ -508,7 +532,8 @@ export function createMemoryStore(store:Store, options:Options) {
  const repairLegacyContexts=(p:Principal)=>store.transaction(()=>{
   principal(p);if(p.agentId||p.runId)memoryFail('forbidden',403);
   let repaired=0;const changed=new Set<string>();
-  for(const r of listAll(p))if(r.legacyId&&r.legacyLevel==='L3'&&r.layer==='L3'&&!r.semanticKey&&!r.dependencies.length&&['user_confirmation','user_correction'].includes(r.verification)){
+  const candidates=db.prepare("SELECT id FROM memory_records WHERE json_extract(data,'$.legacyId') IS NOT NULL AND json_extract(data,'$.layer')='L3'").all().flatMap(row=>{try{return [read(p,row.id as string)];}catch(error){if(error instanceof DomainError)return [];throw error;}});
+  for(const r of candidates)if(r.legacyId&&r.legacyLevel==='L3'&&r.layer==='L3'&&!r.semanticKey&&!r.dependencies.length&&['user_confirmation','user_correction'].includes(r.verification)){
    invalidateDerived(r);saveRecord({...r,layer:'L1',revision:r.revision+1,revisionKind:'correction'});changed.add(r.collectionId);repaired++;
   }
   for(const id of changed){bump(p,id);queueLegacyContext(p,id);}

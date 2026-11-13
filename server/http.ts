@@ -721,7 +721,7 @@ export function createHttpServer({
           const b = await requestBody(req);
           const { config, revision } = await readConfig(home);
           const { project } = conversationContext(config, conversation, resolve(home, "workspaces", "conversations", id));
-          const messages = groupChatTurns(store.listEvents(id, 0)).flatMap(turn => turn.messages).filter(message => message.kind !== "error");
+          const messages = groupChatTurns(store.listEvents(id, 0, undefined, true)).flatMap(turn => turn.messages).filter(message => message.kind !== "error");
           if(conversation.executionLocation){
             const roots=[project.cwd,...project.resources.filter(resource=>resource.kind==='local').map(resource=>resource.location)];
             const result=await remoteRequest(conversation.executionLocation,id,'local-files.resolve',{cwd:project.cwd,roots,hrefs:b.hrefs,messages:messages.map(message=>message.text)});
@@ -881,7 +881,8 @@ export function createHttpServer({
           const pump = () => {
             if(res.destroyed||res.writableEnded||res.writableNeedDrain)return;
             if(access&&!access.authorize(req)){res.end();return;}
-            const batch=store.listEvents(id,cursor,256,replaying&&recent!==null&&url.searchParams.get('compact')==='1');
+            const batchSize=replaying&&recent!==null?2048:256;
+            const batch=store.listEvents(id,cursor,batchSize,replaying&&recent!==null&&url.searchParams.get('compact')==='1');
             // Idle polls have no content to disclose. Recheck recursive Asset ACL
             // before every nonempty batch, including after an idle period.
             if(batch.length)try {manager.authorizeConversationRead(id);}catch {res.end();return;}
@@ -892,7 +893,7 @@ export function createHttpServer({
               cursor=batch.at(-1)!.id;
               if(!res.write(batch.map(event=>`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`).join('')))return;
             }
-            if(batch.length===256)setImmediate(pump);
+            if(batch.length===batchSize)setImmediate(pump);
             else if (replaying) {
               replaying = false;
               // Even an empty recent window must resume from the same point after a disconnect.

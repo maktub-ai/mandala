@@ -225,9 +225,9 @@ it('compacts history replay while preserving cursor continuity and unabridged li
   }finally{resume.abort();}
  }finally{controller.abort();}
 });
-it('does not repeat snapshot authorization for every socket drain during a large replay',async()=>{
+it.each([600,3600])('bounds snapshot authorization during a %i-event recent replay and socket drains',async(count)=>{
  const chat=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null});
- store.transaction(()=>{for(let i=0;i<600;i++)store.appendEvent(chat.id,'text',{text:'x'.repeat(4096),itemId:String(i)});});
+ store.transaction(()=>{for(let i=0;i<count;i++)store.appendEvent(chat.id,'text',{text:'x'.repeat(4096),itemId:String(i)});});
  const authorize=vi.spyOn(manager,'authorizeConversationRead'),controller=new AbortController();
  const response=await fetch(url+'/api/conversations/'+chat.id+'/events?recent=5',{signal:controller.signal});
  const reader=response.body!.getReader(),decoder=new TextDecoder();let frames='';

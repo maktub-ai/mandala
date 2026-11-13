@@ -1135,7 +1135,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     return groups;
   },[turns,executionResults.items,earlierBefore,events]);
   const chatMessages = useMemo(() => turns.flatMap(turn => turn.messages), [turns]);
-  const verifiedFiles = useVerifiedConversationFiles(chatActive ? selected : "", chatMessages);
+  const verifiedFiles = useVerifiedConversationFiles(chatActive && auxiliaryReady ? selected : "", chatMessages);
   const publishedFiles=usePublishedConversationFiles(chatActive&&auxiliaryReady&&chat?.id===selected?selected:'',chat?.updatedAt??'');
   const operationTasks=useOperationTasks(auxiliaryReady?events:[],selected);
   useLayoutEffect(() => {

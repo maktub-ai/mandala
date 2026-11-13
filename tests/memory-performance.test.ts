@@ -340,3 +340,35 @@ test('profile scheduling yields between scopes so an interactive request can run
  try{await runtime.scan();await new Promise<void>(resolve=>setImmediate(resolve));expect(calls).toBeGreaterThan(2);expect(seen).toBeGreaterThan(0);expect(seen).toBeLessThan(calls);}
  finally{schedule.mockRestore();await runtime.close();}
 });
+
+test('unchanged source snapshots are reused across reads while authority and database changes stay live',()=>{
+ let revoked=false;
+ const authorize=vi.fn(()=>{if(revoked)throw new DomainError('forbidden',403,'forbidden');}),s=setup(authorize),c=s.memory.ensureCollection(root,{projectId:null,agentId:null});
+ s.store.appendEvent(s.chat.id,'user',{text:'Reusable source snapshot'});s.store.appendEvent(s.chat.id,'status',{status:'idle'});
+ const source=s.memory.captureConversation(root,{collectionId:c.id,conversationId:s.chat.id,trigger:'explicit',kind:'request'}).sources[0];
+ s.memory.source(root,source.id);
+ const payload=s.store.database.prepare('SELECT data FROM memory_sources WHERE id=?').get(source.id)!.data,parse=vi.spyOn(JSON,'parse');authorize.mockClear();
+ s.store.database.prepare('UPDATE memory_collections SET data=data WHERE id=?').run(c.id);
+ s.memory.source(root,source.id);s.memory.source(root,source.id);
+ expect(parse.mock.calls.filter(([value])=>value===payload)).toHaveLength(0);expect(authorize).toHaveBeenCalledTimes(2);
+ const snapshot=s.memory.source(root,source.id);expect(()=>{snapshot.text='Mutated cached text';}).toThrow(TypeError);expect(()=>{snapshot.events[0].text='Mutated cached event';}).toThrow(TypeError);
+ expect(s.memory.source(root,source.id).text).not.toContain('Mutated');
+ revoked=true;expect(()=>s.memory.source(root,source.id)).toThrow('forbidden');revoked=false;
+ const retract=s.store.database.prepare("UPDATE memory_sources SET data=json_set(data,'$.status','retracted') WHERE id=?");
+ expect(()=>s.store.transaction(()=>{retract.run(source.id);expect(()=>s.memory.source(root,source.id)).toThrow('source_retracted');throw new Error('rollback snapshot');})).toThrow('rollback snapshot');
+ expect(s.memory.source(root,source.id).status).not.toBe('retracted');
+ retract.run(source.id);expect(()=>s.memory.source(root,source.id)).toThrow('source_retracted');
+ s.store.database.prepare('UPDATE memory_sources SET data=? WHERE id=?').run(payload,source.id);
+ expect(s.memory.source(root,source.id).status).not.toBe('retracted');
+ const other=new DatabaseSync(join(s.store.home,'state.sqlite'));
+ try{other.prepare("UPDATE memory_sources SET data=json_set(data,'$.status','retracted') WHERE id=?").run(source.id);expect(()=>s.memory.source(root,source.id)).toThrow('source_retracted');}
+ finally{other.close();}
+});
+
+test('startup legacy repair skips evidence validation for modern records',()=>{
+ const authorize=vi.fn(),s=setup(authorize),c=s.memory.ensureCollection(root,{projectId:null,agentId:null});
+ const text='A modern fact that needs no legacy repair',event=s.store.appendEvent(s.chat.id,'user',{text});s.store.appendEvent(s.chat.id,'status',{status:'idle'});
+ const source=s.memory.captureConversation(root,{collectionId:c.id,conversationId:s.chat.id,trigger:'explicit',kind:'request'}).sources[0];
+ s.memory.applyProposal(root,{collectionId:c.id,layer:'L1',contentType:'fact',text,operation:'store',replaces:[],evidence:[{sourceId:source.id,sourceRevision:source.revision}],support:[{sourceId:source.id,eventId:event.id,quote:text}],validUntil:null,certainty:'observed'},c.generation,'evidence_extract');
+ authorize.mockClear();expect(s.memory.repairLegacyContexts(root)).toEqual({repaired:0});expect(authorize).not.toHaveBeenCalled();
+});
