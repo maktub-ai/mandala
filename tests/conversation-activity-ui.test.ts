@@ -62,3 +62,15 @@ it.each(['inProgress','failed','interrupted','blocked'])('does not mount %s tool
  const html=render([event(2,'status',{status:'running'}),event(3,'tool',{method:'item/started',params:{item:{id:'call',type:'mcpToolCall',server:'OMP',tool:'bash',arguments:{command:'inspect-private-argument'},result:'Verbose private tool output\nLatest summary',status}}})]);
  expect(html).toContain('aria-expanded="false"');expect(html).not.toContain('operation-content');expect(html).not.toContain('Verbose private tool output');expect(html).not.toContain('<details class="operation-card" open');
 });
+
+it.each([
+ ['native start',event(3,'tool',{method:'turn/started',params:{turn:{id:'t'}}})],
+ ['submission acknowledgement',event(3,'metadata',{status:'loaded',cli:'codex'})],
+])('shows generation rather than CLI startup after %s',(_label,accepted)=>{
+ const html=render([event(2,'status',{status:'running'}),accepted]);
+ expect(html).toContain('正在生成回复');expect(html).not.toContain('正在启动执行端');
+});
+it('retains startup status before the native CLI accepts the request',()=>{
+ const html=render([event(2,'status',{status:'running'}),event(3,'metadata',{status:'applying',cli:'codex'})]);
+ expect(html).toContain('正在启动执行端');
+});

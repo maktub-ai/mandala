@@ -25,7 +25,7 @@ function setup(embed:typeof fixtureMemoryEmbed=fixtureMemoryEmbed,denied=new Set
   return memory.applyProposal(root,{collectionId:collection.id,layer:'L1',contentType,text,operation:'store',replaces:[],evidence:[{sourceId:source.id,sourceRevision:source.revision}],support:[{sourceId:source.id,eventId:event.id,quote:text}],validUntil:null,certainty:'user_asserted',pipeline:'request'},collection.generation,'evidence_extract')!;
  };
  const global=add(null,'I prefer deployment checklists in Chinese.','preference'),own=add('a','Agent A deployment checklist is private.'),other=add('b','Agent B deployment checklist is private.');
- return {memory,recall,global,own,other,add,tasks};
+ return {store,memory,recall,global,own,other,add,tasks};
 }
 for(const query of ['', 'deployment']){
  test(`${query||'blank'} context gives an agentless conversation only injectable global memory while owner inspection stays authorized`,async()=>{
@@ -85,4 +85,17 @@ test('automatic turn recall uses one bounded query and retains authorized lexica
  expect(facts.degraded).toBe(true);
  expect(new Set(facts.items.map(item=>item.recordId))).toEqual(new Set([s.global.recordId,s.own.recordId]));
  expect(scenes?.items).toEqual([]);
+});
+
+test('turn recall validates shared source authority once per synchronous selection, not per returned fact',async()=>{
+ const {vi}=await import('vitest'),s=setup(),principal={...root,agentId:'perf'};
+ const collection=s.memory.ensureCollection(root,{projectId:null,agentId:'perf'}),chat=s.store.createConversation({projectId:'',agentId:'perf',cli:'codex',model:null});
+ const facts=Array.from({length:8},(_,i)=>`The deployment checklist item ${i} is required.`);
+ const event=s.store.appendEvent(chat.id,'user',{text:facts.join(' ')});s.store.appendEvent(chat.id,'status',{status:'idle'});
+ const source=s.memory.captureConversation(root,{collectionId:collection.id,conversationId:chat.id,trigger:'explicit',kind:'request'}).sources[0];
+ for(const text of facts)s.memory.applyProposal(root,{collectionId:collection.id,layer:'L1',contentType:'fact',text,operation:'store',replaces:[],evidence:[{sourceId:source.id,sourceRevision:source.revision}],support:[{sourceId:source.id,eventId:event.id,quote:text}],validUntil:null,certainty:'user_asserted',pipeline:'request'},collection.generation,'evidence_extract');
+ const authorize=vi.spyOn(s.memory.options,'authorizeConversationRead');
+ const [result]=await s.recall.turnContextSearch(principal,{projectId:null,query:'deployment',kinds:['request']},AbortSignal.timeout(1000));
+ expect(result.items.length).toBe(8);
+ expect(authorize.mock.calls.filter(([,id])=>id===source.conversationId).length).toBeLessThanOrEqual(3);
 });

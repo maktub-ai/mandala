@@ -414,7 +414,7 @@ export function createSessionManager(
   };
   const knownSources = (id: string): VersionRef[] => {
     const refs = [...(live.get(id)?.sourceVersions ?? []),...attachmentAssets.lineage(root,id,sourceId=>authorizeExecutionHistory(sourceId),mandalaContextBoundary(store,id)).refs];
-    for (const event of store.listEvents(id,mandalaContextBoundary(store,id))) {
+    for (const event of store.listContextEvents(id,'metadata',mandalaContextBoundary(store,id))) {
       const data=event.data as {memoryRecall?:string;status?:string;entries?:{assetId?:string;versionId?:string}[];actualUse?:string;sourceVersions?:VersionRef[]};
       if (event.kind !== "metadata") continue;
       if (data.memoryRecall && data.status === "completed") for (const entry of data.entries ?? []) if(entry.assetId && entry.versionId) refs.push({assetId:entry.assetId,versionId:entry.versionId});
@@ -675,7 +675,7 @@ export function createSessionManager(
     let memoryContextInstructions = '';
     let inheritedMemory:ReturnType<typeof memoryHistoryReferences> = [];
     let memoryNotices:MemoryChangeNotice[] = [];
-    const recallPlan=planMemoryRecall({request:text,recentRequests:store.listEvents(id,mandalaContextBoundary(store,id)).filter(event=>event.kind==='user').map(event=>(event.data as {text?:string}).text??''),taskRequest:task?tasks.getExecution(root,task.executionId).request:undefined});
+    const recallPlan=planMemoryRecall({request:text,recentRequests:store.listContextEvents(id,'user',mandalaContextBoundary(store,id)).map(event=>(event.data as {text?:string}).text??''),taskRequest:task?tasks.getExecution(root,task.executionId).request:undefined});
     const memoryQuery = recallPlan.query??text;
     const memoryPrincipal = {...root, ...(before.agentId ? {agentId:before.agentId} : {}), ...(task ? {runId:task.id} : {})};
     let handoffSkills:SkillDefinition[]=[];
@@ -1201,7 +1201,7 @@ export function createSessionManager(
       // Local transcript persistence is not native submission acknowledgment.
       if (before.completedAt) store.updateConversation(id,{completedAt:before.completedAt});
       onMessage?.(id);
-      const previousMode = store.listEvents(id, 0).reverse().find(event => event.kind === "metadata" &&
+      const previousMode = store.listContextEvents(id, 'metadata', 0).reverse().find(event => event.kind === "metadata" &&
         ["loaded", "applying"].includes((event.data as { status?: string }).status ?? "") &&
         (event.data as { approvalMode?: string }).approvalMode)?.data as { approvalMode?: string } | undefined;
       if (before.cli === "codex" && approvalMode === "auto")

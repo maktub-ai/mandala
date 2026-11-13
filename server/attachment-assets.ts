@@ -23,7 +23,7 @@ export function createAttachmentAssets(home:string,store:Store,files:ReturnType<
   },
   submittedOrigin(conversationId:string,attachmentId:string,authorize:(id:string)=>void){
    authorize(conversationId);let current=store.getConversation(conversationId),origin=conversationId;
-   const find=(id:string,through=Infinity)=>store.listEvents(id,0).find(event=>event.kind==='user'&&event.id<=through&&((event.data as {attachments?:{id:string}[]}).attachments??[]).some(item=>item.id===attachmentId));
+   const find=(id:string,through=Infinity)=>store.listContextEvents(id,'user',0).find(event=>event.id<=through&&((event.data as {attachments?:{id:string}[]}).attachments??[]).some(item=>item.id===attachmentId));
    let scope=(find(origin)?.data as {fileScope?:{agentId?:string;projectId?:string}}|undefined)?.fileScope??{};
    const visited=new Set([conversationId]);
    while(current?.branchedFrom){const parent=current.branchedFrom;if(visited.has(parent.conversationId))throw new DomainError('attachment_origin_cycle',403,'Invalid attachment origin');visited.add(parent.conversationId);authorize(parent.conversationId);const event=find(parent.conversationId,parent.eventId);if(!event)break;
@@ -33,7 +33,7 @@ export function createAttachmentAssets(home:string,store:Store,files:ReturnType<
   },
   lineage(p:Principal,conversationId:string,authorize:(id:string)=>void,after=0){
    const refs:VersionRef[]=[];let complete=true;
-   for(const event of store.listEvents(conversationId,after)){if(event.kind!=='user')continue;
+   for(const event of store.listContextEvents(conversationId,'user',after)){
     for(const item of (event.data as {attachments?:{id:string}[]}).attachments??[]){let link;try{const origin=service.submittedOrigin(conversationId,item.id,authorize);link=row(p,origin.conversationId,item.id);}catch{complete=false;continue;}
      if(!link||link.state!=='imported'){complete=false;continue;}refs.push({assetId:link.asset_id as string,versionId:link.version_id as string});
     }
