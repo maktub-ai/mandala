@@ -365,3 +365,19 @@ it('bounds Agent history in SQL before decoding and preserves snapshots and curs
     parse.mockRestore();
   } finally { vi.restoreAllMocks(); store.close(); rmSync(home, { recursive: true, force: true }); }
 });
+
+it('reads only requested context event kinds while retaining order, cursor and history replacement semantics',()=>{
+ const home=mkdtempSync(join(tmpdir(),'mana-context-events-')),store=openStore(home);
+ try{
+  const chat=store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null});
+  const first=store.appendEvent(chat.id,'user',{text:'first'});
+  const old=store.appendEvent(chat.id,'metadata',{status:'loaded',cli:'codex'});
+  store.database.prepare('UPDATE events SET superseded=1 WHERE id=?').run(old.id);
+  store.appendEvent(chat.id,'text',{text:'unrelated output'});
+  const latest=store.appendEvent(chat.id,'metadata',{actualUse:'acknowledged'});
+  const next=store.appendEvent(chat.id,'user',{text:'second'});
+  expect(store.listContextEvents(chat.id,'user',first.id)).toEqual([next]);
+  expect(store.listContextEvents(chat.id,'metadata',0)).toEqual([latest]);
+  expect(store.listContextEvents(chat.id,'user',next.id)).toEqual([]);
+ }finally{store.close();rmSync(home,{recursive:true,force:true});}
+});

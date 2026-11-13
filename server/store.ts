@@ -34,6 +34,7 @@ export interface Store {
   setAutomaticTitle(id: string, title: string): boolean;
   appendEvent(id: string, kind: EventKind, data: unknown, observedAt?: string): DisplayEvent;
   listEvents(id: string, afterId: number, limit?: number, compact?: boolean): DisplayEvent[];
+  listContextEvents(id: string, kind: 'user' | 'metadata', afterId: number): DisplayEvent[];
   historyWindowStart(id: string, before: number, turns: number): number | null;
   listEarlierEvents(id: string, from: number, before: number, compact?: boolean): DisplayEvent[];
   listAgentHistory(id: string, afterId: number, latest: boolean): DisplayEvent[];
@@ -162,6 +163,10 @@ export function openStore(home: string, maintenanceToken?:symbol): Store {
       INSERT INTO event_revisions SELECT NEW.conversationId,1 WHERE NEW.conversationId!=OLD.conversationId
         ON CONFLICT(conversation_id) DO UPDATE SET revision=revision+1;
     END;`);
+  db.exec(`CREATE INDEX IF NOT EXISTS events_native_context_reset ON events(conversationId,id)
+    WHERE kind='metadata' AND json_extract(data,'$.nativeContextReset.reason')='receipt_access_revoked'`);
+  db.exec(`CREATE INDEX IF NOT EXISTS events_context ON events(conversationId,kind,id)
+    WHERE superseded=0 AND kind IN ('user','metadata')`);
   db.exec(`CREATE INDEX IF NOT EXISTS events_memory_history ON events(conversationId,id)
     WHERE kind='metadata' AND superseded=0 AND
       (json_type(data,'$.memoryUse') IS NOT NULL OR json_type(data,'$.memoryHistory') IS NOT NULL OR json_type(data,'$.memoryRecall') IS NOT NULL)`);
@@ -340,6 +345,10 @@ export function openStore(home: string, maintenanceToken?:symbol): Store {
         )
         .all(conversationId, afterId, ...(compact ? [Number.MAX_SAFE_INTEGER] : []), limit ?? -1)
         .map(decodeEvent);
+    },
+    listContextEvents(conversationId, kind, afterId) {
+      return db.prepare("SELECT id,conversationId,kind,data,createdAt FROM events WHERE conversationId=? AND kind=? AND id>? AND superseded=0 AND kind IN ('user','metadata') ORDER BY id")
+        .all(conversationId, kind, afterId).map(decodeEvent);
     },
     historyWindowStart(id, before, turns) {
       const anchors = db.prepare(`SELECT id, kind, json_extract(data,'$.runId') AS runId FROM events AS e

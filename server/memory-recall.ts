@@ -20,14 +20,14 @@ export function createMemoryRecall(memory:MemoryStore,options:MemoryVectorOption
   try{memory.validateReferences(p,{projectId:input.projectId,items:[{recordId:r.recordId,revision:r.revision}]});return true;}
   catch(error){if(error instanceof DomainError)return false;throw error;}
  };
- const pool=(p:Principal,input:RecallInput,generation=false,context=false)=>memory.withAuthorityQuery(()=>{memory.principal(p);return memory.list(p,{projectId:input.projectId,taskId:input.taskId,conversationId:input.conversationId,status:'active'}).filter(r=>(r.layer!=='L3'||r.profileScope?.projectId===input.projectId&&r.profileScope?.agentId===(p.agentId??null)&&r.recordId===memory.profileId(r.profileScope))&&readable(input,r,generation)&&(!input.layers||input.layers.includes(r.layer))&&(!input.kinds||input.kinds.some(kind=>(r.pipelines??['request']).includes(kind)))&&(!r.validUntil||Date.parse(r.validUntil)>Date.now())&&(!context||injectable(p,input,r)));});
+ const pool=(p:Principal,input:RecallInput,generation=false,context=false)=>memory.withAuthorityQuery(()=>{memory.principal(p);return memory.list(p,{projectId:input.projectId,taskId:input.taskId,conversationId:input.conversationId,status:'active',...(input.layers?.length===1?{layer:input.layers[0]}:{})}).filter(r=>(r.layer!=='L3'||r.profileScope?.projectId===input.projectId&&r.profileScope?.agentId===(p.agentId??null)&&r.recordId===memory.profileId(r.profileScope))&&readable(input,r,generation)&&(!input.layers||input.layers.includes(r.layer))&&(!input.kinds||input.kinds.some(kind=>(r.pipelines??['request']).includes(kind)))&&(!r.validUntil||Date.parse(r.validUntil)>Date.now())&&(!context||injectable(p,input,r)));});
  const current=(p:Principal,input:RecallInput,r:MemoryRevision,generation=false,context=false):MemoryRevision|undefined=>{
   if(options.signal?.aborted||!readable(input,r,generation))return;
   try{return memory.withAuthorityQuery(()=>{const value=memory.read(p,r.recordId,input.projectId);return value.status==='active'&&semanticHash(value)===semanticHash(r)&&(!value.validUntil||Date.parse(value.validUntil)>Date.now())&&(!context||injectable(p,input,value))?value:undefined;});}catch(error){if(!(error instanceof DomainError))throw error;}
  };
  const finish=(p:Principal,input:RecallInput,candidates:MemoryCandidate[],budget:number,indexLag=0,degraded=false,context=false):RecallResult=>{
   const items:MemoryHit[]=[];let length=context?2:0;
-  for(const candidate of candidates){
+  memory.withAuthorityQuery(()=>{for(const candidate of candidates){
    if(items.length===8)break;
    const r=current(p,input,candidate.record,false,context);if(!r||r.revision!==candidate.record.revision)continue;
    const method=candidate.reason==='scope_summary'?'范围内有效摘要':candidate.reason==='exact'?'ID/路径精确匹配':candidate.reason==='semantic_anchor'?'本地语义首位保留；BM25＋本地向量 RRF融合':candidate.reason==='hybrid_rrf'?'BM25＋本地向量 RRF融合':candidate.reason==='vector'?'本地语义向量匹配':'BM25匹配';
@@ -35,6 +35,7 @@ export function createMemoryRecall(memory:MemoryStore,options:MemoryVectorOption
    const size=context?unicodeLength(JSON.stringify(summarizeMemoryHit(hit,input.query)))+(items.length?1:0):unicodeLength(r.text);
    if(length+size>budget)continue;length+=size;items.push(hit);
   }
+  });
   for(const item of items.filter(r=>r.layer==='L2'&&r.semanticKey?.startsWith('scene.')))db.prepare('INSERT INTO memory_scene_hits VALUES(?,?,?) ON CONFLICT(collection_id,semantic_key) DO UPDATE SET hits=hits+1').run(item.collectionId,item.semanticKey!,parseSceneBlock(item.text,item.recordId).meta.heat+1);
   return {items,indexLag,degraded};
  };
