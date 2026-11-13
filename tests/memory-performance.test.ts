@@ -277,7 +277,7 @@ test('idle background scans do not rebuild unchanged transcripts, while new cont
  }finally{await runtime.close();}
 });
 
-test('a background scheduling pass validates shared event content once across project Agent scopes',async()=>{
+test('background scheduling bounds shared event validation within each yielding scope',async()=>{
  const s=setup(),config={version:2 as const,projects:[{id:'p',name:'Project',cwd:'',agentIds:['a','b'],resources:[],skills:[],mcp:[]}],agents:['a','b'].map(id=>({id,name:id,instructions:'',defaultCli:'codex' as const,models:{},skills:[],mcp:[]}))};
  const runtime=createMemoryRuntime({home:join(tmpdir(),'unused-synthetic-home'),store:s.store,loadConfig:async()=>config});
  const chat=s.store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null}),data={text:'Shared project scheduling evidence'};
@@ -287,7 +287,7 @@ test('a background scheduling pass validates shared event content once across pr
  runtime.memory.applyProposal(root,{collectionId:c.id,layer:'L1',contentType:'fact',text:data.text,operation:'store',replaces:[],evidence:[{sourceId:source.id,sourceRevision:source.revision}],support:[{sourceId:source.id,eventId:event.id,quote:data.text}],validUntil:null,certainty:'observed'},c.generation,'evidence_extract');
  try{
   await runtime.scan();const parse=vi.spyOn(JSON,'parse'),all=vi.spyOn(runtime.memory,'listAll');
-  await runtime.scan();expect(all).not.toHaveBeenCalled();expect(parse.mock.calls.filter(call=>call[0]===JSON.stringify(data)).length).toBeLessThanOrEqual(1);
+  await runtime.scan();expect(all).not.toHaveBeenCalled();expect(parse.mock.calls.filter(call=>call[0]===JSON.stringify(data)).length).toBeLessThanOrEqual(3);
  }finally{await runtime.close();}
 });
 
@@ -328,4 +328,15 @@ test('background memory work leaves the initial startup turn free and starts on 
   runtime.start();expect(loadConfig).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(1000);expect(loadConfig).toHaveBeenCalled();
  }finally{await runtime.close();vi.useRealTimers();}
+});
+
+
+test('profile scheduling yields between scopes so an interactive request can run',async()=>{
+ const s=setup();
+ for(let i=0;i<8;i++)s.store.createConversation({projectId:'',agentId:'profile-'+i,cli:'codex',model:null});
+ const runtime=createMemoryRuntime({home:s.store.home,store:s.store,loadConfig:async()=>({version:2 as const,projects:[],agents:[],system:{memory:{request:{generate:true,read:true},session:{generate:false,read:false}}}})});
+ let calls=0,seen=-1;
+ const schedule=vi.spyOn(runtime.profiles,'schedule').mockImplementation(()=>{if(++calls===1)setImmediate(()=>{seen=calls;});return null;});
+ try{await runtime.scan();await new Promise<void>(resolve=>setImmediate(resolve));expect(calls).toBeGreaterThan(2);expect(seen).toBeGreaterThan(0);expect(seen).toBeLessThan(calls);}
+ finally{schedule.mockRestore();await runtime.close();}
 });

@@ -193,14 +193,16 @@ export function createMemoryRuntime({home,store,loadConfig,generate=nativeGenera
    }
    await yieldToRequests();
    if(!closed&&epoch===settingsEpoch&&settings.request.generate){
-    memory.withAuthorityQuery(()=>{
-    scheduler?.scan(now);
+    memory.withAuthorityQuery(()=>scheduler?.scan(now));
     // Discover scheduling addresses without materializing every record's evidence.
     // profiles.schedule still validates the scoped records against live authority.
     const storedScopes=store.database.prepare("SELECT DISTINCT json_extract(data,'$.profileScope') AS scope FROM memory_records WHERE json_type(data,'$.profileScope')='object'").all().map(row=>JSON.parse(row.scope as string) as MemoryProfileScope);
     const scopes=[...memory.collections(root).filter(c=>c.projectId===null).map(c=>({projectId:c.projectId,agentId:c.agentId})),...storedScopes,...store.listConversations().map(chat=>({projectId:chat.projectId||null,agentId:chat.agentId||null})),...(configCache?.projects??[]).flatMap(project=>project.agentIds.map(agentId=>({projectId:project.id,agentId})))];
-    for(const scope of new Map(scopes.map(scope=>[JSON.stringify(scope),scope])).values())try{profiles.schedule(scope,new Date(now).toISOString());}catch(error){if(!(error instanceof DomainError))throw error;}
-    });
+    for(const scope of new Map(scopes.map(scope=>[JSON.stringify(scope),scope])).values()){
+     if(closed||epoch!==settingsEpoch)return;
+     try{memory.withAuthorityQuery(()=>profiles.schedule(scope,new Date(now).toISOString()));}catch(error){if(!(error instanceof DomainError))throw error;}
+     await yieldToRequests();
+    }
    }
   })().finally(()=>{scanning=undefined;});return scanning;
  }

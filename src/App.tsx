@@ -694,15 +694,6 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       stream.close();
     };
   }, [selected, chatActive]);
-  useLayoutEffect(() => {
-    const viewport = bottom.current?.closest('.conversation');
-    const anchor = historyAnchor.current;
-    historyAnchor.current = null;
-    if (!viewport) return;
-    if (followLatest.current) viewport.scrollTop = viewport.scrollHeight;
-    else if (anchor?.element.isConnected) viewport.scrollTop += anchor.element.getBoundingClientRect().top - anchor.top;
-    lastScrollTop.current = viewport.scrollTop;
-  }, [events, approvals.length, historyReady]);
   const busy =
     pending || chat?.status === "running" || chat?.status === "approval";
   const project = config.projects.find((p) => p.id === projectId),
@@ -1143,6 +1134,19 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     }
     return groups;
   },[turns,executionResults.items,earlierBefore,events]);
+  const chatMessages = useMemo(() => turns.flatMap(turn => turn.messages), [turns]);
+  const verifiedFiles = useVerifiedConversationFiles(chatActive ? selected : "", chatMessages);
+  const publishedFiles=usePublishedConversationFiles(chatActive&&auxiliaryReady&&chat?.id===selected?selected:'',chat?.updatedAt??'');
+  const operationTasks=useOperationTasks(auxiliaryReady?events:[],selected);
+  useLayoutEffect(() => {
+    const viewport = bottom.current?.closest('.conversation');
+    const anchor = historyAnchor.current;
+    historyAnchor.current = null;
+    if (!viewport) return;
+    if (followLatest.current) viewport.scrollTop = viewport.scrollHeight;
+    else if (anchor?.element.isConnected) viewport.scrollTop += anchor.element.getBoundingClientRect().top - anchor.top;
+    lastScrollTop.current = viewport.scrollTop;
+  }, [events, approvals.length, historyReady, executionResults.items, operationTasks.tasks]);
   const focusedExecution=useRef('');
   useLayoutEffect(()=>{
     const runId=new URLSearchParams(location.search).get('run');
@@ -1158,10 +1162,6 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     const viewport=target.closest<HTMLElement>('.conversation');
     if(viewport)viewport.scrollTop+=target.getBoundingClientRect().top-viewport.getBoundingClientRect().top;
   },[selected,historyReady,events,routeLocation,earlierState]);
-  const chatMessages = useMemo(() => turns.flatMap(turn => turn.messages), [turns]);
-  const verifiedFiles = useVerifiedConversationFiles(chatActive ? selected : "", chatMessages);
-  const publishedFiles=usePublishedConversationFiles(chatActive&&auxiliaryReady&&chat?.id===selected?selected:'',chat?.updatedAt??'');
-  const operationTasks=useOperationTasks(auxiliaryReady?events:[],selected);
   const publishedFilesByRun=useMemo(()=>new Map([['',publishedFiles],...[...new Set(publishedFiles.flatMap(file=>file.runId?[file.runId]:[]))].map(runId=>[runId,publishedFiles.filter(file=>!file.runId||file.runId===runId)] as const)]),[publishedFiles]);
   // Read only when the context popover opens.
   const loadChatFiles = useCallback(() => conversationFiles(chatMessages, selected, verifiedFiles), [chatMessages, selected, verifiedFiles]);

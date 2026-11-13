@@ -405,7 +405,7 @@ export function createHttpServer({
         return json(res, 200, { path: directory, parent: dirname(directory) === directory ? null : dirname(directory),
           home: homedir(), breadcrumbs, entries });
       }
-      if(path==='/api/mandala/goals'&&method==='GET')return json(res,200,manager.coordination.list().map(own=>({...own,task:manager.taskService.getTask(workspacePrincipal(store),own.taskId)})));
+      if(path==='/api/mandala/goals'&&method==='GET')return json(res,200,readScope(()=>manager.coordination.list().map(own=>({...own,task:manager.taskService.getTask(workspacePrincipal(store),own.taskId)}))));
       if(path==='/api/mandala/proposals'&&method==='GET'){
         const id=string(url.searchParams.get('conversationId'));manager.authorizeConversationRead(id);return json(res,200,manager.coordination.proposals(id));
       }
@@ -637,7 +637,7 @@ export function createHttpServer({
       const agentMessagePath=path.match(/^\/api\/agent-messages\/([a-zA-Z0-9_-]+)$/);
       if(agentMessagePath&&method==='GET')return json(res,200,manager.getAgentMessage(agentMessagePath[1]));
       if (path === "/api/tasks") {
-        if (method === "GET") return json(res, 200, manager.listTasks(url.searchParams.get("projectId") ?? undefined,url.searchParams.get("view")==="control"));
+        if (method === "GET") return json(res, 200, readScope(()=>manager.listTasks(url.searchParams.get("projectId") ?? undefined,url.searchParams.get("view")==="control")));
         if (method === "POST") {
           const b = await requestBody(req);
           return json(res, 201, await manager.createTask(
@@ -655,7 +655,7 @@ export function createHttpServer({
         const conversation = store.getConversation(id);
         if (!conversation) throw new Error("conversation not found");
         if(method==='GET'||method==='POST'&&['workspace-file','local-file','local-files','attachments','model','queue','fork','branch','edit','messages','continue','questions','title','memory'].includes(action??''))manager.authorizeConversationRead(id);
-        if(action==='results'&&method==='GET')return json(res,200,conversationResults(store,manager.taskService,{userId:store.ownerUserId},id,manager.authorizeConversationRead));
+        if(action==='results'&&method==='GET')return json(res,200,readScope(()=>conversationResults(store,manager.taskService,{userId:store.ownerUserId},id,manager.authorizeConversationRead)));
         if (action === "reference-summary" && method === "GET") return json(res,200,await manager.listReferenceSummary(id,url.searchParams.get("view")==="outputs"));
         const recentTurns = () => {
           const recent = Number(url.searchParams.get('recent'));
