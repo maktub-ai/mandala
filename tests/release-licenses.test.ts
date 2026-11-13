@@ -30,6 +30,7 @@ it('ships project and original bundled third-party terms without collecting dev 
       'LICENSE': 'project terms', 'THIRD_PARTY_NOTICES.md': 'separate upstream rights',
       'package-lock.json': JSON.stringify({packages: {'': {}, 'node_modules/box': {version: '1', license: 'Unlicense'}, 'node_modules/readme-only': {version: '2', license: 'MIT'}, 'node_modules/dev': {version: '1', license: 'MIT', dev: true}}}),
       'node_modules/readme-only/README.md': 'Package documentation\nCopyright Original Author\nMIT permission and warranty terms',
+      'node_modules/box/THIRD_PARTY_NOTICES.md': 'original embedded patch terms',
       'node_modules/box/LICENSE': 'original box terms', 'node_modules/dev/LICENSE': 'dev only',
       'server/vendor/tencentdb/LICENSE': 'vendor terms',
       'src/assets/fonts/Inter-LICENSE.txt': 'font terms',
@@ -46,6 +47,7 @@ it('ships project and original bundled third-party terms without collecting dev 
     expect(await readFile(join(root, 'output/licenses/assets/third-party-notices/CodeGraph-1.2.0-LICENSE.txt'), 'utf8')).toBe('original graph MIT terms');
     expect(await readFile(join(root, 'output/licenses/assets/third-party-notices/Node-24.16.0-LICENSE.txt'), 'utf8')).toBe('original sidecar Node terms');
     expect(await readFile(join(root, 'output/licenses/dependencies/box/LICENSE'), 'utf8')).toBe('original box terms');
+    expect(await readFile(join(root, 'output/licenses/dependencies/box/THIRD_PARTY_NOTICES.md'), 'utf8')).toBe('original embedded patch terms');
     expect(await readFile(join(root, 'output/licenses/assets/server/vendor/tencentdb/LICENSE'), 'utf8')).toBe('vendor terms');
     expect(await readFile(join(root, 'output/licenses/assets/src/assets/fonts/EBGaramond-OFL.txt'), 'utf8')).toBe('original OFL terms');
     expect(await readFile(join(root, 'output/licenses/dependencies/readme-only/README.md'), 'utf8')).toBe(files['node_modules/readme-only/README.md']);

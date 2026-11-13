@@ -7,7 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync, type SpawnOptionsWithoutStdio, type ChildProcessWithoutNullStreams } from 'node:child_process';
 export function resolveNativeCli(command: string, env: NodeJS.ProcessEnv = process.env): string {
   const windows = process.platform === 'win32';
-  const extensions = windows ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(value => value.toLowerCase()).filter(value => ['.com','.exe','.bat','.cmd'].includes(value)) : [''];
+  if (isAbsolute(command) || windows && win32.isAbsolute(command)) {
+    try { if (statSync(command).isFile()) { accessSync(command, constants.X_OK); return command; } } catch {}
+    throw Object.assign(new Error(`${command} not found`), { code: 'ENOENT' });
+  }
+  const extensions = windows && /\.(?:com|exe|bat|cmd)$/i.test(command) ? [''] : windows ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(value => value.toLowerCase()).filter(value => ['.com','.exe','.bat','.cmd'].includes(value)) : [''];
   for (const entry of (env.PATH ?? env.Path ?? '').split(windows ? ';' : delimiter)) {
     const directory = entry.replace(/^"(.*)"$/, '$1');
     if (!directory || !isAbsolute(directory)) continue;

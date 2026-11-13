@@ -1,5 +1,5 @@
-import { AgentSideConnection, ndJsonStream, type ContentBlock } from "@agentclientprotocol/sdk";
-import { PassThrough, Readable, Writable } from "node:stream";
+import type { ContentBlock } from "@agentclientprotocol/sdk";
+import { createAcpAgentFixture } from "./helpers/acp-agent";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,6 +14,7 @@ import type { OmpOptions } from "../server/omp";
 import type { Config, Cli } from "../shared/types";
 vi.mock("../server/native-runtime", () => ({ startNativeRuntime: vi.fn() }));
 
+const agentFixtures: Awaited<ReturnType<typeof createAcpAgentFixture>>[] = [];
 let home: string, store: Store, manager: SessionManager | undefined, config: Config;
 let received: string[], inputs: string[], options: CodexOptions, turn: number;
 const nativeId = "response-style-session";
@@ -51,7 +52,7 @@ beforeEach(async () => {
   config = { version: 2, runtimes: [...runtimeIds], projects: [{ id: "p", name: "Synthetic project", cwd: home, agentIds: ["a"], resources: [], mcp: [], skills: [] }],
     agents: [{ id: "a", name: "Synthetic Agent", instructions: "Keep this Agent instruction", defaultCli: "codex", models: {}, mcp: [], skills: [] }] };
 });
-afterEach(async () => { await manager?.close(); manager = undefined; store.close(); await rm(home, { recursive: true, force: true }); vi.clearAllMocks(); });
+afterEach(async () => { await manager?.close(); manager = undefined; await Promise.all(agentFixtures.splice(0).map(agent => agent.close())); store.close(); await rm(home, { recursive: true, force: true }); vi.clearAllMocks(); });
 
 it("accepts all styles without narrowing the five Runtime schema, and rejects invalid values before writing", async () => {
   config.runtimeDefaults = { gemini: { args: [] }, claude: { args: [] }, opencode: { args: [] } };
@@ -126,8 +127,7 @@ it.each(["claude", "gemini", "opencode"] as const)("%s ACP wire prompt includes 
   const prompts: ContentBlock[][] = [];
   vi.mocked(startNativeRuntime).mockImplementation(async (actualCli, callbacks) => {
     expect(actualCli).toBe(cli);
-    const input = new PassThrough(), output = new PassThrough();
-    new AgentSideConnection(client => ({
+    const agent = await createAcpAgentFixture(client => ({
       authenticate: async () => ({}),
       initialize: async () => ({ protocolVersion: 1, agentCapabilities: { loadSession: true } }),
       newSession: async () => ({ sessionId: "wire-session" }), loadSession: async () => ({}), cancel: async () => {},
@@ -136,18 +136,19 @@ it.each(["claude", "gemini", "opencode"] as const)("%s ACP wire prompt includes 
         await client.sessionUpdate({ sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Native wire answer" } } });
         return { stopReason: "end_turn" as const };
       },
-    }), ndJsonStream(Writable.toWeb(input), Readable.toWeb(output) as ReadableStream<Uint8Array>));
-    return connectAcp(ndJsonStream(Writable.toWeb(output), Readable.toWeb(input) as ReadableStream<Uint8Array>), callbacks, () => { input.destroy(); output.destroy(); });
+    }));
+    agentFixtures.push(agent);
+    return connectAcp({ ...callbacks, runtimeCli: cli }, agent.command);
   });
   config.agents[0].defaultCli = cli; config.responseStyle = "concise";
   manager = createSessionManager(store, async () => structuredClone(config), undefined, undefined, home);
   const chat = await manager.create("p", "a", undefined, cli);
   await manager.send(chat.id, "Original user input");
-  await expect.poll(() => store.getConversation(chat.id)?.status).toBe("idle");
+  await expect.poll(() => store.getConversation(chat.id)?.status,{timeout:5000}).toBe("idle");
   config.responseStyle = "explanatory";
   await manager.close(); manager = createSessionManager(store, async () => structuredClone(config), undefined, undefined, home);
   await manager.continue(chat.id, "Resumed user input");
-  await expect.poll(() => store.getConversation(chat.id)?.status).toBe("idle");
+  await expect.poll(() => store.getConversation(chat.id)?.status,{timeout:5000}).toBe("idle");
   const texts = prompts.map(prompt => prompt[0].type === "text" ? prompt[0].text : "");
   expect(texts).toHaveLength(2);
   for (const text of texts) { expect(text).toMatch(/^<mandala-context>\n/); expect(text).toContain("You are an AI assistant running inside Mandala"); expect(text).toContain("Keep this Agent instruction"); expect(text.match(/Response style: /g)).toHaveLength(1); }

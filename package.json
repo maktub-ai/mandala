@@ -51,6 +51,7 @@
     "@tencentdb-agent-memory/tcvdb-text": "0.1.1",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
+    "acpx": "https://github.com/maktub-ai/acpx/releases/download/v0.22.0-mandala.1/acpx-0.22.0-mandala.1.tgz",
     "class-variance-authority": "0.7.1",
     "cn": "^0.5.0",
     "cross-spawn": "7.0.6",

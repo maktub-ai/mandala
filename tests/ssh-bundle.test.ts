@@ -1,6 +1,7 @@
 import {expect,it} from 'vitest';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import {pathToFileURL} from 'node:url';
 import {mkdtemp,cp,rm,readFile,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
@@ -12,6 +13,8 @@ it('builds relocatable service/CLI bundles and executes a bound mailbox command 
  try{
   const bundle=join(root,'bundle');await cp(resolve('release/ssh-runner'),bundle,{recursive:true});
   expect(await readFile(join(bundle,'pi-permission-extension.mjs'),'utf8')).toContain('mandala-permission-gate');
+  const loaded=await exec(process.execPath,['--input-type=module','-e',`const runner=await import(${JSON.stringify(pathToFileURL(join(bundle,'ssh-runner.mjs')).href)});console.log(typeof runner.runSshDaemon,typeof runner.attachSshDaemon);`],{cwd:root,timeout:5000});
+  expect(loaded.stdout.trim()).toBe('function function');
   const help=await exec(process.execPath,[join(bundle,'mandala.mjs'),'--help']);expect(help.stdout).toContain('memory search');
   const calls:any[]=[];runtime=await createBusinessCliRuntime(root,'inv',{baseUrl:'http://127.0.0.1:1',token:'mailbox-only'},async request=>{calls.push(request);return {records:[]};},join(bundle,'mandala.mjs'));
   const result=await exec(process.execPath,[join(bundle,'mandala.mjs'),'memory','search','--data','{"query":"past decision"}','--key','stable-key'],{env:{...process.env,MANDALA_CONTEXT:runtime.contextFile},timeout:5000});

@@ -1,8 +1,8 @@
 import {openClawNativeSettings} from './gateway-native';
 import { canApproveAcpLocally } from './approval-policy';
 import type { TurnOptions } from "../shared/chat-input";
-import { ClientSideConnection, ndJsonStream, type Stream, type SessionConfigOption, type SessionNotification, type RequestPermissionResponse, type McpServer as AcpMcpServer, type ContentBlock } from '@agentclientprotocol/sdk';
-import { Readable, Writable } from 'node:stream';
+import type { SessionConfigOption, SessionNotification, RequestPermissionRequest, RequestPermissionResponse, McpServer as AcpMcpServer, ContentBlock } from '@agentclientprotocol/sdk';
+import {createAcpRuntime,createAgentRegistry,type AcpRuntimeHandle,type AcpRuntimeTurn,type AcpSessionRecord,type AcpRuntimeEvent} from 'acpx/runtime';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import {join} from 'node:path';
@@ -18,21 +18,7 @@ const bounded = async <T>(promise: Promise<T>,timeout=15000): Promise<T> => {
  try { return await Promise.race([promise,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('ACP setup timed out')),timeout);})]); }
  finally {clearTimeout(timer!);}
 };
-export async function connectAcp(stream: Stream, options: CodexOptions & {nativeModel?:ModelChoice;runtimeCli?:Cli}, stop: ()=>void|Promise<void>): Promise<CodexClient> {
- // Older agents still return `models`; the current SDK strips that legacy field.
- // Carry it in protocol metadata before SDK validation, without weakening validation.
- stream={...stream,readable:stream.readable.pipeThrough(new TransformStream({transform(message,controller){
-  if(options.runtimeCli==='codebuddy'&&'method' in message&&message.method==='session/request_permission'){
-   const params=message.params as {options?:{optionId:string;kind:string}[]}|undefined;
-   if(params?.options)params.options=params.options.map(option=>({...option,kind:option.kind==='allow'&&option.optionId==='allow_once'?'allow_once':option.kind==='allow'&&option.optionId==='allow_session'?'allow_always':option.kind==='reject'&&option.optionId==='deny'?'reject_once':option.kind}));
-  }
-  if('result' in message&&message.result&&typeof message.result==='object'&&!Array.isArray(message.result)){
-   const result=message.result as Record<string,unknown>;
-   if(result.models)result._meta={...(result._meta as object??{}),mandalaLegacyModels:result.models};
-  }
-  controller.enqueue(message);
- }}))};
- const restrictedMeta=options.safeSystem?{_meta:{claudeCode:{options:{tools:[],settingSources:[],persistSession:false,settings:{disableAllHooks:true},mcpServers:{}}}}}:{};
+export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoice;runtimeCli:Cli}, command:string[]): Promise<CodexClient> {
  let sessionId='', instructions='', active: {id:string;mode:ApprovalMode;cancelled:boolean;promptStarted?:boolean;wholeTurnApproved?:boolean;sawOutput?:boolean;gatewayFailure?:string}|undefined, closed=false;
  let configuration: SessionConfigOption[]=[];
  let legacyModels:ModelChoice[]=[];
@@ -75,7 +61,7 @@ export async function connectAcp(stream: Stream, options: CodexOptions & {native
    calls.set(u.toolCallId,item);emit(item.status==='inProgress'?'item/started':'item/completed',{item});
   }
  };
- const connection=new ClientSideConnection(()=>({sessionUpdate:update,requestPermission:async request=>{
+ const requestPermission=async(request:RequestPermissionRequest):Promise<RequestPermissionResponse>=>{
   if(closed||!active||active.cancelled||request.sessionId!==sessionId)return {outcome:{outcome:'cancelled'}};
   if(options.safeSystem){options.onApproval({id:randomUUID(),method:'acp/permission',params:{threadId:sessionId,toolCall:request.toolCall}});return {outcome:{outcome:'cancelled'}};}
   const once=request.options.find(option=>option.kind==='allow_once');
@@ -85,18 +71,83 @@ export async function connectAcp(stream: Stream, options: CodexOptions & {native
    permissions.set(id,{resolve,allowed:new Set(request.options.filter(o=>o.kind==='allow_once'||o.kind==='allow_always'||o.kind==='reject_once').map(o=>o.optionId))});
    options.onApproval({id,method:'acp/permission',params:{threadId:sessionId,turnId:active!.id,title:request.toolCall.title??'ACP tool',itemId:request.toolCall.toolCallId,toolCall:request.toolCall,options:request.options}});
   });
- }}),stream);
+ };
+ const cli=options.runtimeCli, gatewayBacked=cli==='hermes'||cli==='openclaw';
+ const setupTimeout=gatewayBacked?45000:15000,lifetime=new AbortController();
+ let handle:AcpRuntimeHandle|undefined,nativeTurn:AcpRuntimeTurn|undefined,servers:AcpMcpServer[]=[],stderr='';
+ // Mandala persists native session IDs. acpx records only cache this connection;
+ // every later attachment explicitly resumes the same native session.
+ const records=new Map<string,AcpSessionRecord>();
+ const agentPids=new Set<number>();
+ const runtime=createAcpRuntime({
+  cwd:options.cwd,agentRegistry:createAgentRegistry({overrides:{[cli]:command}}),probeAgent:cli,
+  sessionStore:{async load(id){const record=records.get(id);return record?structuredClone(record):undefined;},async save(record){records.set(record.acpxRecordId,structuredClone(record));}},
+  agentProcessEnv:options.env,timeoutMs:setupTimeout,permissionMode:'deny-all',nonInteractivePermissions:'deny',fs:false,terminal:false,
+  mcpServers:()=>servers,
+  processLifecycle:{onExit(exit){
+   const agent=agentPids.delete(exit.pid);
+   if(!agent||closed||exit.scope.kind!=='runtime-session'||exit.scope.sessionKey!==handle?.sessionKey)return;
+   cancelPermissions();options.onExit(runtimeError('ACP connection closed',stderr,options.env??{}));
+  }},
+  sessionRequestMeta:options.safeSystem?()=>({claudeCode:{options:{tools:[],settingSources:[],persistSession:false,settings:{disableAllHooks:true},mcpServers:{}}}}):undefined,
+  spawnAgent({command,args,options:launch}){
+   lifetime.signal.throwIfAborted();
+   const child=spawn(command,args,{...launch,stdio:'pipe'});
+   // acpx also owns --version/--help probes; only piped-stdin ACP agents
+   // represent the conversation connection, even when they share its scope.
+   if(!(Array.isArray(launch.stdio)&&launch.stdio[0]==='ignore'))child.once('spawn',()=>{if(child.pid)agentPids.add(child.pid);});
+   const stop=()=>{child.kill('SIGTERM');};
+   lifetime.signal.addEventListener('abort',stop,{once:true});
+   child.once('close',()=>lifetime.signal.removeEventListener('abort',stop));
+   child.stderr.on('data',data=>{stderr=(stderr+String(data)).slice(-8192);});
+   return child;
+  },
+  async onPermissionRequest({raw},{signal}){
+   if(signal.aborted)return {outcome:'cancel'};
+   const abort=()=>cancelPermissions();signal.addEventListener('abort',abort,{once:true});
+   try{const response=await requestPermission(raw);return response.outcome.outcome==='selected'?response.outcome:{outcome:'cancel'};}
+   finally{signal.removeEventListener('abort',abort);}
+  },
+ });
+ const snapshot=async()=>{
+  const status=await runtime.getStatus({handle:handle!});
+  return {sessionId:handle!.backendSessionId!,configOptions:status.details?.configOptions as SessionConfigOption[]|undefined,
+   _meta:{mandalaLegacyModels:status.models?{currentModelId:status.models.currentModelId,availableModels:status.models.availableModelIds.map(modelId=>({modelId,name:status.models?.availableModels?.find(model=>model.modelId===modelId)?.name??modelId}))}:undefined}};
+ };
+ const attach=async(cwd:string,mcp:AcpMcpServer[],resumeSessionId?:string)=>{
+  servers=mcp;
+  const next=await runtime.ensureSession({sessionKey:randomUUID(),agent:cli,mode:'persistent',cwd,resumeSessionId});
+  if(!next.backendSessionId||resumeSessionId&&next.backendSessionId!==resumeSessionId)throw new Error('ACP did not restore the requested native session');
+  // Once Mandala receives an ID, even the first reconnect must keep that ID.
+  // acpx otherwise permits replacing an unprompted fresh persistent session.
+  handle=resumeSessionId?next:await runtime.ensureSession({sessionKey:next.sessionKey,agent:cli,mode:'persistent',cwd,resumeSessionId:next.backendSessionId});
+  return snapshot();
+ };
+ const forward=(event:AcpRuntimeEvent)=>{
+  if(event.type==='text_delta')update({sessionId,update:{sessionUpdate:event.stream==='thought'?'agent_thought_chunk':'agent_message_chunk',content:{type:'text',text:event.text}}});
+  else if(event.type==='status'&&event.tag==='plan'&&event.entries&&!closed&&active)emit('turn/plan/updated',{plan:event.entries.map(entry=>({step:entry.content,status:entry.status}))});
+  else if(event.type==='tool_call'&&event.toolCallId)update({sessionId,update:{sessionUpdate:event.tag==='tool_call'?'tool_call':'tool_call_update',toolCallId:event.toolCallId,title:event.title,kind:event.kind,status:event.status,locations:event.locations,rawInput:event.rawInput,rawOutput:event.rawOutput,content:event.content} as SessionNotification['update']});
+ };
+ const sendPrompt=async(content:ContentBlock[])=>{
+  const text=content.filter(block=>block.type==='text').map(block=>block.text).join('');
+  const attachments=content.filter(block=>block.type==='image').map(block=>({mediaType:block.mimeType,data:block.data}));
+  // Setup is bounded; coding turns last until completion or explicit cancellation.
+  const turn=runtime.startTurn({handle:handle!,requestId:active!.id,mode:'prompt',text,attachments,timeoutMs:0,assertActive:()=>{if(closed||active?.cancelled)throw new Error('ACP turn cancelled');}});
+  nativeTurn=turn;
+  try{for await(const event of turn.events)forward(event);const result=await turn.result;
+   if(result.status==='failed')throw new Error(result.error.message);
+   configure(await snapshot());
+   return {stopReason:result.status==='cancelled'?'cancelled':result.stopReason};
+  }finally{if(nativeTurn===turn)nativeTurn=undefined;}
+ };
  let closing:Promise<void>|undefined;
- const close=()=>{if(closing)return closing;closed=true;cancelPermissions();return closing=Promise.resolve().then(stop);};
+ const abort=()=>{void close().catch(error=>options.onExit(String(error)));};
+ const close=()=>{if(closing)return closing;closed=true;cancelPermissions();options.signal?.removeEventListener('abort',abort);lifetime.abort();return closing=runtime.shutdown();};
+ options.signal?.addEventListener('abort',abort,{once:true});
  let initialized;
- try {initialized=await bounded(connection.initialize({protocolVersion:1,clientInfo:{name:'mandala',version:'0.1.0'},clientCapabilities:{fs:{readTextFile:false,writeTextFile:false},terminal:false}}));}
- catch(error){await close();throw error;}
- if(options.runtimeCli==='grok'){
-  const method=initialized.authMethods?.find(method=>/api.?key|cached.?token/i.test(method.id));
-  if(method)try{await bounded(connection.authenticate({methodId:method.id,_meta:{headless:true}}));}catch(error){await close();throw error;}
- }
+ try {options.signal?.throwIfAborted();initialized=await bounded(runtime.doctor(),setupTimeout);if(!initialized.ok)throw new Error(initialized.details?.at(-1)??initialized.message);}
+ catch(error){await close();throw new Error(runtimeError(String(error),stderr,options.env??{}),{cause:error});}
  const capabilities=initialized.agentCapabilities;
- void connection.closed.then(()=>{cancelPermissions();if(!closed)options.onExit('ACP connection closed');});
  const mcpServers=(servers:McpServer[]=[]):AcpMcpServer[]=>{
   if(servers.length&&(options.runtimeCli==='hermes'||options.runtimeCli==='openclaw'))throw new Error(`${runtimeLabel(options.runtimeCli)} session MCP bindings are unavailable in Mandala. ${options.runtimeCli==='hermes'?'The native Gateway cannot reliably revoke an empty binding set on resume.':'OpenClaw ACP does not support per-session MCP.'} Remove the session bindings and manage MCP in the native Gateway.`);
   return servers.map(server=>{
@@ -117,17 +168,16 @@ export async function connectAcp(stream: Stream, options: CodexOptions & {native
   const setting=configuration.find(option=>option.category==='model');
   if(!setting&&legacyModels.length){
    if(!legacyModels.some(choice=>choice.id===model))throw new Error('ACP model is not in the native catalog');
-   if(!legacyModels.some(choice=>choice.id===model&&choice.isDefault))await bounded(connection.extMethod('session/set_model',{sessionId,modelId:model}));
+   if(!legacyModels.some(choice=>choice.id===model&&choice.isDefault))await bounded(runtime.setModel({handle:handle!,model}));
    legacyModels=legacyModels.map(choice=>({...choice,isDefault:choice.id===model}));return;
   }
   if(!setting)throw new Error('ACP agent does not advertise model selection; use its native default');
   if(setting.currentValue===model)return;
-  configuration=(await bounded(connection.setSessionConfigOption({sessionId,configId:setting.id,value:model}))).configOptions;
+  await bounded(runtime.setConfigOption({handle:handle!,key:setting.id,value:model}));configure(await snapshot());
  };
  let prepared: {id:string;input:TurnOptions;images:ContentBlock[]}|undefined;
- const gatewayBacked=options.runtimeCli==='hermes'||options.runtimeCli==='openclaw';
  const setup=async<T>(request:Promise<T>):Promise<T>=>{try{return await bounded(request,gatewayBacked?45000:15000);}catch(error){if(!gatewayBacked)throw error;throw new Error(`${runtimeLabel(options.runtimeCli!)} Gateway setup failed. Check the native installation, Gateway startup and provider login in the selected profile. No task was sent.`,{cause:error});}};
- const ensureSession=async()=>{if(!sessionId){const result=await setup(connection.newSession({cwd:options.cwd,mcpServers:[],...restrictedMeta}));sessionId=result.sessionId;configure(result);}};
+ const ensureSession=async()=>{if(!sessionId){const result=await setup(attach(options.cwd,[]));sessionId=result.sessionId;configure(result);}};
  const prepareTurn=async(id:string,input:TurnOptions={})=>{
   if(closed||id!==sessionId||active)throw new Error('ACP session is unavailable or busy');
   if(input.effort)throw new Error('ACP reasoning effort selection is not supported');
@@ -148,21 +198,21 @@ export async function connectAcp(stream: Stream, options: CodexOptions & {native
    return setting.options.flatMap(option=>'options' in option?option.options:[option]).map(option=>({id:option.value,label:option.name,isDefault:option.value===setting.currentValue}));
   },
   async startThread(input){
+   if(closed||active)throw new Error('ACP session is unavailable or busy');
    if(input.safeSystem&&!options.safeSystem)throw new Error('Restricted ACP must be configured before launch');
    if(!options.safeSystem&&!capabilities?.loadSession&&!capabilities?.sessionCapabilities?.resume)throw new Error('ACP agent must support session resume for durable chats');
-   const result=await setup(connection.newSession({cwd:input.cwd,mcpServers:options.safeSystem?[]:mcpServers(input.mcp),...restrictedMeta}));
+   const result=await setup(attach(input.cwd,options.safeSystem?[]:mcpServers(input.mcp)));
    sessionId=result.sessionId;instructions=input.instructions;configure(result);
    await setModel(input.model);return sessionId;
   },
   async resumeThread(id,mcp,nextInstructions,model){
-   if(active)throw new Error('ACP turn is still running');
+   if(closed||active)throw new Error('ACP turn is still running or the session is closed');
    const servers=mcpServers(mcp);
    if(id!==sessionId){
     if(!capabilities?.loadSession&&!capabilities?.sessionCapabilities?.resume)throw new Error('ACP agent cannot resume this session; start a new chat');
     const openclaw=options.runtimeCli==='openclaw';
     if(openclaw&&!capabilities?.sessionCapabilities?.resume)throw new Error('OpenClaw must support strict session resume; upgrade the native CLI.');
-    const request={sessionId:id,cwd:options.cwd,mcpServers:servers,...(openclaw?{_meta:{sessionKey:/^[a-f0-9-]{36}$/i.test(id)?'acp-bridge:'+id:id,requireExisting:true}}:{})};
-    const result=await bounded(openclaw||!capabilities?.loadSession?connection.resumeSession(request):connection.loadSession(request));
+    const result=await attach(options.cwd,options.safeSystem?[]:servers,id);
     sessionId=id;configure(result);
    }
    instructions=nextInstructions??instructions;await setModel(model);
@@ -188,7 +238,7 @@ export async function connectAcp(stream: Stream, options: CodexOptions & {native
     }
     if(closed||active!==turn||turn.cancelled)return {stopReason:'cancelled' as const};
     turn.promptStarted=true;
-    return connection.prompt({sessionId,prompt});
+    return sendPrompt(prompt);
    })().then(result=>{
     if(closed||active!==turn)return;finishMessage();cancelPermissions();
     if(options.runtimeCli==='openclaw'&&result.stopReason==='end_turn'&&!turn.sawOutput)turn.gatewayFailure='OpenClaw Gateway ended without a response or tool result. Check native model authentication and Gateway logs; the task was not resent.';
@@ -200,7 +250,7 @@ export async function connectAcp(stream: Stream, options: CodexOptions & {native
    });
    return turn.id;
   },
-  async interrupt(id,turnId){if(active?.id!==turnId||id!==sessionId)return;active.cancelled=true;cancelPermissions();if(active.promptStarted)await connection.cancel({sessionId});},
+  async interrupt(id,turnId){if(active?.id!==turnId||id!==sessionId)return;active.cancelled=true;cancelPermissions();if(active.promptStarted)await nativeTurn?.cancel();},
   replyApproval(id,result){
    const pending=permissions.get(String(id));if(!pending)return;
    const response=result as RequestPermissionResponse;
@@ -224,19 +274,6 @@ export async function startAcp(cli:Cli,options:CodexOptions):Promise<CodexClient
   env.GEMINI_CLI_SYSTEM_SETTINGS_PATH=settings;
  }
  if(options.safeSystem&&cli==='opencode')env.OPENCODE_PERMISSION=JSON.stringify({'*':'deny'});
- let child;
- const ownGroup=process.platform!=='win32'&&['codebuddy','kimi','dsh','grok'].includes(cli);
- child=spawn(runtime.command,[...runtime.args,...(options.safeSystem&&cli==='codebuddy'?['--tools','','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--setting-sources','','--settings','{"disableAllHooks":true}','--no-session-persistence']:[])],{cwd:options.cwd,env:{...process.env,...env},signal:options.signal,stdio:'pipe',shell:false,detached:ownGroup});
- let stderr='';child.stderr.on('data',data=>{stderr=(stderr+String(data)).slice(-8192);});
- let stopping=false;
- const kill=(signal:NodeJS.Signals)=>{if(ownGroup&&child.pid)try{process.kill(-child.pid,signal);return;}catch{}child.kill(signal);};
- const abort=()=>kill('SIGTERM');options.signal?.addEventListener('abort',abort,{once:true});
- const ended=new Promise<void>(resolve=>child.once('close',()=>resolve()));
- child.once('close',()=>{options.signal?.removeEventListener('abort',abort);if(ownGroup&&child.pid)kill('SIGKILL');});
- child.on('error',error=>{if(!stopping)options.onExit(runtimeError(error.message,stderr,env));});
- return connectAcp(ndJsonStream(Writable.toWeb(child.stdin),Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>),{...options,nativeModel:native?.model,runtimeCli:cli},async()=>{
-  stopping=true;kill('SIGTERM');
-  const timer=setTimeout(()=>kill('SIGKILL'),2000);
-  try{await ended;}finally{clearTimeout(timer);}
- });
+ const command=[runtime.command,...runtime.args,...(options.safeSystem&&cli==='codebuddy'?['--tools','','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--setting-sources','','--settings','{"disableAllHooks":true}','--no-session-persistence']:[])];
+ return connectAcp({...options,env,nativeModel:native?.model,runtimeCli:cli},command);
 }

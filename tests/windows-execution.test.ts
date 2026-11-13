@@ -344,3 +344,14 @@ test('default native CLI resolution selects an explicit PATH entry and never a p
     expect(() => resolveNativeCli('omp', { PATH: project, PATHEXT: '.CMD' })).toThrow(/not found/);
   } finally { Object.defineProperty(process, 'platform', original); }
 });
+
+test('pre-resolved ACP Windows executables keep their absolute path and extension', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mandala-acpx-win-')); homes.push(directory);
+  const executable = join(directory, 'cmd.exe'); writeFileSync(executable, 'fixture'); chmodSync(executable, 0o700);
+  const original = Object.getOwnPropertyDescriptor(process, 'platform')!; Object.defineProperty(process, 'platform', { value: 'win32' });
+  try {
+    expect(resolveNativeCli(executable, { PATH: '', PATHEXT: '.EXE;.CMD' })).toBe(executable);
+    expect(resolveNativeCli('cmd.exe', { PATH: directory, PATHEXT: '.EXE;.CMD' })).toBe(executable);
+    expect(() => resolveNativeCli(join(directory, 'missing.exe'), { PATH: directory, PATHEXT: '.EXE' })).toThrow(/not found/);
+  } finally { Object.defineProperty(process, 'platform', original); }
+});

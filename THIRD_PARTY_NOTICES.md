@@ -18,6 +18,8 @@ The Mandala Source-Available License applies only to covered project-owned contr
 
 All existing upstream license files and headers remain unchanged. Product and project names and marks remain with their respective holders. No endorsement or trademark license is asserted.
 
+The ACP runtime is [maktub-ai/acpx](https://github.com/maktub-ai/acpx), a lightweight fork of [openclaw/acpx](https://github.com/openclaw/acpx), based on v0.22.0 (`1ed28f2842182fdc0526927b8fbe2f5ba906ab2e`). Its host process spawning hook is adapted from [Paperclip's MIT patch](https://github.com/paperclipai/paperclip/blob/ff8ec41e6a1236694d28f463b60c7d136442f9c9/patches/acpx%400.22.0.patch). Original complete notices are shipped in `licenses/dependencies/acpx/LICENSE` and `licenses/dependencies/acpx/THIRD_PARTY_NOTICES.md`. The fork and those upstream contributions retain MIT terms independently of Mandala's project license.
+
 ## Application dependencies
 
 Versions are pinned by `package-lock.json`; use that lockfile for the exact dependency graph, including transitive dependencies. The following inventory covers direct application dependencies in this source version. Original texts are supplied by the corresponding installed packages, usually as `node_modules/<package>/LICENSE` or lowercase `license`; retain them with distributed code, including code bundled into browser/server output.
@@ -29,6 +31,7 @@ Versions are pinned by `package-lock.json`; use that lockfile for the exact depe
 | @tencentdb-agent-memory/tcvdb-text | 0.1.1 | MIT |
 | @xterm/addon-fit | 0.11.0 | MIT |
 | @xterm/xterm | 6.0.0 | MIT |
+| acpx (Mandala fork) | 0.22.0-mandala.1 | MIT; OpenClaw Team license and Paperclip patch notice retained in the package and release |
 | class-variance-authority | 0.7.1 | Apache-2.0 |
 | cn | 0.5.0 | MIT |
 | cross-spawn | 7.0.6 | MIT |

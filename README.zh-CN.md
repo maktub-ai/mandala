@@ -197,14 +197,14 @@ flowchart TB
 flowchart LR
   phone["手机浏览器"] -. "可选的端到端加密中继" .-> svc
   subgraph machine["你的电脑"]
-    ui["<b>React 界面</b><br/>浏览器或 Electron"] <--> svc["<b>本地 Node 服务</b><br/>每种 CLI 一个适配器"] <--> db[("SQLite + 文件")]
+    ui["<b>React 界面</b><br/>浏览器或 Electron"] <--> svc["<b>本地 Node 服务</b><br/>acpx + 原生适配器"] <--> db[("SQLite + 文件")]
   end
 ```
 
 | 层 | 技术 |
 |---|---|
 | 界面 | React、Vite、Radix、Tailwind |
-| 服务 | Node.js 22、`node:sqlite`，每种原生 CLI 一个适配器 |
+| 服务 | Node.js 22、`node:sqlite`，acpx ACP 运行时 + 原生 CLI 适配器 |
 | 桌面 | Electron，内置 Node.js |
 | 远程 | TweetNaCl authenticated box，有界的密文中继 |
 | 测试 | Vitest、Playwright |
@@ -227,6 +227,8 @@ npm run test:e2e   # 需先 `npx playwright install chromium` 并完成构建
 曼陀罗（Mandala）是围绕一个中心画出的圆。我们的标志是围绕一个开放核心的六片花瓣：**你、任务、Agent、记忆、项目 Wiki 和任意 CLI**。工作从中心出发，最后回到中心。
 
 ## 致谢
+
+Mandala 的 ACP 通信复用 [acpx 的轻量 MIT fork](https://github.com/maktub-ai/acpx)，上游是 [OpenClaw/acpx](https://github.com/openclaw/acpx)。我们复用了 Paperclip 的宿主进程启动扩展并保留来源声明，将通用兼容补丁拆成独立上游贡献；ACP 尚未覆盖的能力继续使用原生适配器。详见 [CLI 能力表与更新流程](docs/cli-adapters.md)。
 
 Mandala 的记忆模块借鉴了 [TencentDB Agent Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory)（MIT 许可）。我们改编了它的场景提取、画像生成和检索工具（位于 `server/vendor/tencentdb/`），并使用了它的 `@tencentdb-agent-memory/tcvdb-text` 包。感谢作者将它开源。
 

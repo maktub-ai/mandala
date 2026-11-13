@@ -4,7 +4,7 @@ import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { open as openZip } from 'yauzl';
 
-const isNotice = name => /^(licen[cs]e|notice|copying|copyright)([-._]|$)/i.test(name);
+const isNotice = name => /^(licen[cs]e|notice|copying|copyright|third[-_]party[-_]notices)([-._]|$)/i.test(name);
 
 /** Electron puts these beside the .app, so electron-builder does not include them. */
 export async function copyElectronLicenses(archive, output) {

@@ -197,14 +197,14 @@ What runs where: everything stays on your machine. A phone can connect through a
 flowchart LR
   phone["Phone browser"] -. "optional E2EE relay" .-> svc
   subgraph machine["Your machine"]
-    ui["<b>React UI</b><br/>browser or Electron"] <--> svc["<b>Local Node service</b><br/>one adapter per CLI"] <--> db[("SQLite + files")]
+    ui["<b>React UI</b><br/>browser or Electron"] <--> svc["<b>Local Node service</b><br/>acpx + native adapters"] <--> db[("SQLite + files")]
   end
 ```
 
 | Layer | Stack |
 |---|---|
 | UI | React, Vite, Radix, Tailwind |
-| Service | Node.js 22, `node:sqlite`, one adapter per native CLI |
+| Service | Node.js 22, `node:sqlite`, acpx ACP runtime + native CLI adapters |
 | Desktop | Electron with bundled Node.js |
 | Remote | TweetNaCl authenticated box, bounded ciphertext relay |
 | Tests | Vitest, Playwright |
@@ -227,6 +227,8 @@ Tests use temporary data and mock protocol endpoints, so they never need your CL
 A mandala is a circle drawn around one center. Our mark has six petals around an open core: **you, tasks, Agents, memory, the Project Wiki and any CLI**. Work moves out from the center and comes back to it.
 
 ## Acknowledgements
+
+Mandala's ACP transport uses a [lightweight MIT fork of acpx](https://github.com/maktub-ai/acpx), based on [OpenClaw's acpx](https://github.com/openclaw/acpx). We reuse Paperclip's host process spawning hook with attribution, keep compatibility fixes in separate upstream contributions, and retain native adapters for capabilities outside ACP. See the [CLI capability matrix and update process](docs/cli-adapters.md).
 
 Mandala's memory layer builds on [TencentDB Agent Memory](https://github.com/TencentCloud/TencentDB-Agent-Memory) (MIT). We adapted its scene extraction, persona generation and search helpers in `server/vendor/tencentdb/` and use its `@tencentdb-agent-memory/tcvdb-text` package. Thanks to its authors for making it open source.
 
