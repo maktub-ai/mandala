@@ -2,18 +2,23 @@ const { app, BrowserWindow, Menu, Tray, Notification, nativeImage, nativeTheme, 
 const { homedir } = require('node:os');
 const { join, isAbsolute, resolve } = require('node:path');
 const { statSync, readFileSync, writeFileSync } = require('node:fs');
-const { resolveDesktopHome, desktopEnvironment, loginShellPath, prepareDesktopHome, connectOrStartService, stopBackgroundService, stopBackgroundServiceIfIdle, readRuntimeBuild, RuntimeShutdownTimeout, allowedNavigation, readDesktopAppearance, writeDesktopAppearance, readDesktopPreferences, writeDesktopPreference, desktopCliStatus, installDesktopCli } = require('./runtime.cjs');
+const { resolveDesktopHome, desktopEnvironment, loginShellPath, prepareDesktopHome, connectOrStartService, stopBackgroundService, stopBackgroundServiceIfIdle, readRuntimeBuild, RuntimeShutdownTimeout, allowedNavigation, readDesktopAppearance, writeDesktopAppearance, readDesktopPreferences, writeDesktopPreference, desktopCliStatus, installDesktopCli, backgroundLaunchArgument, loginStartupPaused, setLoginStartupPaused, registerMacLoginStartup } = require('./runtime.cjs');
 const { createUpdateController } = require('./updates.cjs');
 const { createLocalUpdate } = require('./local-update.cjs');
 let window, petWindow, petPosition, tray, service, confirming = false, stopping = false, finished = false, discardUnsaved = false;
 let homeError;
+let backgroundOnly = app.isPackaged && process.argv.includes(backgroundLaunchArgument);
 const home = resolveDesktopHome();
 // Chromium cookies/preferences are separate from platform data and survive installer replacement.
 try { prepareDesktopHome(home); app.setPath('userData', join(home, 'desktop-browser')); } catch (error) { homeError = error; }
 app.setName('Mandala');
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance', () => { window?.show(); window?.focus(); });
+  app.on('second-instance', (_event, args) => {
+    if (args?.includes(backgroundLaunchArgument)) return;
+    backgroundOnly = false;
+    window?.show(); window?.focus();
+  });
   app.on('activate', () => window?.show());
   app.on('window-all-closed', () => {});
   app.on('will-quit', () => tray?.destroy());
@@ -26,7 +31,10 @@ else {
   app.whenReady().then(start).catch(async error => {
     if (finished) return;
     const report = !stopping; stopping = true;
-    if (report) dialog.showErrorBox('Mandala could not start', error.message);
+    if (report) {
+      if (backgroundOnly) console.error('Mandala background startup failed', error.message);
+      else dialog.showErrorBox('Mandala could not start', error.message);
+    }
     finished = true; app.quit();
   });
 }
@@ -37,11 +45,14 @@ function quit() {
 async function stopRuntime() {
   if (confirming || stopping || !service) return;
   confirming = true;
-  const answer = await dialog.showMessageBox({ type: 'question', title: 'Stop runtime and quit?', message: 'This stops local tasks, terminals and this computer’s connection. Quit Mandala normally to keep work running.', buttons: ['Keep running', 'Stop runtime and quit'], defaultId: 0, cancelId: 0 });
+  const answer = await dialog.showMessageBox({ type: 'question', title: 'Stop runtime and quit?', message: 'This stops local tasks, terminals and this computer’s connection. Automatic startup stays paused until you open Mandala again.', buttons: ['Keep running', 'Stop runtime and quit'], defaultId: 0, cancelId: 0 });
   confirming = false;
   if (answer.response !== 1 || finished) return;
   stopping = true;
-  try { await stopBackgroundService(service); }
+  try {
+    setLoginStartupPaused(home, true);
+    await stopBackgroundService(service);
+  }
   catch (error) { stopping = false; dialog.showErrorBox('Runtime shutdown incomplete', error.message); return; }
   stopping = false; quit();
 }
@@ -94,17 +105,47 @@ async function connectDesktopRuntime(options, copy) {
   }
 }
 
+function registerLoginStartup() {
+  if (!app.isPackaged || process.env.MANDALA_HOME !== undefined || process.env.OPEN_MANA_HOME !== undefined) return;
+  if (process.platform === 'darwin') {
+    if (!process.execPath.startsWith('/Volumes/') && !process.execPath.includes('/AppTranslocation/')) {
+      registerMacLoginStartup(process.execPath);
+    }
+  } else if (process.platform === 'win32') {
+    // Electron parses the lookup path as a command line.
+    const settings = { path: '"' + process.execPath + '"', args: [backgroundLaunchArgument], name: 'Mandala' };
+    const { launchItems } = app.getLoginItemSettings(settings);
+    if (!launchItems.some(item => item.name === settings.name && item.scope === 'user' && item.args.length === 1 && item.args[0] === backgroundLaunchArgument)) {
+      app.setLoginItemSettings({ ...settings, openAtLogin: true });
+    }
+  }
+}
+
 async function start() {
   if (stopping || finished) return;
   if (homeError) throw homeError;
+  if (backgroundOnly) {
+    if (loginStartupPaused(home)) return quit();
+    app.dock?.hide();
+  }
   const runtime = app.isPackaged ? join(process.resourcesPath, 'runtime') : join(__dirname, '..', '.runtime');
   const env = desktopEnvironment({ home, runtime, loginPath: loginShellPath() });
   const gatewayHome=join(home,'account-gateway'); prepareDesktopHome(gatewayHome);
   const build = readRuntimeBuild(runtime);
   if (app.isPackaged && !build) throw Error('The installed Mandala build information is missing or invalid.');
   const upgrade = upgradeCopy();
-  service = await connectDesktopRuntime({ home:gatewayHome, build, node: join(runtime, 'bin', process.platform === 'win32' ? 'node.exe' : 'node'), entry: join(runtime, 'server', 'account-desktop-main.mjs'), cwd: runtime, env }, upgrade);
+  const options = { home:gatewayHome, build, node: join(runtime, 'bin', process.platform === 'win32' ? 'node.exe' : 'node'), entry: join(runtime, 'server', 'account-desktop-main.mjs'), cwd: runtime, env: { ...env, MANDALA_DESKTOP_LOGIN_START: backgroundOnly ? '1' : '0' } };
+  if (backgroundOnly) {
+    service = await connectOrStartService(options);
+    if (backgroundOnly) return quit();
+  } else {
+    service = await connectDesktopRuntime(options, upgrade);
+  }
   if (stopping || finished || !service) return;
+  app.dock?.show();
+  setLoginStartupPaused(home, false);
+  try { registerLoginStartup(); }
+  catch (error) { console.error('Mandala could not register startup at login', error.message); }
   const bootstrapResponse=await fetch(service.origin+'/auth/desktop/bootstrap',{headers:{'X-Mandala-Launcher':service.setupToken}});
   if(!bootstrapResponse.ok)throw Error('Could not verify desktop account');
   const bootstrap=await bootstrapResponse.json(), profileHome=bootstrap.home;

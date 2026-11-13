@@ -203,5 +203,5 @@ export function createDesktopGateway(options:{root:string;setupToken:string;cont
  });
  async function expireAfterFailure(){accounts.logout();await closeWorker();}
  server.on('close',()=>{stopped=true;clearInterval(timer);void closeWorker().catch(()=>{});});
- return {server,reserveIdleShutdown,close:async()=>{stopped=true;clearInterval(timer);await closeWorker();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}};
+ return {server,reserveIdleShutdown,async startSavedWorkspace(){if(accounts.current())await start();},close:async()=>{stopped=true;clearInterval(timer);await closeWorker();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}};
 }

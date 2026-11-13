@@ -1,3 +1,4 @@
+import { setLoginStartupPaused, loginStartupPaused, registerMacLoginStartup } from '../desktop/login-startup';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -112,4 +113,25 @@ describe('desktop runtime', () => {
     const [code] = await once(child,'exit'); expect(code).toBe(0); expect((await import('node:fs')).existsSync(home)).toBe(false);
   });
 
+});
+
+describe('desktop login startup', () => {
+  it('persists an explicit stop until manual startup clears it', () => {
+    const home = temporary();
+    expect(loginStartupPaused(home)).toBe(false);
+    setLoginStartupPaused(home, true);
+    expect(loginStartupPaused(home)).toBe(true);
+    setLoginStartupPaused(home, false);
+    expect(loginStartupPaused(home)).toBe(false);
+  });
+
+  it('registers one background launch per login using the installed executable path', () => {
+    const userHome = temporary();
+    registerMacLoginStartup('/Applications/Mandala & Tools.app/Contents/MacOS/Mandala', userHome);
+    const plist = readFileSync(join(userHome, 'Library', 'LaunchAgents', 'com.maktubcn.mandala.background.plist'), 'utf8');
+    expect(plist).toContain('<string>/Applications/Mandala &amp; Tools.app/Contents/MacOS/Mandala</string>');
+    expect(plist).toContain('<string>--mandala-background</string>');
+    expect(plist).toContain('<key>RunAtLoad</key>');
+    expect(plist).not.toContain('KeepAlive');
+  });
 });

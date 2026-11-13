@@ -141,3 +141,28 @@ test('production account workspace reports real child exit and restores persiste
   const restored=await fetch(origin+'/api/config',{headers}).then(r=>r.json());expect(restored.config.agents.some((agent:any)=>agent.id==='recovery-test')).toBe(true);
  }finally{await gateway.close();if(previousOptions===undefined)delete process.env.NODE_OPTIONS;else process.env.NODE_OPTIONS=previousOptions;rmSync(root,{recursive:true,force:true});rmSync(runtime,{recursive:true,force:true});}
 },30000);
+
+test.each(['valid', 'expired', 'signed out'])('starts a saved workspace without a renderer only for a valid lease (%s)', async state => {
+ const root=mkdtempSync(join(tmpdir(),'mandala-headless-gateway-'));
+ const controlOrigin='http://127.0.0.1:9999';
+ const accounts=openDesktopAccounts(root,controlOrigin);
+ const starts:string[]=[];
+ if(state!=='signed out'){
+  accounts.activate({user:{id:'alice',username:'alice',createdAt:new Date().toISOString()},token:'synthetic',csrfToken:'synthetic',expiresAt:Date.now()+60000},false);
+  if(state==='expired'){
+   const file=join(root,'account-gateway','desktop-accounts.json');
+   const saved=JSON.parse(readFileSync(file,'utf8'));
+   saved.active.expiresAt=Date.now()-1;
+   writeFileSync(file,JSON.stringify(saved));
+  }
+ }
+ const gateway=createDesktopGateway({root,controlOrigin,setupToken:'synthetic',async startWorkspace(home){
+  starts.push(home);
+  return {origin:'http://127.0.0.1:1',cookie:'synthetic',csrfToken:'synthetic',key:'synthetic',async close(){}};
+ }});
+ try{
+  await new Promise<void>(r=>gateway.server.listen(0,'127.0.0.1',r));
+  await gateway.startSavedWorkspace();
+  expect(starts).toEqual(state==='valid'?[accounts.home('alice')]:[]);
+ }finally{await gateway.close();rmSync(root,{recursive:true,force:true});}
+});

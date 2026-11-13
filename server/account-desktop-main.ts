@@ -44,4 +44,7 @@ record = claimServiceRecord(home, `http://127.0.0.1:${port}`, setupToken);
 process.on('message', message => { if ((message as { type?: string })?.type === 'mandala:stop') stop(); });
 process.once('SIGTERM', stop);
 process.once('SIGINT', stop);
+if (process.env.MANDALA_DESKTOP_LOGIN_START === '1') {
+  void gateway.startSavedWorkspace().catch(() => console.error('Saved Mandala workspace could not start'));
+}
 process.send?.({ type: 'mandala:ready', port, setupToken });

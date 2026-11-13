@@ -6,18 +6,24 @@ import { EventEmitter } from 'node:events';
 const require = createRequire(import.meta.url);
 const source = readFileSync('desktop/main.cjs', 'utf8');
 const tick = () => new Promise<void>(r => setImmediate(r));
-async function fixture(pending = false, platform = 'darwin', dark = false, initialAppearance: string | null = null, packaged = false, localUpdate: unknown = null) {
+async function fixture(pending = false, platform = 'darwin', dark = false, initialAppearance: string | null = null, packaged = false, localUpdate: unknown = null, startup: { background: boolean; paused: boolean; windowsRegistered?: boolean } = { background: false, paused: false }) {
   const app: any = new EventEmitter(), child: any = new EventEmitter();
   child.exitCode = null; child.signalCode = null; child.pid = 99999999;
   const events = { quit: 0, exit: 0, idleStop: 0, errors: [] as unknown[], stop: 0, shown: 0, icons: [] as string[], reloads: 0, prompts: [] as unknown[] };
   const nativeTheme = Object.assign(new EventEmitter(), { shouldUseDarkColors: dark });
   app.nativeTheme = nativeTheme;
-  app.dock = { setIcon: (icon: string) => events.icons.push(icon) };
+  app.dock = { show() {}, hide() {}, setIcon: (icon: string) => events.icons.push(icon) };
   let browserWindow: any, appearance: string | null = initialAppearance;
   const preferences:Record<string,string>={};
   let menu: any, resolveConfirm!: (value: any) => void, resolveStart!: (value: any) => void;
   const timers: any[] = [];
+  const loginRegistrations: unknown[] = [];
+  let loginStartupPaused = startup.paused, runtimeStarts = 0;
   app.isPackaged = packaged;
+  app.getLoginItemSettings = (options: {path:string}) => ({
+    launchItems: startup.windowsRegistered !== false && options.path === '"C:\\Program Files\\Mandala\\Mandala.exe"' ? [{name:'Mandala',scope:'user',args:['--mandala-background'],enabled:false}] : [],
+  });
+  app.setLoginItemSettings = (options: unknown) => loginRegistrations.push(options);
   app.setPath = app.setName = () => {}; app.requestSingleInstanceLock = () => true;
   app.whenReady = () => Promise.resolve(); app.getVersion = () => 'synthetic'; app.getPath = () => '/private/tmp/synthetic';
   app.quit = () => events.quit++; app.exit = () => events.exit++;
@@ -38,14 +44,16 @@ async function fixture(pending = false, platform = 'darwin', dark = false, initi
   (electron.session as any).fromPartition=()=>electron.session.defaultSession;
   const service = { child, origin: 'http://127.0.0.1:54321' };
   const commandCalls:string[]=[];
-  const runtime = { RuntimeShutdownTimeout: Error, readRuntimeBuild: () => packaged ? { version: '1.0.0', commit: 'a'.repeat(40) } : undefined, desktopCliStatus:()=>{commandCalls.push('status');return {installed:false};},installDesktopCli:()=>{commandCalls.push('install');return {installed:true};},resolveDesktopHome: () => '/private/tmp/synthetic', desktopEnvironment: () => ({}), loginShellPath: () => '', assertHomeAvailable() {}, prepareDesktopHome() {}, connectOrStartService: (_options: any) => { return pending ? new Promise(r => resolveStart = r) : Promise.resolve(service); }, stopBackgroundServiceIfIdle: async () => { events.idleStop++; return 'accepted'; }, stopBackgroundService: async () => { events.stop++; child.exitCode = 0; child.emit('exit', 0); }, forceStopService: async () => {}, allowedNavigation: (url: string, origin: string) => url.startsWith(origin + '/'), readDesktopPreferences:()=>({...preferences}),writeDesktopPreference:(_home:string,key:string,value:string)=>{if(key==='unknown')throw Error('Invalid key');preferences[key]=value;},readDesktopAppearance: () => appearance, writeDesktopAppearance: (_home: string, value: string) => { if (value === 'invalid') throw Error('Invalid appearance'); appearance = value; } };
-  vm.runInNewContext(source, { require: (p: string) => p === 'electron' ? electron : p === './runtime.cjs' ? runtime : p === './updates.cjs' ? require('../desktop/updates.cjs') : p === './local-update.cjs' ? { createLocalUpdate: () => localUpdate } : require(p), __dirname: '/private/tmp/synthetic', fetch:async()=>({ok:true,json:async()=>({partition:'signin',home:'/private/tmp/synthetic'})}), process: { platform, arch: 'arm64', resourcesPath: '/private/tmp/synthetic' }, console, setImmediate, URL, setTimeout: (_fn: Function, delay: number) => { const timer = { delay, unref() {}, cleared: false }; timers.push(timer); return timer; }, setInterval: (_fn: Function, delay: number) => { const timer = { delay, unref() {}, cleared: false }; timers.push(timer); return timer; }, clearTimeout: (timer: any) => { timer.cleared = true; }, clearInterval: (timer: any) => { timer.cleared = true; } });
+  const runtime = { backgroundLaunchArgument: '--mandala-background', registerMacLoginStartup() {},
+    loginStartupPaused: () => loginStartupPaused, setLoginStartupPaused: (_home: string, paused: boolean) => { loginStartupPaused = paused; },
+    RuntimeShutdownTimeout: Error, readRuntimeBuild: () => packaged ? { version: '1.0.0', commit: 'a'.repeat(40) } : undefined, desktopCliStatus:()=>{commandCalls.push('status');return {installed:false};},installDesktopCli:()=>{commandCalls.push('install');return {installed:true};},resolveDesktopHome: () => '/private/tmp/synthetic', desktopEnvironment: () => ({}), loginShellPath: () => '', assertHomeAvailable() {}, prepareDesktopHome() {}, connectOrStartService: (_options: any) => { runtimeStarts++; return pending ? new Promise(r => resolveStart = r) : Promise.resolve(service); }, stopBackgroundServiceIfIdle: async () => { events.idleStop++; return 'accepted'; }, stopBackgroundService: async () => { events.stop++; child.exitCode = 0; child.emit('exit', 0); }, forceStopService: async () => {}, allowedNavigation: (url: string, origin: string) => url.startsWith(origin + '/'), readDesktopPreferences:()=>({...preferences}),writeDesktopPreference:(_home:string,key:string,value:string)=>{if(key==='unknown')throw Error('Invalid key');preferences[key]=value;},readDesktopAppearance: () => appearance, writeDesktopAppearance: (_home: string, value: string) => { if (value === 'invalid') throw Error('Invalid appearance'); appearance = value; } };
+  vm.runInNewContext(source, { require: (p: string) => p === 'electron' ? electron : p === './runtime.cjs' ? runtime : p === './updates.cjs' ? require('../desktop/updates.cjs') : p === './local-update.cjs' ? { createLocalUpdate: () => localUpdate } : require(p), __dirname: '/private/tmp/synthetic', fetch:async()=>({ok:true,json:async()=>({partition:'signin',home:'/private/tmp/synthetic'})}), process: { platform, env: {}, argv: startup.background ? ['--mandala-background'] : [], execPath: 'C:\\Program Files\\Mandala\\Mandala.exe', arch: 'arm64', resourcesPath: '/private/tmp/synthetic' }, console, setImmediate, URL, setTimeout: (_fn: Function, delay: number) => { const timer = { delay, unref() {}, cleared: false }; timers.push(timer); return timer; }, setInterval: (_fn: Function, delay: number) => { const timer = { delay, unref() {}, cleared: false }; timers.push(timer); return timer; }, clearTimeout: (timer: any) => { timer.cleared = true; }, clearInterval: (timer: any) => { timer.cleared = true; } });
   await tick(); await tick();
   const appearanceRequest = (request: unknown, override = {}) => { const event = { sender: browserWindow.webContents, senderFrame: browserWindow.webContents.mainFrame, returnValue: undefined, ...override }; electron.ipcMain.emit('mandala:appearance', event, request); return event.returnValue; };
   const preferenceRequest=(request:unknown,override={})=>{const event={sender:browserWindow.webContents,senderFrame:browserWindow.webContents.mainFrame,returnValue:undefined,...override};electron.ipcMain.emit('mandala:preferences',event,request);return event.returnValue;};
   const cliRequest=(request:unknown,override={})=>handlers.get('mandala:cli')!({sender:browserWindow.webContents,senderFrame:browserWindow.webContents.mainFrame,...override},request);
   const directoryRequest=(path:unknown,override={})=>{const event={sender:browserWindow.webContents,senderFrame:browserWindow.webContents.mainFrame,returnValue:undefined,...override};electron.ipcMain.emit('mandala:directory-path',event,path);return event.returnValue;};
-  return { timers, menu: () => menu, permission: (types:string[],main=true,url=browserWindow.webContents.mainFrame.url) => {let allowed=false;permissionRequest(browserWindow.webContents,'media',(value:boolean)=>allowed=value,{mediaTypes:types,isMainFrame:main,requestingUrl:url});return allowed;}, permissionCheck: (type:string,main=true,url=browserWindow.webContents.mainFrame.url) => permissionCheck(browserWindow.webContents,'media',url,{mediaType:type,isMainFrame:main,requestingUrl:url}), headersFor, crash: (reason='crashed',exitCode=139) => browserWindow.webContents.emit('render-process-gone', {}, {reason,exitCode}), directoryRequest, app, child, events, appearanceRequest, preferenceRequest, cliRequest, commandCalls, mainFrame: browserWindow?.webContents.mainFrame, unload: (preventDefault: () => void) => browserWindow.webContents.emit('will-prevent-unload', { preventDefault }), quit: () => menu[0].submenu.find((x: any) => x.label === 'Quit Mandala').click(), stop: () => menu[0].submenu.find((x: any) => x.label === 'Stop runtime and quit…').click(), confirm: (response: number) => resolveConfirm({ response }), ready: () => resolveStart(service) };
+  return { timers, loginRegistrations, runtimeStarts: () => runtimeStarts, startupPaused: () => loginStartupPaused, menu: () => menu, permission: (types:string[],main=true,url=browserWindow.webContents.mainFrame.url) => {let allowed=false;permissionRequest(browserWindow.webContents,'media',(value:boolean)=>allowed=value,{mediaTypes:types,isMainFrame:main,requestingUrl:url});return allowed;}, permissionCheck: (type:string,main=true,url=browserWindow.webContents.mainFrame.url) => permissionCheck(browserWindow.webContents,'media',url,{mediaType:type,isMainFrame:main,requestingUrl:url}), headersFor, crash: (reason='crashed',exitCode=139) => browserWindow.webContents.emit('render-process-gone', {}, {reason,exitCode}), directoryRequest, app, child, events, appearanceRequest, preferenceRequest, cliRequest, commandCalls, mainFrame: browserWindow?.webContents.mainFrame, unload: (preventDefault: () => void) => browserWindow.webContents.emit('will-prevent-unload', { preventDefault }), quit: () => menu[0].submenu.find((x: any) => x.label === 'Quit Mandala').click(), stop: () => menu[0].submenu.find((x: any) => x.label === 'Stop runtime and quit…').click(), confirm: (response: number) => resolveConfirm({ response }), ready: () => resolveStart(service) };
 }
 test.each([['darwin', false], ['darwin', true], ['win32', false], ['win32', true]])('app icon follows system appearance on %s (initial dark: %s)', async (platform, dark) => {
   const f = await fixture(false, platform as string, dark as boolean);
@@ -72,7 +80,7 @@ test('only explicit confirmed runtime shutdown stops local work', async () => {
   const f = await fixture(); let stopping = f.stop(); await tick(); f.confirm(0); await stopping;
   expect(f.events.stop).toBe(0); expect(f.events.quit).toBe(0);
   stopping = f.stop(); await tick(); f.confirm(1); await stopping;
-  expect(f.events.stop).toBe(1); expect(f.events.quit).toBe(1);
+  expect(f.events.stop).toBe(1); expect(f.events.quit).toBe(1); expect(f.startupPaused()).toBe(true);
 });
 
 test('cancelled quit keeps unsaved settings and allows a later explicit discard', async () => {
@@ -198,4 +206,32 @@ test('a ready local update applies only after the app confirms quit', async () =
   expect(install).toHaveBeenCalledOnce();
   expect(f.events.idleStop).toBe(1);
   expect(f.events.exit).toBe(1);
+});
+
+
+test('system login starts the runtime and exits before creating the interface', async () => {
+  const f = await fixture(false, 'darwin', false, null, true, null, { background: true, paused: false });
+  expect(f.runtimeStarts()).toBe(1);
+  expect(f.events.quit).toBe(1);
+  expect(f.mainFrame).toBeUndefined();
+});
+
+test('paused login skips runtime startup until a manual open', async () => {
+  const paused = await fixture(false, 'darwin', false, null, true, null, { background: true, paused: true });
+  expect(paused.runtimeStarts()).toBe(0);
+  expect(paused.startupPaused()).toBe(true);
+  const manual = await fixture(false, 'darwin', false, null, true, null, { background: false, paused: true });
+  expect(manual.runtimeStarts()).toBe(1);
+  expect(manual.startupPaused()).toBe(false);
+});
+
+test('keeps a Windows login item disabled by the OS when its installation path contains spaces', async () => {
+  const f = await fixture(false, 'win32', false, null, true);
+  expect(f.loginRegistrations).toEqual([]);
+});
+
+
+test('registers a missing Windows login item with the background launch argument', async () => {
+  const f = await fixture(false, 'win32', false, null, true, null, { background: false, paused: false, windowsRegistered: false });
+  expect(f.loginRegistrations).toEqual([{name:'Mandala',path:'"C:\\Program Files\\Mandala\\Mandala.exe"',args:['--mandala-background'],openAtLogin:true}]);
 });
