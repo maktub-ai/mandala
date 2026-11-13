@@ -56,9 +56,28 @@ test("running schedules can be stopped without disabling the plan or losing hist
   await run.getByRole("button",{name:"停止本次运行",exact:true}).click();
   await expect(run).toContainText("已中断");await expect(plan).toContainText("已启用");
   await plan.getByRole("button",{name:"删除计划",exact:true}).click();
-  await plan.getByRole("button",{name:"确认删除",exact:true}).click();await expect(plan).toHaveCount(0);await page.locator(".automation-history > summary").click();await expect(page.locator(".automation-history .automation-run").filter({hasText:"Personal long review"})).toBeVisible();
+  await plan.getByRole("button",{name:"确认删除",exact:true}).click();await expect(plan).toHaveCount(0);await expect(page.locator(".automation-history .automation-run").filter({hasText:"Personal long review"})).toBeVisible();
   const data=await (await request.get("/api/automations")).json();
   expect(data.runs.find((r:any)=>r.automationId===schedule.id).status).toBe("interrupted");
+});
+
+test("recent runs show the latest five and can reveal older runs on a narrow screen",async({page,request})=>{
+  await setup(request);
+  const runs=Array.from({length:6},(_,index)=>({id:`run-${index}`,name:`Review ${index+1}`,status:"succeeded",cli:"codex",projectId:"schedule-reading",createdAt:new Date(Date.UTC(2026,0,index+1)).toISOString()}));
+  await page.route("**/api/automations",route=>route.fulfill({json:{version:1,automations:[],runs}}));
+  await page.setViewportSize({width:390,height:844});
+  await page.goto("/schedules?project=schedule-reading");
+  const history=page.getByRole("region",{name:"最近运行",exact:true});
+  const rows=history.getByRole("article");
+  await expect(rows).toHaveCount(5);
+  await expect(rows.first()).toContainText("Review 6");
+  await expect(rows.last()).toContainText("Review 2");
+  await history.getByRole("button",{name:"查看全部 6 条"}).click();
+  await expect(rows).toHaveCount(6);
+  await expect(rows.last()).toContainText("Review 1");
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await history.getByRole("button",{name:"收起",exact:true}).click();
+  await expect(rows).toHaveCount(5);
 });
 
 test("English narrow scheduling translates validation and keeps the form readable",async({page,request})=>{

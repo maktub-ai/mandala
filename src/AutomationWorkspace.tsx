@@ -68,6 +68,7 @@ export default function AutomationWorkspace({config,onOpenConversation,onEditing
   const createKey=useRef<string>(crypto.randomUUID()),commandIdentity=useComposerDraftIdentity();
   const [pendingCommands,setPendingCommands]=useState<Record<string,string>>(()=>{try{return pendingScheduleCommands(commandIdentity);}catch{return {};}});
   useEffect(()=>{const sync=()=>{try{setPendingCommands(pendingScheduleCommands(commandIdentity));}catch{/* Mutations fail closed if the stored checkpoint cannot be read. */}};sync();addEventListener("storage",sync);return()=>removeEventListener("storage",sync);},[commandIdentity]);
+  const [showAllRuns,setShowAllRuns]=useState(false);
   const [selectedId,setSelectedId]=useState(()=>new URLSearchParams(location.search).get("schedule")??"");
   const selectSchedule=(id:string)=>{const params=new URLSearchParams(location.search);id?params.set("schedule",id):params.delete("schedule");navigateAssetPage(location.pathname+(params.size?"?"+params:""));setSelectedId(id);};
   const [search,setSearch]=useState(""),[ruleStatus,setRuleStatus]=useState("all");
@@ -211,13 +212,16 @@ export default function AutomationWorkspace({config,onOpenConversation,onEditing
 
     {task?(<section className="automation-plans" aria-label={t("计划列表")}>
       {loading?<LoadingState label={localize('读取计划…', 'Loading schedules…')}/>:!filtered.length&&!loadError?<EmptyState icon="schedule"><p>{task?(localize('当前仅手动执行，可按需添加定时规则。', 'Manual execution; add a schedule when needed.')):search||ruleStatus!=="all"?(localize('没有匹配的计划。', 'No matching schedules.')):t("还没有定时任务")}</p>{(search||ruleStatus!=="all")&&<Button onClick={()=>{setSearch("");setRuleStatus("all");}}>{localize('清除筛选', 'Clear filters')}</Button>}{!config.agents.length&&<a href="/agents">{t("先创建一个 Agent")}</a>}</EmptyState>:filtered.map(renderPlan)}
-    </section>):<ListDetail className="schedule-list-detail" list={compactRows} detail={detail}/> }    {!manageOnly&&<Disclosure className="automation-help" title={<> <Icon name="info" size={14}/>{t("定时运行说明")} </>}><p>{localize('本地服务可用时执行；错过的运行按规则的补跑策略处理，状态检查可合并为一次待处理检查。', 'Schedules run while the local service is available. Missed runs follow each rule’s catch-up policy; state checks can merge into one pending check.')}</p>
+    </section>):<ListDetail className="schedule-list-detail" list={compactRows} detail={detail}/>}
+
+    {!task&&!(manageOnly&&!runs.length)&&<section className="automation-history" aria-labelledby="automation-history-title">
+      <header className="automation-history-heading"><h2 id="automation-history-title">{localize('最近运行', 'Recent runs')}</h2>{runs.length>0&&<span className="automation-history-count">{runs.length}</span>}</header>
+      {!runs.length?<p className="field-hint">{t("运行后，结果与审批会在这里显示。")}</p>:<div className="automation-history-list">{(showAllRuns?runs:runs.slice(0,5)).map(renderRun)}</div>}
+      {runs.length>5&&<Button variant="ghost" size="sm" className="automation-history-more" aria-expanded={showAllRuns} onClick={()=>setShowAllRuns(value=>!value)}>{showAllRuns?localize('收起', 'Show less'):localize(`查看全部 ${runs.length} 条`, `Show all ${runs.length}`)}</Button>}
+    </section>}
+    {!manageOnly&&<Disclosure className="automation-help" title={<> <Icon name="info" size={14}/>{t("定时运行说明")} </>}><p>{localize('本地服务可用时执行；错过的运行按规则的补跑策略处理，状态检查可合并为一次待处理检查。', 'Schedules run while the local service is available. Missed runs follow each rule’s catch-up policy; state checks can merge into one pending check.')}</p>
       <p>{t("同一计划的运行依次排队；等待审批时不会自动批准。暂停影响后续投递，已开始的运行继续；停止运行不会停用计划。")}</p>
       <p>{t("自动标题和记忆提炼由系统任务设置管理。")}</p></Disclosure>}
-
-    {!task&&!(manageOnly&&!runs.length)&&<Disclosure className="automation-history" title={<><Icon name="clock" size={15}/>{localize('全部运行记录', 'All run history')}<span>{runs.length}</span></>}>
-      {!runs.length?<p className="field-hint">{t("运行后，结果与审批会在这里显示。")}</p>:runs.map(renderRun)}
-    </Disclosure>}
   </section></>;
 }
 

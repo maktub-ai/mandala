@@ -58,3 +58,16 @@
 .schedules-workspace .schedule-row-meta { align-items:flex-start; white-space:normal; }
 .schedules-workspace .schedule-row-context { align-items:flex-start; }
 .schedules-workspace .schedule-row-context > .schedule-row-trigger { flex:0 1 auto; overflow:visible; }
+/* Run history reads as a page section; scheduling notes are a quiet footnote, not a list row. */
+.schedules-workspace .automation-history { display:flex; flex-direction:column; gap:4px; margin-top:12px; }
+.schedules-workspace .automation-history-heading { display:flex; align-items:center; gap:8px; justify-content:flex-start; }
+.schedules-workspace .automation-history-heading h2 { margin:0; font-size:var(--type-ui); font-weight:var(--weight-medium,500); color:var(--text); }
+.schedules-workspace .automation-history-count { min-width:20px; padding:0 6px; border-radius:999px; background:var(--raised); color:var(--muted); font-size:var(--type-meta); line-height:20px; text-align:center; font-variant-numeric:tabular-nums; }
+.schedules-workspace .automation-history > .field-hint { margin:4px 0 0; }
+.schedules-workspace .automation-history-more { align-self:flex-start; justify-self:start; margin-left:-8px; color:var(--muted); }
+.schedules-workspace .automation-help { justify-self:start; margin-top:-4px; }
+.schedules-workspace .automation-help > summary { display:inline-flex; width:auto; min-height:28px; gap:4px; padding:4px 8px; margin-left:-8px; }
+.schedules-workspace .automation-help .ui-disclosure-title { flex:none; gap:6px; }
+.schedules-workspace .automation-help .ui-disclosure-chevron { margin-left:0; width:14px; height:14px; }
+.schedules-workspace .automation-help > .ui-disclosure-content { max-width:640px; padding:4px 0 0 22px; }
+.schedules-workspace .automation-help > .ui-disclosure-content p { margin:0 0 4px; }

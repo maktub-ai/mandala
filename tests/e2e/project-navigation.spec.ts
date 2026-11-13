@@ -127,15 +127,16 @@ test('global start and project links preserve automatically saved configuration 
 
 test('fix1 returning to the selected chat from tasks assets and rules restores its URL and draft',async({page,request})=>{
  const root=mkdtempSync(join(tmpdir(),'openmana-return-'));
- const {revision}=await(await request.get('/api/config')).json();
- expect((await request.put('/api/config',{data:{revision,config:{version:2,projects:[{id:'return-project',name:'Return project',cwd:root,agentIds:['return-worker'],resources:[],mcp:[],skills:[]}],agents:[{id:'return-worker',name:'Return worker',instructions:'Synthetic navigation only',defaultCli:'codex',models:{},mcp:[],skills:[]}]}}})).ok()).toBe(true);
+ const {config,revision}=await(await request.get('/api/config')).json();
+ expect((await request.put('/api/config',{data:{revision,config:{...config,projects:[...config.projects,{id:'return-project',name:'Return project',cwd:root,agentIds:['return-worker'],resources:[],mcp:[],skills:[]}],agents:[...config.agents,{id:'return-worker',name:'Return worker',instructions:'Synthetic navigation only',defaultCli:'codex',models:{},mcp:[],skills:[]}]}}})).ok()).toBe(true);
  const sourceResponse=await request.post('/api/conversations',{data:{projectId:'return-project',agentId:'return-worker',model:'model-fixture',cli:'codex'}});expect(sourceResponse.ok()).toBe(true);
  const source=(await sourceResponse.json()).id;
  expect((await request.post('/api/conversations/'+source+'/messages',{data:{text:'Synthetic return navigation'}})).ok()).toBe(true);
  await expect.poll(async()=>(await(await request.get('/api/conversations/'+source)).json()).conversation.status).toBe('idle');
  const timestamp=new Date().toISOString();
  // This read fixture drives the existing history callback to the real, selected canonical chat.
- await page.route('**/api/automations',route=>route.fulfill({json:{version:1,automations:[],runs:[{id:'return-run',automationId:'return-rule',name:'Return rule',projectId:'return-project',agentId:'return-worker',cli:'codex',instructions:'Synthetic return navigation',scheduledAt:timestamp,createdAt:timestamp,status:'succeeded',conversationId:source}]}}));
+ const rule={id:'return-rule',name:'Return rule',projectId:'return-project',agentId:'return-worker',cli:'codex',instructions:'Synthetic return navigation',enabled:false,schedule:{kind:'daily',time:'09:00',timeZone:'Asia/Singapore'}};
+ await page.route('**/api/automations',route=>route.fulfill({json:{version:1,automations:[rule],runs:[{id:'return-run',automationId:rule.id,name:rule.name,projectId:rule.projectId,agentId:rule.agentId,cli:rule.cli,instructions:rule.instructions,scheduledAt:timestamp,createdAt:timestamp,status:'succeeded',conversationId:source}]}}));
  const state=async()=>await(await request.get('/api/automations')).json();
  try {
   await page.goto('/?project=return-project&conversation='+source);
@@ -145,8 +146,8 @@ test('fix1 returning to the selected chat from tasks assets and rules restores i
    await page.getByRole('textbox',{name:'消息',exact:true}).fill('Keep same-chat draft '+area);
    await openArea(page,area==='assets'?'资产库':'任务');
    if(area==='rules') {
-    await page.locator('.task-legacy-rules > summary').click();await page.locator('.automation-history > summary').click();
-    await page.locator('.automation-run').filter({hasText:'Return rule'}).getByRole('button',{name:'查看对话',exact:true}).click();
+    await page.locator('.task-legacy-rules > summary').click();
+    await page.getByRole('region',{name:'最近运行',exact:true}).locator('.automation-run').filter({hasText:'Return rule'}).getByRole('button',{name:'查看对话',exact:true}).click();
    } else {
     await page.locator('#navigation-chat').getByRole('button',{name:detail.conversation.title,exact:true}).click();
    }
