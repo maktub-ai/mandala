@@ -4,6 +4,7 @@ import ProjectNavigation from './ProjectNavigation';
 import DesktopCliSettings from './DesktopCliSettings';
 import DesktopUpdateSettings from './DesktopUpdateSettings';
 import VoiceSettings from './VoiceSettings';
+import MemoryRetrievalSettings from './MemoryRetrievalSettings';
 import ExecutionMachinesSettings from './ExecutionMachinesSettings';
 import { PageHeader, DetailSection } from './ui/WorkspacePage';
 import AgentOverview from './AgentOverview';
@@ -296,6 +297,7 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
               {kind === "memory" && <Disclosure title={localize('记忆行为说明', 'Memory behavior')}><p className="field-hint">{localize('关闭生成期间的新内容不会在重新开启后自动补记。重新开启默认只处理后续内容；已有深层记忆任务暂停后继续。', 'When generation is off, new content is excluded from automatic memory. Re-enabling applies to future content. Existing deep-memory work pauses and resumes.')}</p><p className="field-hint">{t("记忆保留工作来源，按当前权限与项目范围加载；可在记忆页纠正或撤回。")}</p></Disclosure>}
             </section>;
           })}
+          <MemoryRetrievalSettings/>
           <Disclosure className="settings-help settings-card" title={<> <Icon name="settings" size={16} />{t("系统默认与运行说明")} </>}>
             <p>{t("标题默认关闭，记忆生成与读取默认开启。生成任务使用所选 CLI 和模型，产生模型用量。")}</p>
             <p>{t("系统任务不加载 Project 与 Agent 能力；CLI 的全局扩展仍可能启动。")}</p>

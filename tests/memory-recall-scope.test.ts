@@ -81,7 +81,7 @@ test('automatic turn recall uses one bounded query and retains authorized lexica
  embed.mockImplementation(() => new Promise(() => {}));
  const [facts,scenes]=await s.recall.turnContextSearch(principal,input,AbortSignal.timeout(30));
  expect(embed).toHaveBeenCalledTimes(1);
- expect(embed.mock.calls[0][0].every(text=>text.startsWith('task:'))).toBe(true);
+ expect(embed.mock.calls[0][0].every(text=>text==='deployment')).toBe(true);
  expect(facts.degraded).toBe(true);
  expect(new Set(facts.items.map(item=>item.recordId))).toEqual(new Set([s.global.recordId,s.own.recordId]));
  expect(scenes?.items).toEqual([]);

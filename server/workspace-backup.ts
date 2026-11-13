@@ -5,7 +5,7 @@ import {chmod,copyFile,lstat,mkdir,mkdtemp,readFile,readdir,realpath,rename,rm,w
 import {basename,dirname,isAbsolute,join,relative,resolve,sep} from 'node:path';
 import {acquireWorkspaceMaintenance} from './store';
 
-const files=['state.sqlite','config.json','knowledge.json','automations.json','desktop-appearance.json','desktop-preferences.json'];
+const files=['state.sqlite','config.json','knowledge.json','automations.json','desktop-appearance.json','desktop-preferences.json','memory-retrieval.json'];
 const directories=['blobs','attachments','workspaces','outputs','market/packages'];
 type Entry={path:string;size:number;sha256:string;mode:number};
 type Manifest={version:1;createdAt:string;sourceHome:string;sourceRealHome:string;files:Entry[];directories:string[]};

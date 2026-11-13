@@ -1,0 +1,28 @@
+import {test,expect} from '@playwright/test';
+import {chooseOption} from './helpers/select';
+test('keyword default and opt-in embedding settings persist without exposing credentials',async({page,request},testInfo)=>{
+ await page.goto('/settings/system');
+ const section=page.getByRole('region',{name:'记忆检索',exact:true});
+ await expect(section.getByRole('switch',{name:'启用向量检索'})).not.toBeChecked();
+ await expect(section.getByText('关键词检索（默认）',{exact:true})).toBeVisible();
+ await section.getByRole('switch',{name:'启用向量检索'}).check();
+ await section.getByRole('button',{name:'保存检索设置'}).click();
+ await expect(section.getByRole('alert')).toBeVisible();
+ await section.getByLabel('服务地址',{exact:true}).fill('https://embedding.example/v1');
+ await section.getByLabel('嵌入模型',{exact:true}).fill('synthetic-model');
+ await section.getByLabel('API Key',{exact:true}).fill('synthetic-key');
+ await section.getByRole('button',{name:'保存检索设置'}).click();
+ await expect(section.getByText('已保存',{exact:true})).toBeVisible();
+ const saved=await (await request.get('/api/v2/memory/retrieval')).json();expect(saved.enabled).toBe(true);expect(saved.hasApiKey).toBe(true);expect(JSON.stringify(saved)).not.toContain('synthetic-key');
+ await page.reload();await expect(section.getByRole('switch',{name:'启用向量检索'})).toBeChecked();await expect(section.getByLabel('API Key',{exact:true})).toHaveValue('');
+ await section.screenshot({path:testInfo.outputPath('memory-retrieval-light.png')});
+ await page.emulateMedia({colorScheme:'dark'});await page.setViewportSize({width:390,height:844});
+ await expect(section.getByLabel('服务地址',{exact:true})).toHaveValue('https://embedding.example/v1');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await section.screenshot({path:testInfo.outputPath('memory-retrieval-dark-mobile.png')});
+ await chooseOption(page,'向量提供方','ollama');
+ await section.getByRole('switch',{name:'启用向量检索'}).uncheck();await section.getByRole('button',{name:'保存检索设置'}).click();
+ await expect(section.getByText('已保存',{exact:true})).toBeVisible();
+ await page.reload();await expect(section.getByRole('switch',{name:'启用向量检索'})).not.toBeChecked();
+ expect((await (await request.get('/api/v2/memory/retrieval')).json()).hasApiKey).toBe(false);
+});

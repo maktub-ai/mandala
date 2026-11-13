@@ -367,7 +367,7 @@ test.each(['withdraw','correct','acl'] as const)('OMP delayed factory validates 
 // No real model or native generation: exercise current reading policy at both handoff boundaries.
 test.each(['combined','native-preparation','stopped-reading'] as const)('request reading fenced during $0 cannot inject selected facts',async mode=>{
  let queryCount=0,s!:Awaited<ReturnType<typeof setup>>;
- s=await setup(async texts=>{if(texts.some(t=>t.startsWith('task:'))&&++queryCount===1&&mode==='combined')s.config.system!.memory!.request!.read=false;return texts.map(()=>[1,0]);});
+ s=await setup(async texts=>{if(texts.some(t=>t==='pnpm')&&++queryCount===1&&mode==='combined')s.config.system!.memory!.request!.read=false;return texts.map(()=>[1,0]);});
  s.config.system={cli:'codex',memory:{request:{generate:false,read:true},session:{generate:false,read:false},idleHours:6}};await s.runtime.initialize();
  const root={userId:'local'},collection=s.runtime.memory.ensureCollection(root,{projectId:null,agentId:null}),source=s.store.createConversation({projectId:'',agentId:'',cli:'codex',model:null}),text='Synthetic current request uses pnpm.';
  const event=s.store.appendEvent(source.id,'user',{text});s.store.appendEvent(source.id,'status',{status:'idle'});

@@ -55,7 +55,7 @@ test('embedding failures and malformed vectors visibly fall back to BM25',async(
 });
 test('exact paths remain ahead of semantic distractors within eight-record budget',async()=>{
  const s=setup(['Change server/memory-store.ts carefully',...Array.from({length:12},(_,i)=>`semantic distractor ${i}`)]);
- const recall=createMemoryRecall(s.memory,{embed:async(texts)=>texts.map(text=>text.startsWith('task:')?[1,0]:text.includes('memory-store.ts')?[0,1]:[1,0]),model:'synthetic'});
+ const recall=createMemoryRecall(s.memory,{embed:async(texts)=>texts.map(text=>text==='server/memory-store.ts'?[1,0]:text.includes('memory-store.ts')?[0,1]:[1,0]),model:'synthetic'});
  const result=await recall.hybridSearch(actor,{projectId:'p',query:'server/memory-store.ts'});
  expect(result.items[0].text).toContain('server/memory-store.ts');expect(result.items).toHaveLength(8);expect(result.items[0].reason).toContain('精确');
 });
@@ -68,7 +68,7 @@ test('oversized documents embed all bounded overlapping chunks instead of silent
  const tail='essential Tokyo tail',s=setup(['甲'.repeat(3000)+tail]),seen:string[]=[];
  const recall=createMemoryRecall(s.memory,{embed:async texts=>{seen.push(...texts);return texts.map(vector);},model:'synthetic'});
  await recall.hybridSearch(actor,{projectId:'p',query:'日本'});
- const documents=seen.filter(t=>t.startsWith('title:'));expect(documents.length).toBeGreaterThan(1);expect(documents.some(t=>t.includes(tail))).toBe(true);
+ const documents=seen.filter(t=>t!=='日本');expect(documents.length).toBeGreaterThan(1);expect(documents.some(t=>t.includes(tail))).toBe(true);
  expect(documents.every(t=>Buffer.byteLength(t,'utf8')<1500)).toBe(true);
 });
 test('query-await correction and source permission revoke exclude cached vectors from retrieval',async()=>{
@@ -78,7 +78,7 @@ test('query-await correction and source permission revoke exclude cached vectors
  const result=await recall.hybridSearch(actor,{projectId:'p',query:'日本'});expect(result.items).toEqual([]);expect(result.indexLag).toBe(1);
 });
 test('dimension mismatch degrades to lexical search without failing the caller',async()=>{
- const s=setup(['travels to Tokyo']),recall=createMemoryRecall(s.memory,{embed:async texts=>texts.map(t=>t.startsWith('task:')?[1,0,0]:[1,0]),model:'synthetic'});
+ const s=setup(['travels to Tokyo']),recall=createMemoryRecall(s.memory,{embed:async texts=>texts.map(t=>t==='Tokyo'?[1,0,0]:[1,0]),model:'synthetic'});
  const result=await recall.hybridSearch(actor,{projectId:'p',query:'Tokyo'});expect(result.degraded).toBe(true);expect(result.items[0].text).toContain('Tokyo');
 });
 test('changing validity or semantic scope creates a fresh vector key while retraction blocks old cached text',async()=>{
@@ -95,17 +95,6 @@ test('runtime background indexing advances old authorized data without a query o
  try{runtime.start();await expect.poll(()=>s.store.database.prepare('SELECT COUNT(*) AS n FROM memory_vectors').get()!.n,{timeout:7000}).toBe(64);
  await runtime.refreshVectors();expect(s.store.database.prepare('SELECT COUNT(*) AS n FROM memory_vectors').get()!.n).toBe(70);expect(nativeCalls).toBe(0);
  }finally{await runtime.close();}
-});
-test('local model digest binds persisted vectors so a mutable tag cannot reuse old model weights',async()=>{
- const {vi}=await import('vitest'),s=setup(['travels to Tokyo']);let digest='version-one',documentCalls=0;
- vi.stubGlobal('fetch',async(url:string,init?:RequestInit)=>{
-  if(url.endsWith('/api/tags'))return Response.json({models:[{name:'embeddinggemma:latest',digest}]});
-  const input=JSON.parse(init!.body as string).input as string[];documentCalls+=input.filter(t=>t.startsWith('title:')).length;
-  return Response.json({embeddings:input.map(t=>[...vector(t),...Array(766).fill(0)])});
- });
- try{await createMemoryRecall(s.memory).hybridSearch(actor,{projectId:'p',query:'日本'});digest='version-two';await createMemoryRecall(s.memory).hybridSearch(actor,{projectId:'p',query:'日本'});
- expect(documentCalls).toBe(2);expect(s.store.database.prepare('SELECT model FROM memory_vectors ORDER BY model').all().map(r=>r.model)).toEqual(['embeddinggemma:latest@version-one','embeddinggemma:latest@version-two']);
- }finally{vi.unstubAllGlobals();}
 });
 test('cached vectors cannot bypass source permission revoked during an awaited query',async()=>{
  const {DomainError}=await import('../shared/workspace-contracts'),{createMemoryJobs}=await import('../server/memory-jobs'),{createMemoryPipeline}=await import('../server/memory-pipeline'),{evidenceFixture}=await import('./memory-evidence-fixture');
@@ -140,4 +129,20 @@ test('mid-await reading disable excludes automatic recall while human library se
  const runtime=createMemoryRuntime({home:s.home,store:s.store,schedule:false,loadConfig:async()=>config,embed:async texts=>{config.system!.memory!.request!.read=false;return texts.map(vector);}});
  try{await runtime.getSettings();expect((await runtime.recall.hybridSearch(root,{projectId:'p',query:'日本',kinds:['request']})).items).toEqual([]);
  expect((await runtime.recall.hybridSearch(root,{projectId:'p',query:'日本'})).items[0].text).toContain('Tokyo');}finally{await runtime.close();}
+});
+
+test('default retrieval uses keywords without any embedding request or degraded status',async()=>{
+ const {vi}=await import('vitest'),s=setup(['travels to Tokyo']);
+ const network=vi.fn(async()=>{throw new Error('No model service installed');});vi.stubGlobal('fetch',network);
+ const recall=createMemoryRecall(s.memory),input={projectId:'p',query:'Tokyo'};
+ try{
+  const result=await recall.hybridSearch(actor,input);
+  expect(result.items[0].text).toContain('Tokyo');expect(result.degraded).toBe(false);expect(result.indexLag).toBe(0);
+  await recall.contextSearch(actor,input);
+  await recall.turnContextSearch(actor,input,new AbortController().signal);
+  await recall.refreshVectors(actor,{projectId:'p'});
+  await recall.refreshGenerationVectors(actor,{projectId:'p'});
+  const ranked=await recall.rankCandidates(actor,{records:s.memory.list(actor,{projectId:'p'}),query:'Tokyo',limit:5});
+  expect(ranked.degraded).toBe(false);expect(network).not.toHaveBeenCalled();
+ }finally{await recall.close();vi.unstubAllGlobals();}
 });

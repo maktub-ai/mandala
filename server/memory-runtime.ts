@@ -1,3 +1,4 @@
+import {createMemoryRetrieval} from './memory-retrieval';
 import {createMemoryProfiles} from './memory-profiles';
 import { workspacePrincipal } from './workspace-identity';
 import type { Config } from '../shared/types';
@@ -59,8 +60,8 @@ export function createMemoryRuntime({home,store,loadConfig,generate=nativeGenera
   acceptedReadSequence=sequence;configCache=value;syncGenerationSettings(value);return value;
  };
  const authorizeProject=(principal:Principal,id:string)=>{if(principal.agentId&&!configCache?.projects.find(project=>project.id===id)?.agentIds.includes(principal.agentId))throw new DomainError('forbidden',403,'Project membership required');};
- const lifetime=new AbortController();
- const services=memoryServices(home,store,authorizeConversationRead,authorizeProject,{embed,signal:lifetime.signal,revalidate:async()=>{await currentConfig();}},()=>configCache?(['request','session'] as const).filter(kind=>normalizeMemorySettings(configCache!)[kind].read):[],()=>configCache?(['request','session'] as const).filter(kind=>{const settings=normalizeMemorySettings(pendingSettingsSave?.config??configCache!)[kind];return settings.read||settings.generate;}):[]),{memory,jobs,tasks,profiles}=services;
+ const lifetime=new AbortController(),retrieval=createMemoryRetrieval(home);
+ const services=memoryServices(home,store,authorizeConversationRead,authorizeProject,{embed,...!embed?{provider:retrieval.provider}:{},signal:lifetime.signal,revalidate:async()=>{await currentConfig();}},()=>configCache?(['request','session'] as const).filter(kind=>normalizeMemorySettings(configCache!)[kind].read):[],()=>configCache?(['request','session'] as const).filter(kind=>{const settings=normalizeMemorySettings(pendingSettingsSave?.config??configCache!)[kind];return settings.read||settings.generate;}):[]),{memory,jobs,tasks,profiles}=services;
  // Separate eligibility intervals from reset cutoffs: existing sources and queued jobs stay intact.
  function syncGenerationSettings(config:Config){store.transaction(()=>{
   let requestResumed=false;
@@ -226,14 +227,14 @@ export function createMemoryRuntime({home,store,loadConfig,generate=nativeGenera
   }).map(({conversationId,text})=>({conversationId,text}));
   return {records,summaries};
  }
- return {...services,captureConversation,scan,drain,organize,getSettings,result,summaries,refreshVectors,
+ return {...services,retrieval,captureConversation,scan,drain,organize,getSettings,result,summaries,refreshVectors,
   settingsChanged,beginSettingsSave,finishSettingsSave,
   reading:async(_principal?:Principal)=>{const settings=await getSettings();return (['request','session'] as const).filter(kind=>settings[kind].read);},
   initialize:async()=>{await migrateMemory(home,store,memory);memory.repairLegacyContexts(root);memory.retireUnscopedProfiles(root);},
   // Let the desktop load its first history before polling starts CPU-heavy catch-up.
   start(){if(timer||closed)return;const startAfter=Date.now()+5000;const tick=()=>{const now=Date.now();if(now<startAfter)return;if(now>=nextScan){nextScan=now+5000;void scan().then(drain).catch(()=>{});}else void drain().catch(()=>{});if(now>=nextIndexRefresh)void refreshVectors().catch(()=>{nextIndexRefresh=Date.now()+60000;});};timer=setInterval(tick,1000);timer.unref();},
   hasActiveWork:()=>!!processing||nativeGenerations.size>0,
-  async close(){closed=true;if(timer)clearInterval(timer);lifetime.abort();await scanning;await processing;await indexing;await services.recall.close();await Promise.allSettled([...nativeGenerations]);},
+  async close(){closed=true;retrieval.close();if(timer)clearInterval(timer);lifetime.abort();await scanning;await processing;await indexing;await services.recall.close();await Promise.allSettled([...nativeGenerations]);},
  };
 }
 export type MemoryRuntime=ReturnType<typeof createMemoryRuntime>;

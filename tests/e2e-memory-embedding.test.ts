@@ -19,10 +19,10 @@ test('UI embedding fixture exercises healthy async persistent retrieval without 
   const embed=vi.fn(fixtureMemoryEmbed),recall=createMemoryRecall(memory,{embed});
   const result=await recall.hybridSearch(root,{projectId:null,query:'Recall the weekly personal reading plan'});
   expect(result.degraded).toBe(false);expect(result.indexLag).toBe(0);expect(result.items.map(r=>r.text)).toEqual(['Weekly personal reading plan']);
-  const documents=embed.mock.calls.flatMap(([texts])=>texts).filter(text=>text.startsWith('title: memory'));
+  const documents=embed.mock.calls.flatMap(([texts])=>texts).filter(text=>['Weekly personal reading plan','Database backup rotation'].includes(text));
   await recall.hybridSearch(root,{projectId:null,query:'weekly personal reading plan'});
-  expect(embed.mock.calls.flatMap(([texts])=>texts).filter(text=>text.startsWith('title: memory'))).toEqual(documents);
-  expect(embed.mock.calls.flatMap(([texts])=>texts).some(text=>text.startsWith('task: search result'))).toBe(true);
+  expect(embed.mock.calls.flatMap(([texts])=>texts).filter(text=>['Weekly personal reading plan','Database backup rotation'].includes(text))).toEqual(documents);
+  expect(embed.mock.calls.flatMap(([texts])=>texts).some(text=>text==='Recall the weekly personal reading plan')).toBe(true);
   expect(fetch).not.toHaveBeenCalled();await recall.close();
  }finally{store.close();rmSync(home,{recursive:true,force:true});}
 });

@@ -127,3 +127,12 @@ test('offline backup and restore retain the desktop appearance document', async 
  expect(readFileSync(join(f.restored,'desktop-appearance.json'),'utf8')).toBe(appearance);
  expect(readFileSync(join(f.restored,'desktop-preferences.json'),'utf8')).toBe(preferences);
 });
+
+test('offline backup preserves opt-in memory retrieval settings and private credentials',async()=>{
+ const f=fixture(),store=openStore(f.home);store.close();
+ const settings={enabled:true,provider:'openai',baseUrl:'https://embedding.example/v1',model:'synthetic-model',apiKey:'synthetic-key'};
+ writeFileSync(join(f.home,'memory-retrieval.json'),JSON.stringify(settings),{mode:0o600});
+ await backupWorkspace(f.home,f.snapshot);await restoreWorkspace(f.snapshot,f.restored);
+ expect(JSON.parse(readFileSync(join(f.restored,'memory-retrieval.json'),'utf8'))).toEqual(settings);
+ expect(statSync(join(f.restored,'memory-retrieval.json')).mode&0o777).toBe(0o600);
+});

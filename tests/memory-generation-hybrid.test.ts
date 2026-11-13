@@ -33,7 +33,7 @@ test('generator supplied-pool hook shares cache, bypasses read switches, and pre
  const s=await setup(Array.from({length:9},(_,i)=>`travels to Tokyo ${i}`));
  await s.runtime.recall.refreshVectors(root,{projectId:null});s.embed.mockClear();
  const ranked=await s.runtime.recall.rankCandidates(root,{records:s.facts,query:'日本旅行',limit:5});
- expect(ranked.degraded).toBe(false);expect(ranked.candidates).toHaveLength(5);expect(s.embed.mock.calls.flat(2).every(t=>t.startsWith('task:'))).toBe(true);
+ expect(ranked.degraded).toBe(false);expect(ranked.candidates).toHaveLength(5);expect(s.embed.mock.calls.flatMap(([texts])=>texts).every(t=>t.includes('日本'))).toBe(true);
  await s.runtime.drain();expect(s.generate).toHaveBeenCalledOnce();expect(promptData(s.generate.mock.calls[0][1]).records).toHaveLength(5);
 });
 test('cold and provider-failed generation pools visibly degrade to BM25 without dropping lexical hits',async()=>{
@@ -101,9 +101,9 @@ test('long scene generation keeps lexical relevance and cross-word semantics at 
  const s=await setup(['Tokyo travel context']),fact=s.facts[0];
  const scene=s.runtime.memory.applyProposal(root,{...s.atom,layer:'L2',text:'Tokyo travel planning and destination notes. '+ 'Background context for the trip. '.repeat(100),semanticKey:'scene.trip',evidence:fact.evidence,support:[],dependencies:[{recordId:fact.recordId,revision:fact.revision}]},s.c.generation,'layer_summary')!;
  const cold=await s.runtime.recall.rankCandidates(root,{records:[scene],query:'Tokyo itinerary',limit:15});expect(cold.candidates[0].reason).toBe('bm25');
- s.embed.mockImplementation(async texts=>texts.map(text=>text.startsWith('task:')?[1,0]:[0.3,Math.sqrt(0.91)]));await s.runtime.refreshVectors();
+ s.embed.mockImplementation(async texts=>texts.map(text=>['Tokyo itinerary','日本観光計画'].includes(text)?[1,0]:[0.3,Math.sqrt(0.91)]));await s.runtime.refreshVectors();
  for(const query of ['Tokyo itinerary','日本観光計画']){
   const result=await s.runtime.recall.rankCandidates(root,{records:[scene],query,limit:15});expect(result.degraded).toBe(false);expect(result.candidates.map(c=>c.record.recordId)).toContain(scene.recordId);
-  expect((await s.runtime.recall.hybridSearch(root,{projectId:null,query})).items).toEqual([]);
+  expect((await s.runtime.recall.hybridSearch(root,{projectId:null,query})).items.map(item=>item.recordId)).toContain(scene.recordId);
  }
 });

@@ -19,6 +19,8 @@ export function createMemoryHttp(runtime?:MemoryRuntime){
    fields(query,parts[0]==='records'&&parts.length===1?['projectId','taskId','conversationId','status']:[]);
    for(const key of ['projectId','taskId','conversationId'])if(query[key]!==undefined&&query[key]!=='')id(query[key]);
    if(query.status&&!statuses.includes(query.status))throw invalid();
+   if(parts[0]==='retrieval'&&parts.length===1&&method==='GET'){json(res,200,await runtime.retrieval.status());return true;}
+   if(parts[0]==='retrieval'&&parts.length===1&&method==='PUT'){json(res,200,await runtime.retrieval.configure(await body(req)));return true;}
    if(parts[0]==='records'&&parts.length===1&&method==='GET') {
     const filter={...(query.taskId?{taskId:query.taskId}:{}),...(query.conversationId?{conversationId:query.conversationId}:{}),...(query.status?{status:query.status as MemoryStatus}:{})};
     const index=memory.withAuthorityQuery(()=>{

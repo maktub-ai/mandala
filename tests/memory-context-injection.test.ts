@@ -14,7 +14,7 @@ const root={userId:'local'},cleanups:(()=>Promise<void>)[]=[];
 afterEach(async()=>{for(const close of cleanups.splice(0))await close();});
 async function setup(){
  const home=mkdtempSync(join(tmpdir(),'memory-context-')),store=openStore(home),config=(await readConfiguredRuntime(home)).config,queries:string[]=[];
- const runtime=createMemoryRuntime({home,store,loadConfig:async()=>config,schedule:false,verifyOutput:false,generate:async()=>'[]',embed:async texts=>{queries.push(...texts.filter(t=>t.startsWith('task:')));return texts.map(()=>[1,0]);}});
+ const runtime=createMemoryRuntime({home,store,loadConfig:async()=>config,schedule:false,verifyOutput:false,generate:async()=>'[]',embed:async texts=>{queries.push(...texts);return texts.map(()=>[1,0]);}});
  await runtime.initialize();
  const collection=runtime.memory.ensureCollection(root,{projectId:null,agentId:null});
  const add=(text:string)=>{
