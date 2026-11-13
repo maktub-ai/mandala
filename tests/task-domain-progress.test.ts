@@ -12,13 +12,14 @@ test('optional fields stay empty; participants and execution Chats have distinct
  const {store,tasks}=setup(),a=store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null}),b=store.createConversation({projectId:'p',agentId:'b',cli:'codex',model:null});
  const task=tasks.createTask(p,{goal:'Long-term goal'},'new');expect(task).toMatchObject({criteria:[],projectId:null,assigneeAgentId:null,participantAgentIds:[],conversationIds:[]});
  const patch={participantAgentIds:['a','b'],goal:'Edited goal'};
- const edited=tasks.updateTask(p,task.id,1,patch,'edit');tasks.createExecution(p,task.id,{conversationId:a.id,agentId:'a',projectId:'p',request:'First'},'first');tasks.createExecution(p,task.id,{conversationId:b.id,agentId:'b',projectId:'p',request:'Second'},'second');const registered=tasks.getTask(p,task.id);expect(registered).toMatchObject({...patch,conversationIds:[a.id,b.id],revision:2,projectId:null,assigneeAgentId:null});
+ tasks.updateTask(p,task.id,1,patch,'edit');const first=tasks.createExecution(p,task.id,{conversationId:a.id,agentId:'a',projectId:'p',request:'First'},'first');tasks.createExecution(p,task.id,{conversationId:b.id,agentId:'b',projectId:'p',request:'Second'},'second');const registered=tasks.getTask(p,task.id);expect(registered).toMatchObject({...patch,revision:2,projectId:null,assigneeAgentId:null});
+ expect([...registered.conversationIds].sort()).toEqual([a.id,b.id].sort());
  expect(tasks.updateTask(p,task.id,1,patch,'edit')).toEqual(registered);expect(tasks.listLinkedTasks(p,a.id).map(t=>t.id)).toEqual([task.id]);
  expect(tasks.getTask({...p,agentId:'b'},task.id).id).toBe(task.id);
  expect(tasks.listTasks({...p,agentId:'b'}).map(task=>task.id)).toEqual([task.id]);expect(tasks.listTasks({...p,agentId:'unrelated'})).toEqual([]);
  expect(()=>tasks.updateTask(p,task.id,1,{goal:'Stale'},'stale')).toThrow(expect.objectContaining({code:'revision_conflict'}));
  expect(()=>tasks.updateTask(p,task.id,2,{goal:'Conflicting'},'edit')).toThrow(expect.objectContaining({code:'idempotency_conflict'}));
- tasks.removeExecution(p,task.id,2,registered.executions[0].id,'remove');expect(tasks.listLinkedTasks(p,a.id)).toEqual([]);
+ tasks.removeExecution(p,task.id,2,first.id,'remove');expect(tasks.listLinkedTasks(p,a.id)).toEqual([]);
 });
 test('explicit user review and acceptance work without execution or criteria for every legacy acceptance',()=>{
  const {tasks}=setup();for(const acceptance of ['human','checks','delivery'] as const){const task=tasks.createTask(p,{goal:acceptance,acceptance},acceptance);

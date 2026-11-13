@@ -58,11 +58,18 @@ test('one config hydration shares inherited memory reads and renews collection a
   const {chat,source}=evidence();store.appendEvent(chat.id,'metadata',{memoryUse:'acknowledged',items:[{recordId:record.recordId,revision:record.revision}]});
   const result=await createSkillService(home,store)('a','skill_register',{name:'shared-'+i,content:'---\nname: shared-'+i+'\ndescription: Shared evidence\n---\nSynthetic instructions'},'seed-'+i,()=>{},source) as {skill:{id:string}};ids.push(result.skill.id);
  }
- const payload=store.database.prepare('SELECT data FROM memory_sources WHERE id=?').get(captured.id)!.data,parse=vi.spyOn(JSON,'parse');
+ const payload=store.database.prepare('SELECT data FROM memory_sources WHERE id=?').get(captured.id)!.data;
+ // Registration already warmed the source cache. Advance its revision to exercise a cold read.
+ store.database.prepare('UPDATE memory_sources SET data=? WHERE id=?').run(payload,captured.id);
+ const parse=vi.spyOn(JSON,'parse');
  const config=(await readConfig(home)).config;
  const skills=config.skillLibrary!.filter(skill=>ids.includes(skill.id));expect(skills).toHaveLength(3);
  expect(skills.every(skill=>skill.content?.includes('Synthetic instructions'))).toBe(true);
  expect(parse.mock.calls.filter(([value])=>value===payload)).toHaveLength(1);
+ parse.mockClear();
+ const cached=(await readConfig(home)).config.skillLibrary!.filter(skill=>ids.includes(skill.id));
+ expect(cached).toEqual(skills);
+ expect(parse.mock.calls.filter(([value])=>value===payload)).toHaveLength(0);
  const asset=memory.memory.options.assets.getAuthorizedAsset(root,collection.id);memory.memory.options.assets.setLifecycle(root,asset.id,'retracted',asset.revision);
  const unavailable=(await readConfig(home)).config.skillLibrary!.filter(skill=>ids.includes(skill.id));expect(unavailable).toHaveLength(3);
  expect(unavailable.every(skill=>skill.unavailable&&skill.content===undefined)).toBe(true);
