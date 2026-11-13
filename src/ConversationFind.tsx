@@ -31,20 +31,23 @@ function textRanges(root: HTMLElement, query: string): Range[] {
 }
 
 type Highlights = { set(name: string, value: unknown): void; delete(name: string): void };
-export default function ConversationFind({ root, conversationId, version, hasEarlier, onInspect }: { root: RefObject<HTMLDivElement | null>; conversationId: string; version: unknown; hasEarlier: boolean; onInspect: () => void }) {
+export default function ConversationFind({ root, conversationId, version, hasEarlier, historyState, onLoadEarlier, onInspect }: { root: RefObject<HTMLDivElement | null>; conversationId: string; version: unknown; hasEarlier: boolean; historyState: 'idle' | 'loading' | 'error'; onLoadEarlier: () => void; onInspect: () => void }) {
   const {text: localize } = useLanguage(), say = (zh: string, en: string) => localize(zh, en);
-  const [open, setOpen] = useState(false), [query, setQuery] = useState(''), [index, setIndex] = useState(0), [count, setCount] = useState(0);
+  const [openedConversation, setOpenedConversation] = useState(''), [query, setQuery] = useState(''), [index, setIndex] = useState(0), [count, setCount] = useState(0);
   const input = useRef<HTMLInputElement>(null), matches = useRef<Range[]>([]), restoreFocus = useRef<HTMLElement | null>(null);
+  const open=!!conversationId&&openedConversation===conversationId;
+  const loadHistory=useRef(onLoadEarlier);loadHistory.current=onLoadEarlier;
+  useEffect(()=>{if(open&&hasEarlier&&historyState==='idle')loadHistory.current();},[open,hasEarlier,historyState,version]);
   const composing = useRef(false);
   const inspect = useRef(onInspect); inspect.current = onInspect;
-  const close = () => { setOpen(false); restoreFocus.current?.focus({ preventScroll: true }); };
-  useEffect(() => { setOpen(false); setQuery(''); }, [conversationId]);
+  const close = () => { setOpenedConversation(''); restoreFocus.current?.focus({ preventScroll: true }); };
+  useEffect(() => { setOpenedConversation(''); setQuery(''); }, [conversationId]);
   useShortcuts((id, event) => {
       if (id !== 'find' || !conversationId) return;
       event.preventDefault();
       if (!input.current?.parentElement?.contains(document.activeElement))
         restoreFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      setOpen(true); requestAnimationFrame(() => { input.current?.focus(); input.current?.select(); });
+      setOpenedConversation(conversationId); requestAnimationFrame(() => { input.current?.focus(); input.current?.select(); });
   });
   useEffect(() => {
     matches.current = open && root.current ? textRanges(root.current, query) : [];
@@ -73,7 +76,7 @@ export default function ConversationFind({ root, conversationId, version, hasEar
     <Icon name="search" size={16} />
     <Input ref={input} type="search" aria-label={say('对话内查找', 'Find in conversation')} value={query} onChange={event => setQuery(event.target.value)}
       onKeyDown={event => { if (event.key === 'Enter' && !composing.current && !composingKey(event.nativeEvent)) { event.preventDefault(); move(event.shiftKey ? -1 : 1); } }} />
-    {hasEarlier && <small>{say('已加载记录', 'Loaded messages')}</small>}
+    {hasEarlier && (historyState==='error'?<Button type="button" onClick={onLoadEarlier}>{say('重试读取历史', 'Retry loading history')}</Button>:<small>{say('正在读取历史…', 'Loading history…')}</small>)}
     <output data-testid="conversation-find-count" aria-live="polite">{count ? index + 1 : 0} / {count}</output>
     <Button type="button" disabled={!count} aria-label={say('上一个匹配', 'Previous match')} onClick={() => move(-1)}><Icon name="arrowUp" size={16} /></Button>
     <Button type="button" disabled={!count} aria-label={say('下一个匹配', 'Next match')} onClick={() => move(1)}><Icon name="arrowDown" size={16} /></Button>

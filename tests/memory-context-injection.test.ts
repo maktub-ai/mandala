@@ -41,16 +41,17 @@ test('a pure acknowledgment keeps stable principles without searching historical
 });
 
 test('continuing a conversation searches its recent topic instead of only the short follow-up',async()=>{
- const s=await setup();await s.manager.send(s.chat.id,'Review the deployment checklist');s.finish();s.queries.length=0;
+ const s=await setup();await s.runtime.refreshVectors();await s.manager.send(s.chat.id,'Review the deployment checklist');s.finish();s.queries.length=0;
  await s.manager.send(s.chat.id,'继续');
- expect(s.queries.length).toBeGreaterThan(0);
+ expect(s.queries).toHaveLength(1);
  expect(s.queries.every(query=>query.includes('deployment checklist'))).toBe(true);
 });
 
 test('acknowledgment turns do not displace the last useful topic for a continuation',async()=>{
- const s=await setup();await s.manager.send(s.chat.id,'Review the deployment checklist');s.finish();
+ const s=await setup();await s.runtime.refreshVectors();await s.manager.send(s.chat.id,'Review the deployment checklist');s.finish();
  for(let i=0;i<7;i++){await s.manager.send(s.chat.id,'收到');s.finish();}
  s.queries.length=0;await s.manager.send(s.chat.id,'继续');
+ expect(s.queries).toHaveLength(1);
  expect(s.queries.every(query=>query.includes('deployment checklist'))).toBe(true);
 });
 

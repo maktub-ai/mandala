@@ -367,7 +367,7 @@ test.each(['withdraw','correct','acl'] as const)('OMP delayed factory validates 
 // No real model or native generation: exercise current reading policy at both handoff boundaries.
 test.each(['combined','native-preparation','stopped-reading'] as const)('request reading fenced during $0 cannot inject selected facts',async mode=>{
  let queryCount=0,s!:Awaited<ReturnType<typeof setup>>;
- s=await setup(async texts=>{if(texts.some(t=>t.startsWith('task:'))&&++queryCount===2&&mode==='combined')s.config.system!.memory!.request!.read=false;return texts.map(()=>[1,0]);});
+ s=await setup(async texts=>{if(texts.some(t=>t.startsWith('task:'))&&++queryCount===1&&mode==='combined')s.config.system!.memory!.request!.read=false;return texts.map(()=>[1,0]);});
  s.config.system={cli:'codex',memory:{request:{generate:false,read:true},session:{generate:false,read:false},idleHours:6}};await s.runtime.initialize();
  const root={userId:'local'},collection=s.runtime.memory.ensureCollection(root,{projectId:null,agentId:null}),source=s.store.createConversation({projectId:'',agentId:'',cli:'codex',model:null}),text='Synthetic current request uses pnpm.';
  const event=s.store.appendEvent(source.id,'user',{text});s.store.appendEvent(source.id,'status',{status:'idle'});
@@ -375,6 +375,7 @@ test.each(['combined','native-preparation','stopped-reading'] as const)('request
  const common={collectionId:collection.id,contentType:'fact' as const,text,operation:'store' as const,replaces:[],evidence:[{sourceId:captured.id,sourceRevision:captured.revision}],support:[{sourceId:captured.id,eventId:event.id,quote:text}],validUntil:null,certainty:'user_asserted' as const,pipeline:'request' as const};
  const fact=s.runtime.memory.applyProposal(root,{...common,layer:'L1'},collection.generation,'evidence_extract')!;
  s.runtime.memory.applyProposal(root,{...common,layer:'L2',semanticKey:'scene.synthetic',dependencies:[{recordId:fact.recordId,revision:fact.revision}]},collection.generation,'layer_summary');
+ await s.runtime.refreshVectors();
  let entered!:()=>void,release!:()=>void;const started=new Promise<void>(r=>entered=r),gate=new Promise<void>(r=>release=r),handoffs:string[]=[];
  const reading=s.runtime.reading;let readingCount=0;if(mode==='stopped-reading')vi.spyOn(s.runtime,'reading').mockImplementation(async p=>{if(++readingCount===3){entered();await gate;}return reading(p);});
  const factory=async():Promise<CodexClient>=>{if(mode==='native-preparation'){entered();await gate;}return {getStatus:async()=>({status:'ready',version:'fixture'}),listModels:async()=>[],startThread:async value=>{handoffs.push(value.instructions??'');return 'policy-native';},resumeThread:async()=>{},startTurn:async()=> 'policy-turn',interrupt:async()=>{},replyApproval(){},close(){}};};
@@ -382,7 +383,7 @@ test.each(['combined','native-preparation','stopped-reading'] as const)('request
  const sending=manager.send(chat.id,'pnpm').then(()=>null,error=>error);
  if(mode==='native-preparation'){await started;s.config.system.memory!.request!.read=false;release();expect(await sending).toBeInstanceOf(Error);expect(handoffs).toEqual([]);}
  else if(mode==='stopped-reading'){await started;const stopping=manager.stop(chat.id);release();await stopping;await sending;expect(handoffs).toEqual([]);}
- else {expect(await sending).toBeNull();expect(handoffs).toHaveLength(1);expect(handoffs[0]).not.toContain(text);expect(queryCount).toBe(2);}
+ else {expect(await sending).toBeNull();expect(handoffs).toHaveLength(1);expect(handoffs[0]).not.toContain(text);expect(queryCount).toBe(1);}
  expect(s.generate).not.toHaveBeenCalled();expect(s.store.listEvents(chat.id,0).filter(e=>e.kind==='metadata'&&(e.data as any).memoryUse==='acknowledged')).toEqual([]);
 });
 

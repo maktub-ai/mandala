@@ -42,14 +42,39 @@ export function createMemoryRecall(memory:MemoryStore,options:MemoryVectorOption
   const records=pool(p,input,false,context),candidates=input.query.trim()?rankMemoryCandidates(records,input.query,{limit:100}):records.sort((a,b)=>b.extractedAt.localeCompare(a.extractedAt)).map(record=>({record,score:0,reason:'scope_summary'}));
   return finish(p,input,candidates,budget,0,false,context);
  };
- async function hybridSearch(p:Principal,input:RecallInput,context=false):Promise<RecallResult>{
+ async function hybridSearch(p:Principal,input:RecallInput,context=false,loadQuery?:(records:MemoryRevision[])=>Promise<number[]|undefined>):Promise<RecallResult>{
   const records=pool(p,input,false,context);if(!input.query.trim()||!records.length)return search(p,input,6000,context);
   let queryVector:number[]|undefined,failed=false;
-  try{await vectors.refresh(records,r=>current(p,input,r,false,context));queryVector=await vectors.query(input.query);}catch{failed=true;}
+  try {
+   if(loadQuery)queryVector=await loadQuery(records);
+   else {await vectors.refresh(records,r=>current(p,input,r,false,context));queryVector=await vectors.query(input.query);}
+  }catch{failed=true;}
   // Re-enumerate all authorities after every awaited local request before retrieval.
   const active=pool(p,input,false,context),indexLag=vectors.lag(active);let candidates:MemoryCandidate[];
   try{candidates=rankMemoryCandidates(active,input.query,{limit:100,...queryVector&&!failed?{queryVector,vectors:vectors.vectors(active),minVectorScore:LOCAL_MIN_RELEVANCE}:{}});}catch{failed=true;candidates=rankMemoryCandidates(active,input.query,{limit:100});}
   return finish(p,input,candidates,6000,indexLag,failed||indexLag>0,context);
+ }
+ // Automatic recall shares one query vector and leaves document indexing to the background worker.
+ async function turnContextSearch(p:Principal,input:RecallInput,turnSignal:AbortSignal) {
+  const signal=options.signal?AbortSignal.any([options.signal,turnSignal]):turnSignal;
+  let prepared:Promise<string>|undefined, query:Promise<number[]>|undefined;
+  const loadQuery=async(records:MemoryRevision[])=>{
+   signal.throwIfAborted();
+   let cancel!:()=>void;
+   const cancelled=new Promise<never>((_resolve,reject)=>{cancel=()=>reject(signal.reason);signal.addEventListener('abort',cancel,{once:true});});
+   try {
+    return await Promise.race([(async()=>{
+     await (prepared??=vectors.prepare(undefined,signal));
+     signal.throwIfAborted();
+     if(vectors.lag(records)===records.length)return undefined;
+     return query??=vectors.query(input.query,undefined,signal);
+    })(),cancelled]);
+   }finally{signal.removeEventListener('abort',cancel);}
+  };
+  return Promise.all([
+   hybridSearch(p,{...input,layers:['L1']},true,loadQuery),
+   input.kinds?.includes('request')?hybridSearch(p,{...input,layers:['L2'],kinds:['request']},true,loadQuery):undefined,
+  ]);
  }
  // Generation supplies its own authority-bounded pool; automatic read flags and recall output caps do not apply.
  async function rankCandidates(p:Principal,input:MemoryCandidateInput):Promise<MemoryCandidateResult>{
@@ -81,7 +106,7 @@ export function createMemoryRecall(memory:MemoryStore,options:MemoryVectorOption
  async function refreshVectors(p:Principal,input:Omit<RecallInput,'query'>,generation=false):Promise<{indexLag:number;degraded:boolean}>{
   const request={...input,query:''},records=pool(p,request,generation);try{await vectors.refresh(records,r=>current(p,request,r,generation));return {indexLag:vectors.lag(pool(p,request,generation)),degraded:false};}catch{return {indexLag:vectors.lag(pool(p,request,generation)),degraded:true};}
  }
- return {search:(p:Principal,input:RecallInput)=>search(p,input),hybridSearch:(p:Principal,input:RecallInput)=>tracked(()=>hybridSearch(p,input)),contextSearch:(p:Principal,input:RecallInput)=>tracked(()=>hybridSearch(p,input,true)),refreshGenerationVectors:(p:Principal,input:Omit<RecallInput,'query'>)=>tracked(()=>refreshVectors(p,input,true)),rankCandidates:(p:Principal,input:MemoryCandidateInput)=>tracked(()=>rankCandidates(p,input)),refreshVectors:(p:Principal,input:Omit<RecallInput,'query'>)=>tracked(()=>refreshVectors(p,input)),async close(){closed=true;await Promise.allSettled([...operations]);},summary:(p:Principal,input:{projectId:string|null;query?:string;kinds?:('request'|'session')[]})=>search(p,{...input,query:input.query??'',layers:['L2','L3'],kinds:input.kinds??['session']},2000),
+ return {search:(p:Principal,input:RecallInput)=>search(p,input),hybridSearch:(p:Principal,input:RecallInput)=>tracked(()=>hybridSearch(p,input)),contextSearch:(p:Principal,input:RecallInput)=>tracked(()=>hybridSearch(p,input,true)),turnContextSearch:(p:Principal,input:RecallInput,signal:AbortSignal)=>tracked(()=>turnContextSearch(p,input,signal)),refreshGenerationVectors:(p:Principal,input:Omit<RecallInput,'query'>)=>tracked(()=>refreshVectors(p,input,true)),rankCandidates:(p:Principal,input:MemoryCandidateInput)=>tracked(()=>rankCandidates(p,input)),refreshVectors:(p:Principal,input:Omit<RecallInput,'query'>)=>tracked(()=>refreshVectors(p,input)),async close(){closed=true;await Promise.allSettled([...operations]);},summary:(p:Principal,input:{projectId:string|null;query?:string;kinds?:('request'|'session')[]})=>search(p,{...input,query:input.query??'',layers:['L2','L3'],kinds:input.kinds??['session']},2000),
   recordUse(p:Principal,input:{runId:string;query:string;items:{recordId:string;revision:number}[]}):string {
    memory.principal(p);const run=memory.options.tasks.getRun(p,input.runId),execution=memory.options.tasks.getExecution(p,run.executionId);if(p.runId&&p.runId!==run.id)memoryFail('forbidden',403);
    const reader={...p,agentId:execution.agentId,runId:run.id};

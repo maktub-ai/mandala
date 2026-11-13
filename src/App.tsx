@@ -219,7 +219,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const [historyReadyConversation, setHistoryReadyConversation] = useState('');
   const [earlierBefore, setEarlierBefore] = useState<number | null>(null);
   const [earlierState, setEarlierState] = useState<'idle' | 'loading' | 'error'>('idle');
-  const loadEarlier = useRef<(() => void) | null>(null);
+  const loadEarlier = useRef<((turns?: number) => void) | null>(null);
   const historyAnchor = useRef<{ element: HTMLElement; top: number } | null>(null);
   const lastScrollTop = useRef(0);
   const historyReady = !selected || historyReadyConversation === selected;
@@ -621,13 +621,13 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     const path = "/conversations/" + selected;
     let before: number | null = null;
     let earlierRequest: AbortController | undefined;
-    loadEarlier.current = () => {
+    loadEarlier.current = (turns = CHAT_HISTORY_PAGE_TURNS) => {
       if (!active || !initialReplayComplete || before === null || earlierRequest) return;
       const controller = new AbortController();
       earlierRequest = controller;
       setEarlierState('loading');
       void api<ChatHistoryPage>(
-        path + "/history?recent=" + CHAT_HISTORY_PAGE_TURNS + "&compact=1&before=" + before, "GET", undefined, controller.signal,
+        path + "/history?recent=" + turns + "&compact=1&before=" + before, "GET", undefined, controller.signal,
       ).then(page => {
         if (!active) return;
         const viewport = messagesRoot.current?.closest('.conversation');
@@ -1478,7 +1478,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
             <span>{runtimeName(statusCli)}{runtimePending&&<small className="mandala-runtime-pending">{localize('下轮：', 'Next turn: ')}{activeChat?.cli!==mandalaAgent.defaultCli?runtimeName(mandalaAgent.defaultCli):localize('切换模型', 'model change')}</small>}</span>
           </Button>}
         {!document.getElementById('desktop-titlebar-right')&&contextPopover}</header>}
-        {chatActive && <ConversationFind root={messagesRoot} conversationId={selected} version={events} hasEarlier={earlierBefore !== null} onInspect={() => { followLatest.current = false; }} />}
+        {chatActive && <ConversationFind root={messagesRoot} conversationId={selected} version={events} hasEarlier={earlierBefore !== null} historyState={earlierState} onLoadEarlier={() => loadEarlier.current?.(100)} onInspect={() => { followLatest.current = false; }} />}
         {!workbench && selected && (()=>{const slot=document.getElementById('desktop-titlebar-right');const button=<Button ref={contentPanelTrigger} type="button" className="content-panel-trigger" hidden={!slot&&effectiveOpen} aria-label={t(effectiveOpen?'收起右侧栏':'展开右侧栏')} title={t(effectiveOpen?'收起右侧栏':'展开右侧栏')} aria-expanded={effectiveOpen} aria-controls="chat-environment-panel" onClick={()=>{setEffectiveOpen(value=>!value);}}><Icon name="panel" size={18}/></Button>;return slot?createPortal(<>{contextPopover}{button}</>,slot):button;})()}
 
         {workbench && workbenchProject ? <>{(error || refreshError) && <p className="form-error" role="alert">{errorText(error || refreshError)}</p>}

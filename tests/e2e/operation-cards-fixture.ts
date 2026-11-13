@@ -22,13 +22,15 @@ export async function operationCardsFixture(req:IncomingMessage,res:ServerRespon
  }
  if(req.url==='/__test__/operation-outcomes'||req.url==='/__test__/operation-outcomes-only'){
   const only=req.url==='/__test__/operation-outcomes-only';
+  let body='';for await(const chunk of req)body+=chunk;
+  const {answer='已保存账单计划和核对报告。'}=JSON.parse(body||'{}') as {answer?:string};
   const {config}=await ensureMandalaConfig(home),chat=ensureMandalaConversation(store,config),invocationId=crypto.randomUUID();
   const source=store.appendEvent(chat.id,'user',{text:'保存计划与报告，并返回工作发现结果。',invocationId,...(only?{agentMessage:{id:invocationId}}:{})});
   const samples=[{command:'automation_create',output:{id:'sample-rule',name:'账单检查',enabled:false,schedule:{kind:'daily',time:'09:00',timeZone:'Asia/Singapore'}}},{command:'artifact_publish',output:{assetId:'sample-asset',title:'核对报告',versionId:'sample-version'}},{command:'mandala_discover_capabilities',output:{items:[{name:'Skill'}],truncated:true}},{command:'wiki_refresh',output:null,state:'unknown'},{command:'task_update',output:{id:'failed-task',goal:'失败任务'},state:'failed'},...['automation_update','task_update','skill_update'].map(command=>({command,output:{id:'unchanged-item',name:'未更改项目',unchanged:true}}))];
   for(const [i,sample] of samples.entries())store.appendEvent(chat.id,'metadata',{runId:invocationId,operationResult:{...projectOperationOutcome(sample.command,{},sample.output),id:invocationId+'-'+i,command:sample.command,state:('state' in sample?sample.state:'succeeded'),sourceEventId:source.id,invocationId,createdAt:source.createdAt}});
   if(only)store.appendEvent(chat.id,'metadata',{runId:invocationId,operationResult:{...projectOperationOutcome('skill_update',{}, {suggestion:{skillId:'pending-skill',status:'pending'}}),id:invocationId+'-skill',command:'skill_update',state:'succeeded',sourceEventId:source.id,invocationId,createdAt:source.createdAt}});
   if(only)await manager.coordination.configure({agentId:chat.agentId,conversationId:chat.id,invocationId,humanEventId:source.id},{kind:'agent',action:'create',values:{id:invocationId+'-pending',name:'等待确认的助手',instructions:'Review',defaultCli:'codex',models:{},mcp:[],skills:[]}},'propose',invocationId+'-pending',()=>{});
-  else store.appendEvent(chat.id,'text',{text:'已保存账单计划和核对报告。',phase:'final_answer',runId:invocationId});
+  else store.appendEvent(chat.id,'text',{text:answer,phase:'final_answer',runId:invocationId});
   store.appendEvent(chat.id,'status',{status:'idle'});
   const next=only?undefined:store.appendEvent(chat.id,'user',{text:'接着讨论下一件事。',invocationId:invocationId+'-next'});
   res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({sourceEventId:source.id,invocationId,nextEventId:next?.id}));return true;

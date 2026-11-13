@@ -25,6 +25,22 @@ test('late Agent replies show their sender and body directly after the interveni
  await reply.scrollIntoViewIfNeeded();await expect(reply).toBeInViewport();await page.screenshot({path:info.outputPath('agent-reply-mobile.png'),animations:'disabled'});
 });
 
+for(const {mode,width} of [{mode:'light',width:390},{mode:'dark',width:1440}])test(`structured replies keep their bubble in ${mode} mode at ${width}px`,async({page,request},info)=>{
+ await page.addInitScript(mode=>localStorage.setItem('mana-theme',mode),mode);
+ await page.setViewportSize({width,height:1000});
+ const response=await request.post('/__test__/operation-outcomes',{data:{answer:'核对完成，发现两处差异。\n\n- 备份保留期\n- 重试次数'}});
+ expect(response.ok()).toBe(true);
+ const {invocationId}=await response.json();
+ await page.goto('/mandala');
+ await expect(page.locator('html')).toHaveAttribute('data-theme',mode);
+ const bubble=page.locator(`.chat-turn[data-run-id="${invocationId}"] .agent-reply > .chat-reply-bubble`);
+ await expect(bubble.getByRole('listitem')).toHaveCount(2);
+ await expect(bubble).not.toHaveCSS('background-color','rgba(0, 0, 0, 0)');
+ await expect(bubble).toHaveCSS('padding-top','12px');
+ await bubble.scrollIntoViewIfNeeded();
+ await page.screenshot({path:info.outputPath('structured-reply.png'),animations:'disabled'});
+});
+
 test('task receipts show the actual executor and final result directly rather than a report notification',async({page,request})=>{
  const fixture=await(await request.post('/__test__/execution-results')).json();
  await page.goto('/mandala');

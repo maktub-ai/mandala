@@ -71,3 +71,18 @@ test('context search rechecks source access after awaited vector work',async()=>
  const result=await work;expect(result.items.map(r=>r.recordId)).toEqual([s.global.recordId]);
  expect(()=>s.memory.validateReferences(principal,{projectId:null,items:result.items.map(r=>({recordId:r.recordId,revision:r.revision}))})).not.toThrow();
 });
+
+test('automatic turn recall uses one bounded query and retains authorized lexical matches on timeout', async () => {
+ const {vi}=await import('vitest');
+ const embed=vi.fn(fixtureMemoryEmbed),s=setup(embed),principal={...root,agentId:'a'};
+ const input={projectId:null,query:'deployment',kinds:['request' as const]};
+ await s.recall.refreshVectors(principal,input);
+ embed.mockClear();
+ embed.mockImplementation(() => new Promise(() => {}));
+ const [facts,scenes]=await s.recall.turnContextSearch(principal,input,AbortSignal.timeout(30));
+ expect(embed).toHaveBeenCalledTimes(1);
+ expect(embed.mock.calls[0][0].every(text=>text.startsWith('task:'))).toBe(true);
+ expect(facts.degraded).toBe(true);
+ expect(new Set(facts.items.map(item=>item.recordId))).toEqual(new Set([s.global.recordId,s.own.recordId]));
+ expect(scenes?.items).toEqual([]);
+});

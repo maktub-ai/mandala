@@ -18,9 +18,9 @@ export async function localEmbed(texts:string[],signal?:AbortSignal):Promise<num
 }
 export function createMemoryVectors(db:DatabaseSync,options:MemoryVectorOptions={}) {
  let model=options.model??LOCAL_EMBEDDING_MODEL;const embed=options.embed??((texts:string[])=>localEmbed(texts,options.signal));
- const resolveModel=async(checkpoint?:()=>Promise<void>)=>{
+ const resolveModel=async(checkpoint?:()=>Promise<void>,signal=options.signal)=>{
   if(options.embed)return model;
-  const response=await fetch('http://127.0.0.1:11434/api/tags',{signal:options.signal?AbortSignal.any([options.signal,AbortSignal.timeout(1500)]):AbortSignal.timeout(1500)});
+  const response=await fetch('http://127.0.0.1:11434/api/tags',{signal:signal?AbortSignal.any([signal,AbortSignal.timeout(1500)]):AbortSignal.timeout(1500)});
   await checkpoint?.();
   if(!response.ok)throw new Error('local_embedding_model_unavailable');
   const result=await response.json() as {models?:{name:string;digest:string}[]};await checkpoint?.();const entry=result.models?.find(m=>m.name===LOCAL_EMBEDDING_MODEL);
@@ -73,7 +73,20 @@ export function createMemoryVectors(db:DatabaseSync,options:MemoryVectorOptions=
   }
  }
  return {refresh,prepare:resolveModel,
-  async query(text:string,checkpoint?:()=>Promise<void>){const identity=await resolveModel(checkpoint);await checkpoint?.();const parts=chunks(text);const values=await embed(parts.map(part=>'task: search result | query: '+part));await checkpoint?.();await options.revalidate?.();await checkpoint?.();if(await resolveModel(checkpoint)!==identity)throw new Error('local_embedding_model_changed');if(values.length!==parts.length)throw new Error('invalid_local_embeddings');const checked=values.map(v=>normalized(v,dimensions()??values[0]?.length));return normalized(checked[0].map((_,i)=>checked.reduce((sum,v)=>sum+v[i],0)/checked.length));},
+  async query(text:string,checkpoint?:()=>Promise<void>,signal=options.signal){
+   const identity=await resolveModel(checkpoint,signal);
+   await checkpoint?.();
+   signal?.throwIfAborted();
+   const parts=chunks(text),inputs=parts.map(part=>'task: search result | query: '+part);
+   const values=await (options.embed?options.embed(inputs):localEmbed(inputs,signal));
+   signal?.throwIfAborted();
+   await checkpoint?.();await options.revalidate?.();await checkpoint?.();
+   signal?.throwIfAborted();
+   if(await resolveModel(checkpoint,signal)!==identity)throw new Error('local_embedding_model_changed');
+   if(values.length!==parts.length)throw new Error('invalid_local_embeddings');
+   const checked=values.map(v=>normalized(v,dimensions()??values[0]?.length));
+   return normalized(checked[0].map((_,i)=>checked.reduce((sum,v)=>sum+v[i],0)/checked.length));
+  },
   vectors(pool:MemoryRevision[]){return Object.fromEntries(pool.flatMap(r=>{const v=cached(r);return v?[[r.recordId,v]]:[];}));},
   lag(pool:MemoryRevision[]){return pool.filter(r=>!cached(r)).length;},
  };

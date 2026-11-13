@@ -122,7 +122,7 @@ const server = createServer(async(req,res)=>{
   if(await mandalaPanelsFixture(req,res,home,store,manager,automations))return;
   if(await conversationActivityFixture(req,res,store,manager,native))return;
   if(await liveOutputFixture(req,res,store,manager,native))return;
-  if (req.method === 'POST' && (req.url === '/__test__/chat-history'||req.url === '/__test__/chat-history-dense')) {
+  if (req.method === 'POST' && (req.url === '/__test__/chat-history'||req.url === '/__test__/chat-history-dense'||req.url === '/__test__/chat-history-search')) {
     const { ensureMandalaConfig } = await import('../../server/config');
     const { ensureMandalaConversation } = await import('../../server/mandala');
     const { config } = await ensureMandalaConfig(home);
@@ -131,7 +131,7 @@ const server = createServer(async(req,res)=>{
       ensureMandalaConversation(store, config),
     ];
     if(req.url.endsWith('-dense'))store.renameConversation(chats[0].id,'Dense history','user');
-    for (const chat of chats) for (let i = 1; i <= 25; i++) {
+    for (const chat of chats) for (let i = 1; i <= (req.url.endsWith('-search')?125:25); i++) {
       const runId = 'history-' + i;
       store.appendEvent(chat.id, 'user', { text: 'History request ' + i, runId });
       if(req.url.endsWith('-dense')&&i===25)store.transaction(()=>{

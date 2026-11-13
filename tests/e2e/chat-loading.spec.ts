@@ -102,15 +102,6 @@ test('opens ordinary and Mandala chats at the latest page and anchors earlier hi
   const first = messages.getByText('History request 21', { exact: true });
   await expect(latest).toBeVisible();
   await expect(messages.getByText('History request 20', { exact: true })).toHaveCount(0);
-  if (id === ordinary) {
-   const shortcut = await page.evaluate(() => /Mac/.test(navigator.platform)) ? 'Meta+f' : 'Control+f';
-   await page.keyboard.press(shortcut);
-   const find = page.getByRole('search', { name: '对话内查找' });
-   await expect(find.getByText('已加载记录', { exact: true })).toBeVisible();
-   await find.getByRole('searchbox').fill('History request 20');
-   await expect(find.getByTestId('conversation-find-count')).toHaveText('0 / 0');
-   await page.keyboard.press('Escape');
-  }
   const scroller = page.locator('.conversation');
   await expect.poll(() => scroller.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(4);
   let release!: () => void;
@@ -118,7 +109,8 @@ test('opens ordinary and Mandala chats at the latest page and anchors earlier hi
   const historyUrl = (url: URL) => url.pathname === '/api/conversations/' + id + '/history';
   await page.route(historyUrl, async route => { await held; await route.continue(); });
   try {
-   await scroller.evaluate(element => { element.scrollTop = 0; });
+   await scroller.hover();
+   await page.mouse.wheel(0,-5000);
    await expect(page.getByRole('button', { name: '正在加载更早的记录…' })).toBeDisabled();
    const before = (await first.boundingBox())!.y;
    release();
@@ -139,4 +131,45 @@ test('opens ordinary and Mandala chats at the latest page and anchors earlier hi
    await expect.poll(() => scroller.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(4);
   }
  }
+});
+
+
+test('find loads earlier history only after it is opened in ordinary and Mandala chats', async ({ page, request }) => {
+ const {ordinary,mandala}=await(await request.post('/__test__/chat-history-search')).json();
+ for(const [path,id] of [['/',ordinary],['/mandala',mandala]]){
+  const reads:string[]=[];
+  const record=(req:import('@playwright/test').Request)=>{if(req.url().includes('/'+id+'/history?'))reads.push(req.url());};
+  page.on('request',record);
+  await page.goto(path+'?conversation='+id);
+  await expect(page.getByText('History answer 125',{exact:true})).toBeVisible();
+  expect(reads).toHaveLength(0);
+  await expect(page.locator('.messages').getByText('History request 1',{exact:true})).toHaveCount(0);
+  await page.keyboard.press(await page.evaluate(()=>/Mac/.test(navigator.platform))?'Meta+f':'Control+f');
+  await page.getByRole('searchbox',{name:'对话内查找'}).fill('History request 1');
+  await expect.poll(async()=>Number((await page.getByTestId('conversation-find-count').innerText()).split('/')[1])).toBeGreaterThanOrEqual(37);
+  await expect(page.locator('.messages').getByText('History answer 1',{exact:true})).toBeAttached();
+  expect(reads.length).toBeGreaterThanOrEqual(2);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('searchbox',{name:'对话内查找'})).toHaveCount(0);
+  page.off('request',record);
+ }
+});
+
+
+test('find retries an earlier-history failure and does not carry loading into another chat',async({page,request})=>{
+ const {ordinary,mandala}=await(await request.post('/__test__/chat-history')).json();
+ let reads=0;
+ await page.route('**/api/conversations/'+ordinary+'/history?*',route=>{reads++;return reads===1?route.fulfill({status:503,json:{error:'Temporary history failure'}}):route.continue();});
+ await page.goto('/?conversation='+ordinary);
+ await expect(page.getByText('History answer 25',{exact:true})).toBeVisible();
+ await page.keyboard.press(await page.evaluate(()=>/Mac/.test(navigator.platform))?'Meta+f':'Control+f');
+ await page.getByRole('searchbox',{name:'对话内查找'}).fill('History answer 1');
+ await page.getByRole('button',{name:'重试读取历史',exact:true}).click();
+ await expect(page.getByTestId('conversation-find-count')).toHaveText('1 / 11');
+ let otherReads=0;page.on('request',req=>{if(req.url().includes('/'+mandala+'/history?'))otherReads++;});
+ await page.getByRole('link',{name:'Mandala',exact:true}).click();
+ await expect(page).toHaveURL(/\/mandala/);
+ await expect(page.getByRole('searchbox',{name:'对话内查找'})).toHaveCount(0);
+ await expect(page.getByText('History answer 25',{exact:true})).toBeVisible();
+ expect(otherReads).toBe(0);
 });

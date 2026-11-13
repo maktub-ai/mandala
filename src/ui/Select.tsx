@@ -72,7 +72,7 @@ export default function Select({ value, onChange, options, ariaLabel, placeholde
           type="button" className="ui-select-trigger" role="combobox" aria-label={ariaLabel}
           aria-expanded={open} aria-haspopup="listbox" aria-controls={open ? `${id}-list` : undefined} disabled={disabled} data-value={value}
           title={selected?.label ?? (allowCustom ? value : undefined)} onKeyDown={handleKey}>
-          {selected?.icon ?? (icon && <Icon name={icon} size={16}/>)}<span>{selected?.label ?? (allowCustom && value ? value : placeholder ?? ariaLabel)}</span><Icon name="chevronDown" size={16}/>
+          {selected?.icon ?? (icon && <Icon name={icon} size={16}/>)}<span className="ui-select-value">{selected?.label ?? (allowCustom && value ? value : placeholder ?? ariaLabel)}</span><Icon name="chevronDown" size={16}/>
         </button>
       </PopoverTrigger>
     </div>

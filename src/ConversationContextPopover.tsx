@@ -64,11 +64,14 @@ export default function ConversationContextPopover({conversationId,executionLoca
  const cwd=executionLocation?.cwd??env?.cwd;
  const folder=cwd?cwd.split(/[\\/]/).filter(Boolean).pop()??cwd:'';
  const capabilityText=caps?[caps.skills.length?text(`${caps.skills.length} 个技能`,`${caps.skills.length} skills`):'',caps.mcp.length?text(`${caps.mcp.length} 个 MCP`,`${caps.mcp.length} MCP`):''].filter(Boolean).join(' · ')||text('未配置技能或 MCP','No skills or MCP'):'';
+ const contextLabel=text('对话上下文','Chat context');
+ const runningLabel=running?text('执行中','Running'):undefined;
+ const locationLabel=executionLocation?text(`在 ${executionLocation.machineName}（${executionLocation.host}）上执行`,`runs on ${executionLocation.machineName} (${executionLocation.host})`):undefined;
  return <Popover open={open} onOpenChange={setOpen}>
-  <PopoverTrigger asChild><button type="button" className="context-popover-trigger" aria-label={text('对话上下文','Chat context')} title={executionLocation?text(`对话上下文 · 在 ${executionLocation.machineName}（${executionLocation.host}）上执行`,`Chat context · runs on ${executionLocation.machineName} (${executionLocation.host})`):text('对话上下文','Chat context')}>
+  <PopoverTrigger asChild><button type="button" className="context-popover-trigger" aria-label={contextLabel} aria-description={runningLabel} title={[contextLabel,locationLabel,runningLabel].filter(Boolean).join(' · ')}>
    {executionLocation?<><Icon name="server" size={16}/><span className="context-popover-machine">{executionLocation.machineName}</span></>:<Icon name={env?.git?'gitBranch':'layers'} size={16}/>}
    {changes?<span className="context-popover-diff"><span className="change-add">+{changes.additions}</span> <span className="change-remove">−{changes.deletions}</span></span>:!executionLocation&&<span>{text('上下文','Context')}</span>}
-   {running&&<span className="status-dot running" aria-label={text('执行中','Running')}/>}
+   {running&&<Icon name="activity" size={14} className="context-popover-running"/>}
   </button></PopoverTrigger>
   <PopoverContent className="context-popover" align="end" sideOffset={6} aria-label={text('对话上下文','Chat context')}>
    {(env||executionLocation)&&<section aria-label={text('工作区','Workspace')}><h3>{text('工作区','Workspace')}</h3>

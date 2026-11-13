@@ -25,7 +25,7 @@
 .product-frame .workspace-main.is-new .conversation-viewport { flex: 0 1 auto; }
 .conversation-viewport > .conversation { width: 100%; }
 /* Scrolled content fades under the chat header instead of being cut mid-line. */
-.product-frame .conversation-viewport > .conversation { mask-image: linear-gradient(to bottom, transparent 0, black 24px); /* alpha mask, not a color */ }
+.product-frame .workspace-main:not(.is-new) .conversation-viewport > .conversation { mask-image: linear-gradient(to bottom, transparent 0, black 24px); /* alpha mask, not a color */ }
 .conversation-find { position: absolute; top: 12px; right: 16px; box-sizing: border-box; z-index: 40; display: flex; align-items: center; gap: 6px; width: min(480px, calc(100% - 32px)); padding: 6px 8px; margin: 0; border: 1px solid var(--border); border-radius: var(--control-radius); background: var(--surface); box-shadow: var(--overlay-shadow); }
 .product-frame .conversation-find input { flex: 1; min-width: 0; min-height: 0; height: 28px; width: 100px; border: 0; padding: 4px; background: transparent; color: var(--text); }
 .conversation-find output { flex: none; font-size: var(--type-meta); font-variant-numeric: tabular-nums; color: var(--muted); }

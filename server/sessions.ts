@@ -828,11 +828,14 @@ export function createSessionManager(
       if(memoryRuntime) {
         try {
           const kinds=await memoryRuntime.reading(memoryPrincipal),projectId=before.projectId||null;
-          const factResult=kinds.length&&recallPlan.query?await memoryRuntime.recall.contextSearch(memoryPrincipal,{projectId,query:memoryQuery,layers:['L1'],kinds}):undefined;
+          const [factResult,sceneResult]=kinds.length&&recallPlan.query
+            ? await memoryRuntime.recall.turnContextSearch(memoryPrincipal,{projectId,query:memoryQuery,kinds},
+              AbortSignal.any([lifetime.signal,current.controller.signal,AbortSignal.timeout(1500)]))
+            : [];
+          if(!ownsPreparation())return;
           const facts=factResult?.items??[];
           const profile=kinds.includes('request')?memoryRuntime.profiles.current(memoryPrincipal,{projectId,agentId:before.agentId||null}):null;
           const stableContext=profile?[{...profile,reason:'current_profile'}]:[];
-          const sceneResult=kinds.includes('request')&&recallPlan.query?await memoryRuntime.recall.contextSearch(memoryPrincipal,{projectId,query:memoryQuery,layers:['L2'],kinds:['request']}):undefined;
           const scenes=sceneResult?.items??[];
           if(factResult?.degraded||sceneResult?.degraded)store.appendEvent(id,"metadata",{memorySearch:"degraded",message:"本地语义索引不可用或构建中，本轮保留BM25检索",indexLag:(factResult?.indexLag??0)+(sceneResult?.indexLag??0)});
           const currentKinds=await memoryRuntime.reading(memoryPrincipal);

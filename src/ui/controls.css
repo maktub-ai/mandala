@@ -1,6 +1,6 @@
 .ui-select { min-width: 0; width: 100%; }
 .ui-select-trigger { display: flex; align-items: center; gap: 8px; min-height: var(--control-height); width: 100%; padding: var(--input-padding); border: 1px solid var(--border); border-radius: var(--control-radius); background: var(--surface); color: var(--text); font-size: var(--input-font-size); text-align: left; cursor: pointer; }
-.ui-select-trigger > span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ui-select-trigger > .ui-select-value { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ui-select-trigger > svg { flex-shrink: 0; color: var(--muted); }
 .ui-select-trigger:hover:not(:disabled), .ui-select-trigger[aria-expanded="true"] { border-color: var(--focus); background: var(--raised); }
 .ui-select-trigger:disabled { opacity: .45; cursor: default; }
