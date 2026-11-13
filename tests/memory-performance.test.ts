@@ -372,3 +372,13 @@ test('startup legacy repair skips evidence validation for modern records',()=>{
  s.memory.applyProposal(root,{collectionId:c.id,layer:'L1',contentType:'fact',text,operation:'store',replaces:[],evidence:[{sourceId:source.id,sourceRevision:source.revision}],support:[{sourceId:source.id,eventId:event.id,quote:text}],validUntil:null,certainty:'observed'},c.generation,'evidence_extract');
  authorize.mockClear();expect(s.memory.repairLegacyContexts(root)).toEqual({repaired:0});expect(authorize).not.toHaveBeenCalled();
 });
+
+
+test('capturing a dense tool turn does not repeatedly search its full event projection',()=>{
+ const s=setup(),c=s.memory.ensureCollection(root,{projectId:null,agentId:null}),count=3000;
+ s.store.appendEvent(s.chat.id,'user',{text:'Synthetic tool turn'});
+ s.store.transaction(()=>{for(let i=0;i<count;i++)s.store.appendEvent(s.chat.id,'tool',{method:'item/commandExecution/outputDelta',params:{itemId:'tool',delta:'x'}});s.store.appendEvent(s.chat.id,'tool',{method:'item/completed',params:{item:{id:'tool',type:'commandExecution',status:'completed',exitCode:0,aggregatedOutput:'Finished'}}});s.store.appendEvent(s.chat.id,'status',{status:'idle'});});
+ const original=Array.prototype.find;let comparisons=0;
+ const find=vi.spyOn(Array.prototype,'find').mockImplementation(function(this:unknown[],predicate:any,thisArg?:unknown){const projection=this.length>count&&!!this[0]&&typeof this[0]==='object'&&'hash' in this[0];return original.call(this,(value,index,array)=>{if(projection)comparisons++;return predicate.call(thisArg,value,index,array);});});
+ try{const result=s.memory.captureConversation(root,{collectionId:c.id,conversationId:s.chat.id,trigger:'explicit',kind:'request'});expect(result.sources[0].events).toHaveLength(count+3);expect(result.sources[0].events.filter(e=>e.kind==='tool'&&e.text).map(e=>e.text)).toEqual(['Finished']);expect(comparisons).toBeLessThan(count*4);}finally{find.mockRestore();}
+});

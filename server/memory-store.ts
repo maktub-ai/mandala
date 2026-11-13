@@ -148,7 +148,9 @@ export function createMemoryStore(store:Store, options:Options) {
   const snapshot=!db.isTransaction?sourceSnapshots.get(id):undefined;
   if(snapshot){sourceSnapshots.delete(id);sourceSnapshots.set(id,snapshot);queryCache?.rawSources.set(id,snapshot.source);return snapshot.source;}
   const row=sourceRow.get(id);if(!row)memoryFail('memory_source_not_found',404);
-  const source=JSON.parse(row!.data as string,(_key,value)=>value&&typeof value==='object'?Object.freeze(value):value) as MemorySource;queryCache?.rawSources.set(id,source);
+  const source=parse<MemorySource>(row!.data),pending:object[]=[source];
+  while(pending.length){const value=pending.pop()!;Object.freeze(value);for(const child of Object.values(value))if(child&&typeof child==='object')pending.push(child);}
+  queryCache?.rawSources.set(id,source);
   const bytes=(row!.data as string).length*2,limit=128*1024*1024;
   if(!db.isTransaction&&bytes<=limit){
    while(snapshotBytes+bytes>limit&&sourceSnapshots.size){const key=sourceSnapshots.keys().next().value!;snapshotBytes-=sourceSnapshots.get(key)!.bytes;sourceSnapshots.delete(key);}
@@ -224,7 +226,7 @@ export function createMemoryStore(store:Store, options:Options) {
   const expected=meaning(history[0]);
   return history.every((r,index)=>meaning(r)===expected&&(index===0||r.revisionKind==='evidence_append'));
  };
- const validateMemoryRefs=(p:Principal,c:Pick<MemoryCollection,'projectId'|'agentId'>,refs:MemoryRevisionRef[],visited=new Set<string>())=>{
+ const validateMemoryRefs=(p:Principal,c:Pick<MemoryCollection,'projectId'|'agentId'>,refs:MemoryRevisionRef[],visited=new Set<string>()):void=>authorityQuery(()=>{
   // Root-driven capture must honor the actual recipient's current scope and privileges too.
   const origin:Principal={userId:p.userId,...(c.agentId?{agentId:c.agentId}:{})};
   const recipients=p.agentId?[p,...(p.agentId!==c.agentId?[origin]:[])]:[origin];
@@ -236,7 +238,7 @@ export function createMemoryStore(store:Store, options:Options) {
    if(parentCollection.projectId!==c.projectId&&!parentCollection.legacy&&!(c.agentId!==null&&c.projectId===null)&&!(parentCollection.projectId===null&&parentCollection.agentId===c.agentId)&&!(parentCollection.projectId===null&&parentCollection.agentId===null&&parent.contentType==='preference'))memoryFail('memory_dependency_scope',403);
    if(!compatibleRevision(ref,parent)||parent.status!=='active'||parent.validUntil&&Date.parse(parent.validUntil)<=Date.now())memoryFail('stale_memory_dependency');
   }
- };
+ });
  // Trusted server callers supply the actual conversation scope; Run scope is independently derived.
  const validateReferences=(p:Principal,input:{projectId:string|null;items:MemoryRevisionRef[]}):void=>authorityQuery(()=>{
   principal(p);
@@ -244,14 +246,14 @@ export function createMemoryStore(store:Store, options:Options) {
   if(p.runId&&options.tasks.getExecution(p,options.tasks.getRun(p,p.runId).executionId).projectId!==input.projectId)memoryFail('scope_mismatch',403);
   validateMemoryRefs(p,{projectId:input.projectId,agentId:p.agentId??null},parseUseRefs(input.items));
  });
- const validateInheritedPermissions=(p:Principal,s:MemorySource,projectId?:string|null,visited=new Set<string>())=>{
+ const validateInheritedPermissions=(p:Principal,s:MemorySource,projectId?:string|null,visited=new Set<string>()):void=>authorityQuery(()=>{
   const permissionVisited=new Set<string>(),sourceScope=projectId===undefined?collection(p,s.collectionId).projectId:projectId,cacheKey=queryKey(p,`${s.id}:${s.revision}`,sourceScope);
   if(queryCache?.permissions.has(cacheKey))return;
   const recipients=p.agentId?[p]:[{userId:p.userId,...(s.agentId?{agentId:s.agentId}:{})}];
   const visit=(recipient:Principal,ref:MemoryRevisionRef,scopeProject:string|null|undefined)=>{if(permissionVisited.has(ref.recordId))return;permissionVisited.add(ref.recordId);const r=rawRecord(ref.recordId),c=collection(recipient,r.collectionId,scopeProject),globalPreference=c.projectId===null&&c.agentId===null&&r.contentType==='preference';const evidenceRecipient=globalPreference?{userId:p.userId}:recipient,evidenceProject=globalPreference?undefined:scopeProject,evidenceRefs=userEvidence(r);for(const evidence of evidenceRefs){const inherited=sourceBase(evidenceRecipient,evidence.sourceId,evidenceProject),quotedUser=evidenceRefs!==r.evidence&&evidence.startEventId!==undefined&&evidence.startEventId===evidence.endEventId&&r.support?.some(ref=>ref.sourceId===evidence.sourceId&&ref.eventId===evidence.startEventId);if(!quotedUser)for(const parent of inherited.memoryRefs??[])visit(evidenceRecipient,parent,evidenceProject);}for(const parent of r.dependencies)visit(recipient,parent,scopeProject);};
   for(const recipient of recipients)for(const ref of s.memoryRefs??[])visit(recipient,ref,sourceScope);
   queryCache?.permissions.add(cacheKey);
- };
+ });
  const source=(p:Principal,id:string,projectId?:string|null):MemorySource=>authorityQuery(()=>{
   const s=sourceBase(p,id,projectId);if(s.modern){validateInheritedPermissions(p,s,projectId);return s;}validateMemoryRefs(p,{...collection(p,s.collectionId,projectId),agentId:s.agentId??collection(p,s.collectionId,projectId).agentId},s.memoryRefs??[]);return s;
  });
@@ -334,11 +336,12 @@ export function createMemoryStore(store:Store, options:Options) {
    // Preserve every event id/hash while materializing one logical assistant/tool message.
    let textHead:typeof publicEvents[number]|undefined;
    for(const event of publicEvents){if(event.kind==='text'){if(textHead){textHead.text+=event.text;event.text='';}else textHead=event;}else if(['user','tool'].includes(event.kind))textHead=undefined;}
+   const publicById=new Map(publicEvents.map(event=>[event.id,event]));
    const toolGroups=new Map<string,{head:typeof publicEvents[number];output:string;completed:boolean}>();
    for(const event of events.filter(e=>e.kind==='tool')){
     const data=event.data as {method?:string;params?:{itemId?:string;delta?:string;item?:{id?:string;command?:string;cwd?:string;status?:string;exitCode?:number;aggregatedOutput?:string;output?:string;result?:{content?:{type?:string;text?:string}[]}}}};
     const params=data.params,item=params?.item,id=item?.id??params?.itemId;if(!id)continue;
-    const captured=publicEvents.find(e=>e.id===event.id)!;captured.text='';
+    const captured=publicById.get(event.id)!;captured.text='';
     const group=toolGroups.get(id)??{head:captured,output:'',completed:false};toolGroups.set(id,group);
     if(item?.command){
      const files=[...new Set(item.command.split(/[\s\"'`;|()<>]+/).filter(value=>/^(?:\/|\.\.?\/|[\w-]+\/)[\w./-]+\.(?:tsx?|jsx?|md|sql|py|toml|ya?ml)$/.test(value)&&!/(?:auth|credential|secret|token)/i.test(value)))].slice(0,20);

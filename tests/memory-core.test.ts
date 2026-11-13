@@ -311,3 +311,14 @@ test('immediate duplicate capture still accelerates a future debounced job',()=>
  vi.useFakeTimers({toFake:['Date']});
  try{vi.setSystemTime('2026-10-12T00:00:00Z');const s=setup();turn(s,'Debounced fact.');const future=capture(s,'idle').jobs[0];expect(Date.parse(future.availableAt)).toBeGreaterThan(Date.now());vi.setSystemTime('2026-10-12T00:00:01Z');const flushed=capture(s,'explicit').jobs[0];expect(flushed.id).toBe(future.id);expect(Date.parse(flushed.availableAt)).toBe(Date.now());expect(s.jobs.claim('worker')?.id).toBe(future.id);}finally{vi.useRealTimers();}
 });
+
+test('task capture shares evidence reads within one inherited-permission traversal',()=>{
+ const s=setup(),facts=Array.from({length:8},(_,i)=>`Synthetic fact ${i}.`),event=turn(s,facts.join(' '));
+ const source=capture(s).sources[0];
+ const records=facts.map(text=>s.memory.applyProposal(p,{collectionId:s.collection.id,layer:'L1',contentType:'fact',text,operation:'store',replaces:[],evidence:[{sourceId:source.id,sourceRevision:source.revision}],support:[{sourceId:source.id,eventId:event.id,quote:text}],validUntil:null,certainty:'observed'},s.collection.generation,'evidence_extract')!);
+ const task=s.tasks.createTask(p,{goal:'Capture shared evidence',criteria:[],acceptance:'human',projectId:'p',assigneeAgentId:'a'},'capture-shared');
+ const run=s.tasks.startTask(p,task.id,task.revision,'capture-shared-start');
+ s.recall.recordUse({...agent,runId:run.id},{runId:run.id,query:'facts',items:records.map(r=>({recordId:r.recordId,revision:r.revision}))});
+ const payload=s.store.database.prepare('SELECT data FROM memory_sources WHERE id=?').get(source.id)!.data,parse=vi.spyOn(JSON,'parse');
+ try{const result=s.memory.captureTask(p,{collectionId:s.collection.id,taskId:task.id,trigger:'stable',kind:'request'});expect(result.sources[0].memoryRefs).toHaveLength(facts.length);expect(parse.mock.calls.filter(([value])=>value===payload).length).toBeLessThanOrEqual(2);}finally{parse.mockRestore();}
+});
