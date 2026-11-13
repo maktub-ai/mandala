@@ -377,3 +377,21 @@ it.skipIf(process.platform==='win32')('does not report a successful Gemini versi
   expect(exits).toHaveLength(1);expect(created).toBe(1);expect(prompts).toEqual(['Continue after disconnect']);
  }finally{await client.close();}
 });
+
+it('aborting a stalled handshake also reaps a native process that ignores SIGTERM',async()=>{
+ const {mkdtemp,readFile,rm}=await import('node:fs/promises');
+ const directory=await mkdtemp(join(tmpdir(),'mandala-acp-stubborn-')),pidFile=join(directory,'pid');
+ const abort=new AbortController();let pid:number|undefined,settled=false;
+ const script="process.on('SIGTERM',()=>{});require('node:fs').writeFileSync(process.argv[1],String(process.pid));process.stdin.resume();setInterval(()=>{},1000);";
+ const result=connectAcp({cwd:directory,runtimeCli:'gemini',signal:abort.signal,onEvent(){},onApproval(){},onExit(){}},[process.execPath,'-e',script,pidFile]).then(()=>{settled=true;return 'connected';},()=>{settled=true;return 'rejected';});
+ try{
+  await expect.poll(async()=>{try{pid=Number(await readFile(pidFile,'utf8'));return pid>0;}catch{return false;}},{timeout:5000}).toBe(true);
+  abort.abort();
+  await expect.poll(()=>settled,{timeout:5000}).toBe(true);
+  expect(await result).toBe('rejected');
+  expect(()=>process.kill(pid!,0)).toThrow();
+ }finally{
+  if(pid)try{process.kill(pid,'SIGKILL');}catch{}
+  await result;await rm(directory,{recursive:true,force:true});
+ }
+},15000);
