@@ -54,7 +54,7 @@ await cp(join(root, 'release/ssh-runner'), join(runtime, 'server/ssh-runner'), {
 await pruneDesktopRuntime(runtime, serverBuild.metafile);
 await prepareVoiceRuntime(runtime);
 await build({ entryPoints: [join(desktop, 'runtime.ts')], outfile: join(app, 'runtime.cjs'), bundle: true, platform: 'node', format: 'cjs', target: 'node22' });
-for (const file of ['main.cjs', 'updates.cjs', 'local-update.cjs', 'preload.cjs', 'tray.png', 'tray-color.png', 'icon-light.png', 'icon-dark.png']) await cp(join(desktop, file), join(app, file));
+for (const file of ['main.cjs', 'updates.cjs', 'local-update.cjs', 'preload.cjs', 'trayTemplate.png', 'trayTemplate@2x.png', 'tray-color.png', 'icon-light.png', 'icon-dark.png']) await cp(join(desktop, file), join(app, file));
 await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'mandala-desktop', productName: 'Mandala', version, description: 'Mandala personal desktop application', author: 'MaktubCN', main: 'main.cjs' }, null, 2));
 let commit = 'uncommitted';
 try { commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(); } catch {}

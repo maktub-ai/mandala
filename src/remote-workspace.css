@@ -19,7 +19,8 @@
 .remote-tabs button { display:flex; align-items:center; gap:10px; width:100%; min-height:34px; padding:0 10px; border:0; border-radius:var(--control-radius); background:transparent; color:var(--muted); justify-content:flex-start; font-weight:var(--weight-medium); transition:none; }
 .remote-tabs button:hover { background:var(--raised); color:var(--text); }
 .remote-tabs button[aria-current] { background:var(--surface); color:var(--text); box-shadow:0 0 0 1px var(--border-soft); }
-.remote-tabs button[aria-current] svg { color:var(--accent); }
+.remote-tabs button[aria-current] svg,.remote-tabs button[aria-current] .brand-mark { color:var(--accent); }
+.remote-tabs .remote-tab-mark.brand-mark { width:16px; height:16px; color:currentColor; }
 .remote-count { margin-left:auto; min-width:18px; height:18px; padding:0 5px; display:inline-grid; place-items:center; border-radius:9px; background:var(--raised); color:var(--muted); font-size:11px; font-weight:500; font-variant-numeric:tabular-nums; box-sizing:border-box; }
 .remote-count[data-tone=warning] { background:color-mix(in srgb, var(--warning) 14%, transparent); color:var(--warning); }
 
@@ -54,11 +55,13 @@
 .remote-chat-heading .workspace-metadata > div { display:flex; gap:6px; font-size:var(--type-meta); }
 
 /* Messages */
-.remote-messages { width:100%; max-width:820px; margin:0 auto; padding:20px; flex:1; min-height:80px; box-sizing:border-box; }
+.remote-messages { width:100%; max-width:820px; margin:0 auto; padding:20px; flex:1 0 auto; min-height:80px; box-sizing:border-box; }
 .remote-earlier-history { display:flex; justify-content:center; margin-bottom:16px; overflow-anchor:none; }
 .remote-turn { display:grid; gap:10px; margin-bottom:20px; }
 .remote-message { overflow-wrap:anywhere; font-size:calc(var(--theme-font-size) + 1px); line-height:1.65; min-width:0; }
 .remote-message > small { display:flex; align-items:center; font-size:var(--type-meta); font-weight:500; }
+/* Consecutive replies from the same speaker read as one block: label only the first. */
+.remote-message:not(.user):not(.error) + .remote-message:not(.user):not(.error) > small { display:none; }
 .remote-message.user { background:var(--panel); padding:8px 12px; border-radius:12px; margin-left:auto; width:fit-content; max-width:85%; }
 .remote-message.user > small { display:none; }
 .remote-message.user:has(.remote-tag) > small { display:flex; }
@@ -68,7 +71,10 @@
 .remote-markdown > :first-child { margin-top:2px; }
 .remote-markdown > :last-child { margin-bottom:0; }
 .remote-message pre,.remote-approval pre { overflow:auto; max-width:100%; font-size:var(--code-font-size); padding:12px; background:var(--panel); border-radius:var(--control-radius); }
-.remote-message table { display:block; overflow-x:auto; }
+.remote-message table { display:block; overflow-x:auto; max-width:100%; margin:10px 0; border-collapse:collapse; font-size:var(--type-ui); line-height:1.5; }
+.remote-message th,.remote-message td { padding:6px 12px 6px 0; border-bottom:1px solid var(--border-soft); text-align:left; vertical-align:top; }
+.remote-message th { color:var(--muted); font-weight:500; border-bottom-color:var(--border); white-space:nowrap; }
+.remote-message td code { font-size:var(--code-font-size); overflow-wrap:anywhere; }
 .remote-message a { color:var(--link); }
 .remote-message h1 { font-size:20px; line-height:1.35; margin:16px 0 12px; }
 .remote-message h2 { font-size:16px; line-height:1.4; }
@@ -98,7 +104,9 @@
 .remote-change-list s { color:var(--muted); }
 
 /* Composer and approvals */
-.remote-composer { margin:8px auto 16px; width:calc(100% - 40px); max-width:780px; display:grid; gap:6px; padding:8px 8px 8px 10px; border:1px solid var(--border); background:var(--surface); border-radius:14px; flex:none; box-sizing:border-box; box-shadow:var(--overlay-shadow); position:sticky; bottom:16px; }
+/* Pending questions and the composer share one docked area, so the transcript never runs underneath them. */
+.remote-dock { position:sticky; bottom:0; z-index:2; flex:none; width:calc(100% - 40px); max-width:780px; margin:0 auto; padding:12px 0 16px; display:grid; gap:8px; box-sizing:border-box; background:linear-gradient(to bottom, transparent, var(--bg) 12px); }
+.remote-composer { margin:0; width:100%; display:grid; gap:6px; padding:8px 8px 8px 10px; border:1px solid var(--border); background:var(--surface); border-radius:14px; flex:none; box-sizing:border-box; box-shadow:var(--overlay-shadow); }
 .remote-composer:focus-within { border-color:var(--border-strong); }
 .remote-composer > label { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip-path:inset(50%); }
 .remote-composer textarea { width:100%; min-height:48px; max-height:40dvh; resize:none; field-sizing:content; font:inherit; font-size:calc(var(--theme-font-size) + 1px); border:0; background:transparent; padding:4px 2px; box-shadow:none; }
@@ -107,8 +115,10 @@
 .remote-actions > button { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
 .remote-actions > .primary:last-child { margin-left:auto; }
 .remote-composer .remote-attach { width:32px; padding:0; color:var(--muted); }
-.remote-approval { margin:8px auto; width:calc(100% - 40px); max-width:780px; box-sizing:border-box; padding:12px; border:1px solid color-mix(in srgb, var(--warning) 40%, var(--border)); background:var(--surface); border-radius:var(--panel-radius); display:grid; gap:12px; max-height:40dvh; overflow:auto; flex:none; }
-.remote-approval h2 { margin:0; font-size:var(--type-body); }
+.remote-approval { margin:0; width:100%; box-sizing:border-box; padding:12px; border:1px solid color-mix(in srgb, var(--warning) 40%, var(--border)); background:var(--surface); border-radius:var(--panel-radius); display:grid; gap:12px; max-height:40dvh; overflow:auto; flex:none; }
+.remote-approval h2 { margin:0; display:flex; align-items:center; gap:8px; font-size:var(--type-body); font-weight:var(--weight-heading); }
+.remote-approval h2 > svg { color:var(--warning); flex:none; }
+.remote-approval label { line-height:1.6; overflow-wrap:anywhere; }
 .remote-approval form { display:grid; gap:12px; }
 .remote-create { width:100%; max-width:560px; padding:0 20px 24px; margin:0 auto; display:grid; gap:12px; box-sizing:border-box; }
 .remote-create .workspace-page-header { padding:24px 0 4px; border:0; }
@@ -187,7 +197,7 @@
  .remote-mandala { grid-template-columns:minmax(0,1fr) 280px; }
 }
 @media(max-width:430px) {
- .remote-tabs button > svg { display:none; }
+ .remote-tabs button > svg,.remote-tabs button > .brand-mark { display:none; }
 }
 @media(max-width:768px) {
  .remote-workspace { grid-template-columns:minmax(0,1fr); grid-template-rows:auto auto minmax(0,1fr); grid-template-areas:"header" "nav" "stage"; }
@@ -210,8 +220,7 @@
  .remote-chat-heading .workspace-page-context { grid-column:2; }
  .remote-messages { padding:16px; }
  .remote-create { padding-inline:16px; }
- .remote-composer { width:calc(100% - 24px); margin:8px 12px max(12px,env(safe-area-inset-bottom)); bottom:max(12px,env(safe-area-inset-bottom)); }
- .remote-approval { width:calc(100% - 32px); }
+ .remote-dock { width:calc(100% - 24px); padding-bottom:max(12px,env(safe-area-inset-bottom)); }
  .remote-task-list { padding-inline:16px; }
  .remote-filter { padding-inline:16px; }
  .remote-content > p,.remote-content > .workspace-detail-section { margin-inline:16px; }

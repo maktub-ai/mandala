@@ -379,7 +379,8 @@ async function start() {
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(menu));
   // A tray makes the background app reachable on Windows and when its window is hidden.
-  const icon = nativeImage.createFromPath(join(__dirname, process.platform === 'darwin' ? 'tray.png' : 'tray-color.png'));
+  const icon = nativeImage.createFromPath(join(__dirname, process.platform === 'darwin' ? 'trayTemplate.png' : 'tray-color.png'));
+  // macOS: 18pt template glyph; Electron picks trayTemplate@2x.png on Retina menu bars.
   if (process.platform === 'darwin') icon.setTemplateImage(true);
   tray = new Tray(icon); tray.setToolTip(service.upgradePending ? `Mandala — ${upgrade.pending}` : 'Mandala — connected to background runtime');
   tray.setContextMenu(Menu.buildFromTemplate(menu[0].submenu)); tray.on('double-click', () => window.show());

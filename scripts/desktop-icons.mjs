@@ -33,9 +33,13 @@ try {
   let offset = 6 + 16 * sizes.length;
   const entries = sizes.map(size => { const png = images.get(size), entry = Buffer.alloc(16); entry[0] = entry[1] = size === 256 ? 0 : size; entry.writeUInt16LE(1, 4); entry.writeUInt16LE(32, 6); entry.writeUInt32LE(png.length, 8); entry.writeUInt32LE(offset, 12); offset += png.length; return entry; });
   await writeFile('desktop/icons/icon.ico', Buffer.concat([header, ...entries, ...sizes.map(size => images.get(size))]));
-  await page.setViewportSize({ width: 32, height: 32 });
-  await page.setContent(`<style>html,body{margin:0;width:100%;height:100%;background:transparent;color:#000}svg{width:100%;height:100%;display:block}</style>${small.replaceAll('#ededf0', '#000000')}`);
-  await page.screenshot({ path: 'desktop/tray.png', omitBackground: true });
+  // macOS menu bar: an 18pt template image (glyph ≈16pt) plus @2x. Retina uses the full mark; 1x uses the optical outline.
+  const mark = await readFile('src/assets/logo-petals.svg', 'utf8');
+  for (const [size, source, file] of [[18, small, 'trayTemplate.png'], [36, mark, 'trayTemplate@2x.png']]) {
+    await page.setViewportSize({ width: size, height: size });
+    await page.setContent(`<style>html,body{margin:0;width:100%;height:100%;background:transparent;color:#000}svg{width:100%;height:100%;display:block}</style>${source.replaceAll('#ededf0', '#000000')}`);
+    await page.screenshot({ path: `desktop/${file}`, omitBackground: true });
+  }
 } finally { await browser.close(); }
 if (process.platform === 'darwin') {
   const iconset = 'desktop/icons/mandala.iconset'; await mkdir(iconset, { recursive: true });
