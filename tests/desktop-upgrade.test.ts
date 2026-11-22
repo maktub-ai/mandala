@@ -114,8 +114,10 @@ test('an active terminal defers the upgrade until it exits', async () => {
     expect(pending.record.pid).toBe(first.record.pid);
     expect((await (await call(path)).json()).session).toMatchObject({ id: session.id, state: 'running' });
 
-    await call(path, 'DELETE', { sessionId: session.id });
-    await expect.poll(async () => (await (await call(path)).json()).session.state).toBe('exited');
+    const stopped = await call(path, 'DELETE', { sessionId: session.id });
+    expect(stopped.status, await stopped.clone().text()).toBe(200);
+    // node-pty drains Windows ConPTY output for 1s before publishing the exit event.
+    await expect.poll(async () => (await (await call(path)).json()).session.state, { timeout: 5000 }).toBe('exited');
     await expect.poll(async () => (await connectOrStartService({ ...options, build: newBuild })).build, { timeout: 10000 }).toEqual(newBuild);
   } finally {
     const running = await connectService(options.home);
