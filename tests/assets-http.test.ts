@@ -139,7 +139,7 @@ it('a revoked dialogue Skill cannot break healthy Wiki list reloads or permissio
 it('reads one asset binding list with current targets and enforces asset access',async()=>{
  const {readConfig,writeConfig}=await import('../server/config');
  const {config,revision}=await readConfig(home);
- config.projects=[{id:'binding-project',name:'Project',cwd:'/tmp',agentIds:['binding-agent'],resources:[],mcp:[],skills:[]}];
+ config.projects=[{id:'binding-project',name:'Project',cwd:home,agentIds:['binding-agent'],resources:[],mcp:[],skills:[]}];
  config.agents=[{id:'binding-agent',name:'Agent',instructions:'',defaultCli:'codex',models:{},mcp:[],skills:[]}];
  await writeConfig(home,config,revision);
  const p=await publish('bindings.md');

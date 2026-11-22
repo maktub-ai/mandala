@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import type { FileHandle } from "node:fs/promises";
 import { createAssetFiles } from "../server/asset-files";
 let home: string, root: string;
 const principal = { userId: "u", agentId: "a", runId: "r" };
@@ -13,7 +14,7 @@ const source = (manifestPath = "a.txt", relativePath = "a.txt") => ({ allowedRoo
 it("streams exact hash size mode and persists principal-bound staging across reopen", async () => {
   await chmod(join(root, "a.txt"), 0o755);
   const files = createAssetFiles(home); const staged = await files.stageFiles(principal, "r", [source()]);
-  expect(staged.files[0]).toEqual({ path: "a.txt", blobHash: createHash("sha256").update("hello").digest("hex"), size: 5, mediaType: "text/plain", executable: true });
+  expect(staged.files[0]).toEqual({ path: "a.txt", blobHash: createHash("sha256").update("hello").digest("hex"), size: 5, mediaType: "text/plain", executable: process.platform !== "win32" });
   expect(await createAssetFiles(home).readStaging(principal, "r", staged.submissionId)).toEqual(staged);
   expect(() => files.readStaging({ userId: "other" }, "r", staged.submissionId)).toThrow();
   expect(() => files.readStaging(principal, "different", staged.submissionId)).toThrow();
@@ -26,9 +27,13 @@ it("rejects traversal absolute paths duplicate normalized paths and mismatched r
   await expect(files.stageFiles(principal, "r", [source("x", "../a.txt")])).rejects.toThrow();
   await expect(files.stageFiles(principal, "other", [source()])).rejects.toThrow();
 });
-it("rejects symlink files and symlink directories", async () => {
+it.skipIf(process.platform === "win32")("rejects symlink files and symlink directories", async () => {
   await symlink(join(root, "a.txt"), join(root, "link")); await symlink(root, join(root, "dir"));
   for (const path of ["link", "dir/a.txt"]) await expect(createAssetFiles(home).stageFiles(principal, "r", [source("x", path)])).rejects.toThrow();
+});
+it.skipIf(process.platform !== "win32")("rejects a Windows directory junction in a source path", async () => {
+  await symlink(root, join(root, "dir"), "junction");
+  await expect(createAssetFiles(home).stageFiles(principal, "r", [source("x", "dir/a.txt")])).rejects.toThrow();
 });
 it("rejects replacement after validation", async () => {
   const files = createAssetFiles(home, { afterSourceValidated: async () => { await rename(join(root, "a.txt"), join(root, "old")); await writeFile(join(root, "a.txt"), "changed"); } });
@@ -62,7 +67,7 @@ it("rejects a file changed in place after validation and an expired staging leas
   await writeFile(metadataPath, JSON.stringify(record));
   expect(() => files.readStaging(principal, "r", manifest.submissionId)).toThrow(/expired/);
 });
-it("concurrent reuse establishes its own directory durability when the first writer fails", async () => {
+it.skipIf(process.platform === "win32")("concurrent reuse establishes its own directory durability when the first writer fails", async () => {
   const hash = createHash("sha256").update("hello").digest("hex");
   const parent = join(home, "blobs", "sha256", hash.slice(0, 2)); await mkdir(parent, { recursive: true });
   const parentStat = await stat(parent), probe = await open(parent, "r");
@@ -90,7 +95,7 @@ it("concurrent reuse establishes its own directory durability when the first wri
     expect((await readdir(join(home, "staging"))).length).toBe(1);
   } finally { release(); await first; spy.mockRestore(); }
 });
-it("failed parent sync retry cannot create a lease until its own sync succeeds", async () => {
+it.skipIf(process.platform === "win32")("failed parent sync retry cannot create a lease until its own sync succeeds", async () => {
   const hash = createHash("sha256").update("hello").digest("hex");
   const parent = join(home, "blobs", "sha256", hash.slice(0, 2)); await mkdir(parent, { recursive: true });
   const parentStat = await stat(parent), probe = await open(parent, "r");
@@ -112,7 +117,7 @@ it("failed parent sync retry cannot create a lease until its own sync succeeds",
     expect(parentSyncs).toBe(3); expect(files.readStaging(principal, "r", recovered.submissionId)).toEqual(recovered);
   } finally { spy.mockRestore(); }
 });
-it("syncs every managed directory entry through the trusted existing home", async () => {
+it.skipIf(process.platform === "win32")("syncs every managed directory entry through the trusted existing home", async () => {
   const probe = await open(home, "r"), prototype = Object.getPrototypeOf(probe), originalSync = prototype.sync; await probe.close();
   const synced = new Set<string>();
   const spy = vi.spyOn(prototype, "sync").mockImplementation(async function(this: import("node:fs/promises").FileHandle) {
@@ -124,5 +129,34 @@ it("syncs every managed directory entry through the trusted existing home", asyn
     for (const directory of [home, join(home, "blobs"), join(home, "blobs", "sha256"), join(home, "blobs", "sha256", result.files[0].blobHash.slice(0, 2)), join(home, "staging"), join(home, "staging", result.submissionId)]) {
       const current = await stat(directory); expect(synced.has(`${current.dev}:${current.ino}`)).toBe(true);
     }
+  } finally { spy.mockRestore(); }
+});
+it.skipIf(process.platform !== "win32")("stages blobs and manifest without attempting unsupported Windows directory sync", async () => {
+  const probe = await open(home, "r"), prototype = Object.getPrototypeOf(probe), originalSync = prototype.sync;
+  await probe.close();
+  const synced: string[] = [];
+  const spy = vi.spyOn(prototype, "sync").mockImplementation(async function(this: FileHandle) {
+    synced.push((await this.stat()).isDirectory() ? "directory" : "file");
+    return originalSync.call(this);
+  });
+  try {
+    const files = createAssetFiles(home);
+    const manifest = await files.stageFiles(principal, "r", [source()]);
+    expect(files.readStaging(principal, "r", manifest.submissionId)).toEqual(manifest);
+    expect(synced).toEqual(["file", "file"]);
+  } finally { spy.mockRestore(); }
+});
+it.each([1, 2])("propagates regular-file sync failure %i without issuing a lease", async failure => {
+  const probe = await open(home, "r"), prototype = Object.getPrototypeOf(probe), originalSync = prototype.sync;
+  await probe.close();
+  const error = Object.assign(new Error("regular-file sync failed"), { code: "EPERM" });
+  let syncs = 0;
+  const spy = vi.spyOn(prototype, "sync").mockImplementation(async function(this: FileHandle) {
+    if ((await this.stat()).isFile() && ++syncs === failure) throw error;
+    return originalSync.call(this);
+  });
+  try {
+    await expect(createAssetFiles(home).stageFiles(principal, "r", [source()])).rejects.toBe(error);
+    expect(await readdir(join(home, "staging"))).toEqual([]);
   } finally { spy.mockRestore(); }
 });

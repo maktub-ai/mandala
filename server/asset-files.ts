@@ -21,7 +21,11 @@ function safePath(path: string): string {
 }
 async function syncDirectory(path: string) {
   const directory = await open(path, constants.O_RDONLY);
-  try { await directory.sync(); } finally { await directory.close(); }
+  try {
+    // Windows does not support fsync on a read-only directory handle.
+    // Blob and manifest file flushes remain mandatory on every platform.
+    if (process.platform !== "win32") await directory.sync();
+  } finally { await directory.close(); }
 }
 async function validateSource(source: UploadSource) {
   const configuredRoot = resolve(source.allowedRoot);
