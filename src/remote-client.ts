@@ -1,4 +1,4 @@
-import { boundedBody, fromBase64, MAX_REMOTE_BODY, MAX_REMOTE_RECORD, newRemoteKey, openRemote, remoteHeaders, remotePublicKey, remoteRequestId, sealRemote, toBase64, type RemoteKey } from '../shared/remote-crypto';
+import { boundedBody, fromBase64, MAX_REMOTE_BODY, MAX_REMOTE_RECORD, REMOTE_HISTORY_ENCODING, isRemoteHistoryRead, newRemoteKey, openRemote, remoteHeaders, remotePublicKey, remoteRequestId, sealRemote, toBase64, type RemoteKey } from '../shared/remote-crypto';
 export { remoteKeyFingerprint } from '../shared/remote-crypto';
 
 let browserKey: Promise<RemoteKey> | undefined;
@@ -24,7 +24,9 @@ export function createRemoteFetch(hostPublicKey: string, keyPair: RemoteKey): (p
     if (!path.startsWith('/api/') || path.startsWith('//') || /[\\#]/.test(path)) throw new Error('Invalid remote path');
     const request = new Request('http://remote.invalid' + path, init), id = remoteRequestId();
     const bytes = await boundedBody(request.body, MAX_REMOTE_BODY);
-    const envelope = sealRemote({ id, timestamp: Date.now(), method: request.method, path, headers: Object.fromEntries(remoteHeaders.filter(k => request.headers.has(k)).map(k => [k, request.headers.get(k)!])), body: toBase64(bytes) }, hostPublicKey, keyPair.secretKey);
+    const historyEncoding = typeof DecompressionStream === 'function' && isRemoteHistoryRead(request.method, path)
+      ? REMOTE_HISTORY_ENCODING : undefined;
+    const envelope = sealRemote({ id, timestamp: Date.now(), method: request.method, path, historyEncoding, headers: Object.fromEntries(remoteHeaders.filter(k => request.headers.has(k)).map(k => [k, request.headers.get(k)!])), body: toBase64(bytes) }, hostPublicKey, keyPair.secretKey);
     const response = await fetch('/api/remote/transport', { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: envelope, signal: init.signal, credentials: 'same-origin', redirect: 'error' });
     if (!response.ok || !response.body) throw new Error(`Remote transport unavailable (${response.status})`);
     const reader = response.body.getReader(); let buffer: Uint8Array = new Uint8Array(), offset = 0, sequence = 0, ended = false;
@@ -51,7 +53,11 @@ export function createRemoteFetch(hostPublicKey: string, keyPair: RemoteKey): (p
     try {
       const first = await record();
       if (first.type !== 'headers' || !Number.isInteger(first.status) || first.status < 200 || first.status > 599) throw new Error('Invalid remote response headers');
-      const stream = new ReadableStream<Uint8Array>({
+      if (first.historyEncoding !== undefined && (!historyEncoding || first.historyEncoding !== historyEncoding ||
+          first.status !== 200 || !new Headers(first.headers).get('content-type')?.startsWith('application/json'))) {
+        throw new Error('Unsupported remote history encoding');
+      }
+      const stream = new ReadableStream<Uint8Array<ArrayBuffer>>({
         async pull(controller) {
           try {
             const next = await record();
@@ -70,7 +76,10 @@ export function createRemoteFetch(hostPublicKey: string, keyPair: RemoteKey): (p
         const empty = stream.getReader(); while (!(await empty.read()).done) {};
         return new Response(null, { status: first.status, headers: first.headers });
       }
-      return new Response(stream, { status: first.status, headers: first.headers });
+      const body = first.historyEncoding === REMOTE_HISTORY_ENCODING
+        ? stream.pipeThrough(new DecompressionStream(REMOTE_HISTORY_ENCODING))
+        : stream;
+      return new Response(body, { status: first.status, headers: first.headers });
     } catch (error) { await reader.cancel().catch(() => {}); throw error; }
   };
 }

@@ -64,3 +64,27 @@ it('accepts many complete response records coalesced into one fetch chunk',async
  });
  const response=await createRemoteFetch(host.publicKey,phone)('/api/conversations/chat/attachments/item');expect((await response.arrayBuffer()).byteLength).toBe(576000);
 });
+
+it('compresses large history only for a client that supports it', async () => {
+ const host = newRemoteKey(), phone = newRemoteKey();
+ const history = { events: Array.from({ length: 700 }, (_, id) => ({ id, data: { text: 'Synthetic history entry. '.repeat(30) } })), before: null };
+ const transport = createRemoteTransport({ identity: host, peer: () => phone.publicKey, async dispatch() {
+  return Response.json(history);
+ } });
+ const url = await listen(createServer((req, res) => { void transport(req, res); }));
+ const path = '/api/conversations/chat/history?recent=5';
+ const wire = async (path: string, historyEncoding?: string) => {
+  const request = sealRemote({ id: remoteRequestId(), timestamp: Date.now(), method: 'GET', path, headers: {}, body: '', historyEncoding }, host.publicKey, phone.secretKey);
+  return (await fetch(url + '/api/remote/transport', { method: 'POST', body: request })).text();
+ };
+ const legacy = await wire(path);
+ const compressed = await wire(path, 'gzip');
+ expect(compressed.length).toBeLessThan(legacy.length / 2);
+ const headers = (payload: string) => openRemote(payload.split('\n')[0], host.publicKey, phone.secretKey);
+ expect(headers(legacy).historyEncoding).toBeUndefined();
+ expect(headers(compressed).historyEncoding).toBe('gzip');
+ expect(headers(await wire('/api/conversations/chat', 'gzip')).historyEncoding).toBeUndefined();
+ routeFetch(url);
+ const response = await createRemoteFetch(host.publicKey, phone)(path);
+ expect(await response.json()).toEqual(history);
+});

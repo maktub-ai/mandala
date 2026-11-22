@@ -5,13 +5,16 @@ export const MAX_REMOTE_BODY = 20 * 1024 * 1024;
 export const MAX_REMOTE_WIRE = 40 * 1024 * 1024;
 export const MAX_REMOTE_RECORD = 128 * 1024;
 export const REMOTE_CHUNK = 48 * 1024;
+export const REMOTE_HISTORY_ENCODING = 'gzip';
+export const isRemoteHistoryRead = (method: string, path: string) =>
+  method === 'GET' && /^\/api\/conversations\/[a-zA-Z0-9_-]{1,100}\/history(?:\?|$)/.test(path);
 export const remoteHeaders = ['content-type', 'accept', 'last-event-id', 'range'];
 export const responseHeaders = ['content-type', 'cache-control', 'content-disposition', 'etag', 'accept-ranges', 'content-range'];
 export function toBase64(bytes: Uint8Array): string {
   let value = ''; for (let offset = 0; offset < bytes.length; offset += 8192) value += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
   return btoa(value);
 }
-export function fromBase64(value: string): Uint8Array {
+export function fromBase64(value: string): Uint8Array<ArrayBuffer> {
   if (typeof value !== 'string' || (value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value))) throw new Error('Invalid base64');
   return Uint8Array.from(atob(value), c => c.charCodeAt(0));
 }

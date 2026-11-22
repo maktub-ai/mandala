@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { once } from 'node:events';
-import { fromBase64, MAX_REMOTE_BODY, MAX_REMOTE_RECORD, MAX_REMOTE_WIRE, openRemote, REMOTE_CHUNK, remoteHeaders, ReplayWindow, responseHeaders, sealRemote, toBase64, type RemoteKey } from '../shared/remote-crypto';
+import { fromBase64, MAX_REMOTE_BODY, MAX_REMOTE_RECORD, MAX_REMOTE_WIRE, isRemoteHistoryRead, openRemote, REMOTE_CHUNK, REMOTE_HISTORY_ENCODING, remoteHeaders, ReplayWindow, responseHeaders, sealRemote, toBase64, type RemoteKey } from '../shared/remote-crypto';
 import { remoteRequestAllowed } from './remote-policy';
 
 export type RemoteRequest = { method: string; path: string; headers: Record<string, string>; body: Uint8Array };
@@ -41,6 +41,13 @@ export function createRemoteTransport(options: {
         response = await options.dispatch(req, { method: value.method, path: value.path, headers, body }, controller.signal);
       }
       if (value.method === 'GET' && response.headers.get('content-type')?.startsWith('text/event-stream')) onReadStream?.();
+      const bodyStream = response.body;
+      const gzipHistory = bodyStream && value.historyEncoding === REMOTE_HISTORY_ENCODING && isRemoteHistoryRead(value.method, value.path) &&
+        response.status === 200 && response.headers.get('content-type')?.startsWith('application/json');
+      const responseBody = gzipHistory
+        ? bodyStream.pipeThrough(new CompressionStream(REMOTE_HISTORY_ENCODING), { signal: controller.signal })
+        : bodyStream;
+      reader = responseBody?.getReader();
       res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store' });
       let seq = 0;
       async function send(record: Record<string, unknown>) {
@@ -49,8 +56,7 @@ export function createRemoteTransport(options: {
         if (frame.length > MAX_REMOTE_RECORD) throw new Error('Remote record too large');
         if (!res.write(frame + '\n')) await once(res, 'drain', { signal: controller.signal });
       }
-      await send({ type: 'headers', status: response.status, headers: Object.fromEntries(responseHeaders.filter(k => response.headers.has(k)).map(k => [k, response.headers.get(k)!])) });
-      reader = response.body?.getReader();
+      await send({ type: 'headers', status: response.status, ...(gzipHistory ? { historyEncoding: REMOTE_HISTORY_ENCODING } : {}), headers: Object.fromEntries(responseHeaders.filter(k => response.headers.has(k)).map(k => [k, response.headers.get(k)!])) });
       if (reader) for (;;) {
         const { done, value: bytes } = await reader.read(); if (done) break;
         for (let i = 0; i < bytes.length; i += REMOTE_CHUNK) await send({ type: 'data', body: toBase64(bytes.subarray(i, i + REMOTE_CHUNK)) });
