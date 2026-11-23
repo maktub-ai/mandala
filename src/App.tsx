@@ -233,9 +233,11 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const auxiliaryReady=historyReady&&(!selected||settledChat===selected);
   const readerConversation = useRef("");
   const [contentRequest, setContentRequest] = useState<{ conversationId: string; target: ContentTarget } | null>(null);
+  const activeContentRequest = contentRequest?.conversationId === selected ? contentRequest.target : null;
+  useEffect(() => setContentRequest(current => current?.conversationId === selected ? current : null), [selected]);
   const [workspaceTab, setWorkspaceTab] = useState<ConversationWorkspaceTab>("files");
   const openContent = useCallback((target: ContentTarget) => {
-    setContentRequest({ conversationId: selected, target });
+    setContentRequest({ conversationId: selected, target: { ...target } });
     setWorkspaceTab(target.kind === "file" ? "files" : "references"); setEffectiveOpen(true);
   }, [selected]);
   const [editingMessage, setEditingMessage] = useState<{ eventId: number; text: string } | null>(null);
@@ -1822,7 +1824,19 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
         </>}
       </main>
       <WorkspaceInspector returnFocusRef={selected && !workbench ? contentPanelTrigger : undefined} compact={!!selected && !workbench} id="chat-environment-panel" title={t(selected && !workbench ? "右侧栏" : "上下文与能力")} className={selected && !workbench ? "chat-workspace-inspector" : ""} preserveContent={!!selected && !workbench} resizable={!!selected && !workbench} open={effectiveOpen} onClose={()=>setEffectiveOpen(false)}>
-        {mandalaMain ? <MandalaPanels conversationId={selected} config={config} onCatalogRefresh={refreshReferenceCatalog} references={referenceItems} onReference={addCatalogReference} onOpen={openWorkspacePath} visible={effectiveOpen&&auxiliaryReady}/> : selected && !workbench ? chat && readerConversation.current === selected && <ConversationWorkspace key={selected} conversationId={selected} projectId={projectId} activityVersion={chat?.updatedAt} config={config} theme={theme} configuration={environmentPanel} contextSources={<><p className="effective-scope">{project?.name ?? t("不关联项目")} / {agent?.name ?? runtimeName(chat?.cli ?? cli)}</p><EffectivePanel visible={effectiveOpen && workspaceTab === "configuration"} view="sources" projectId={projectId} agentId={agentId} cli={chat!.cli} conversationId={selected} workspaceId={workspace?.id ?? null} cwd={!project ? directory : undefined}/></> } onCloseTerminal={() => { setEffectiveOpen(false); requestAnimationFrame(() => { if(document.activeElement===document.body||document.activeElement?.closest("#chat-environment-panel"))contentPanelTrigger.current?.focus(); }); }} onReference={addReference} initialTab={workspaceTab} onTabChange={setWorkspaceTab} requestedContent={contentRequest?.conversationId === selected ? contentRequest.target : null} /> : environmentPanel}
+        {mandalaMain ? <>
+          <div hidden={!!activeContentRequest} style={{ display: activeContentRequest ? "none" : "contents" }}>
+            <MandalaPanels conversationId={selected} config={config} onCatalogRefresh={refreshReferenceCatalog} references={referenceItems} onReference={addCatalogReference} onOpen={openWorkspacePath} visible={effectiveOpen&&auxiliaryReady&&!activeContentRequest}/>
+          </div>
+          {activeContentRequest &&
+          <ConversationWorkspace key={selected} conversationId={selected} projectId={projectId} config={config} theme={theme}
+            onCloseTerminal={() => setEffectiveOpen(false)} onReference={addReference} initialTab={workspaceTab}
+            requestedContent={activeContentRequest} onClosePreview={() => {
+              setContentRequest(null);
+              requestAnimationFrame(() => contentPanelTrigger.current?.focus());
+            }} />
+          }
+        </> : selected && !workbench ? chat && readerConversation.current === selected && <ConversationWorkspace key={selected} conversationId={selected} projectId={projectId} activityVersion={chat?.updatedAt} config={config} theme={theme} configuration={environmentPanel} contextSources={<><p className="effective-scope">{project?.name ?? t("不关联项目")} / {agent?.name ?? runtimeName(chat?.cli ?? cli)}</p><EffectivePanel visible={effectiveOpen && workspaceTab === "configuration"} view="sources" projectId={projectId} agentId={agentId} cli={chat!.cli} conversationId={selected} workspaceId={workspace?.id ?? null} cwd={!project ? directory : undefined}/></> } onCloseTerminal={() => { setEffectiveOpen(false); requestAnimationFrame(() => { if(document.activeElement===document.body||document.activeElement?.closest("#chat-environment-panel"))contentPanelTrigger.current?.focus(); }); }} onReference={addReference} initialTab={workspaceTab} onTabChange={setWorkspaceTab} requestedContent={contentRequest?.conversationId === selected ? contentRequest.target : null} /> : environmentPanel}
       </WorkspaceInspector>
       {folderOpen && <FolderPicker initialPath={directory} purpose="conversation" onClose={() => setFolderOpen(false)} onSelect={path => { setDirectory(path); setWorkspaceId(null); setFolderOpen(false); const query = new URLSearchParams({project: projectId, agent: agentId, cwd: path}); history.replaceState(null, "", "/?" + query); }} />}
       {agentDetail && (() => {

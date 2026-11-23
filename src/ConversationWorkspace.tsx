@@ -56,8 +56,9 @@ function read<T>(url: string, signal: AbortSignal, body?: unknown): Promise<T> {
  return requestJson(url,{signal,...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
 }
 
-export default function ConversationWorkspace({conversationId,projectId,activityVersion='',config,theme,onCloseTerminal,requestedContent,initialTab='references',onTabChange,onReference,configuration,contextSources}: {
+export default function ConversationWorkspace({conversationId,projectId,activityVersion='',config,theme,onCloseTerminal,requestedContent,initialTab='references',onTabChange,onReference,configuration,contextSources,onClosePreview}: {
  conversationId: string; projectId: string; config: Config; requestedContent?: ContentTarget | null;
+ onClosePreview?: () => void;
  configuration?: ReactNode; contextSources?: ReactNode; activityVersion?: string;
  theme: string; onCloseTerminal: () => void;
  onReference: (value:string)=>void;
@@ -83,7 +84,7 @@ export default function ConversationWorkspace({conversationId,projectId,activity
  const [diffScope,setDiffScope]=useState('all'),[showFile,setShowFile]=useState(false);
  const [openPaths,setOpenPaths]=useState(()=>openFiles.get(conversationId)?.paths??[]),restoredScroll=useRef<string|null>(null);
  const reader=useRef<HTMLElement>(null),search=useRef<HTMLInputElement>(null);
- const needsWorkspace=(tab==='files'||tab==='changes')&&!external,scope=conversationId+':'+projectId;
+ const needsWorkspace=!onClosePreview&&(tab==='files'||tab==='changes')&&!external,scope=conversationId+':'+projectId;
  const workspaceKey=conversationId+(tab==='changes'?':'+diffScope+':'+baseRef:'');
  const listing=workspace?.key===workspaceKey?workspace:null;
  const selected=selection?.conversationId===conversationId?selection:null;
@@ -228,19 +229,19 @@ export default function ConversationWorkspace({conversationId,projectId,activity
  const title=external&&external.kind!=='file'?external.name:materialChoice?.material.title??(path?path.split(/[\\/]/).pop():'');
  const localTarget=external?.kind==='file'?{kind:'local-file',body:{href:external.href},query:'href='+encodeURIComponent(external.href)}:selected&&tab==='files'?{kind:'workspace-file',body:{path:selected.path},query:'path='+encodeURIComponent(selected.path)}:null;
  const fileEndpoint=localTarget?'/api/conversations/'+encodeURIComponent(conversationId)+'/'+localTarget.kind:'';
- const back=()=>{if(tab==='references'){setTab('files');onTabChange?.('files');}setShowFile(false);setExternal(null);setSelection(null);setFile(null);setMaterialSelection(null);requestAnimationFrame(()=>(search.current??document.getElementById(id+'-'+tab))?.focus());};
+ const back=()=>{if(onClosePreview){onClosePreview();return;}if(tab==='references'){setTab('files');onTabChange?.('files');}setShowFile(false);setExternal(null);setSelection(null);setFile(null);setMaterialSelection(null);requestAnimationFrame(()=>(search.current??document.getElementById(id+'-'+tab))?.focus());};
  const retryFile=()=>{if(external)setExternal({...external});else if(selected)setSelection({...selected,attempt:selected.attempt+1});};
  const materialUrl=(preview:MaterialPreview,item:AssetFile)=>'/api/v2/assets/'+encodeURIComponent(preview.asset.id)+'/versions/'+encodeURIComponent(preview.version.id)+'/files/'+encodeURIComponent(item.fileId);
 
  return <section className="conversation-workspace">
-  <div ref={tabList} data-compact={compactTabs||undefined} className="conversation-workspace-tabs" role="tablist" aria-label={label('侧栏视图','Sidebar views')} onKeyDown={event=>{
+  {!onClosePreview&&<div ref={tabList} data-compact={compactTabs||undefined} className="conversation-workspace-tabs" role="tablist" aria-label={label('侧栏视图','Sidebar views')} onKeyDown={event=>{
    const at=tabs.findIndex(item=>item.key===activeTab);
    const next=event.key==='ArrowRight'?(at+1)%tabs.length:event.key==='ArrowLeft'?(at+tabs.length-1)%tabs.length:event.key==='Home'?0:event.key==='End'?tabs.length-1:-1;
    if(next<0)return;event.preventDefault();chooseTab(tabs[next].key);document.getElementById(id+'-'+tabs[next].key)?.focus();
   }}>
    {tabs.map(item=><Button type="button" role="tab" key={item.key} id={id+'-'+item.key} title={item.key==='terminal'?item.name+' · '+shortcutLabel('terminal'):compactTabs?item.name:undefined} aria-keyshortcuts={item.key==='terminal'?shortcutAria('terminal'):undefined} aria-selected={activeTab===item.key} aria-controls={id+'-panel'} tabIndex={activeTab===item.key?0:-1} onClick={()=>chooseTab(item.key)}><Icon name={item.icon} size={16}/><span className="workspace-tab-label">{item.name}</span></Button>)}
-  </div>
-  <div role="tabpanel" id={id+'-panel'} aria-labelledby={activeTab==='references'?undefined:id+'-'+activeTab} aria-label={activeTab==='references'?label('预览','Preview'):undefined}>
+  </div>}
+  <div role={onClosePreview?"region":"tabpanel"} id={id+'-panel'} aria-labelledby={onClosePreview||activeTab==='references'?undefined:id+'-'+activeTab} aria-label={onClosePreview||activeTab==='references'?label('预览','Preview'):undefined}>
    {(showConfiguration||capabilitiesVisited)&&<div className="content-browser chat-capabilities" hidden={!showConfiguration}>{configuration}{contextSources&&<section className="chat-instructions" aria-label={label('指令与候选资料','Instructions and available sources')}>{contextSources}</section>}</div>}
    <div className="conversation-workspace-content" hidden={showConfiguration}>
    {tab==='files'&&!external&&openPaths.length>0&&<div className="open-file-tabs" role="group" aria-label={label('打开的文件','Open files')}>
@@ -253,7 +254,7 @@ export default function ConversationWorkspace({conversationId,projectId,activity
    {tab==='terminal'?<DeferredTerminal loadingLabel={label('正在打开终端…','Opening terminal…')} conversationId={conversationId} theme={theme} onClose={onCloseTerminal} onReference={onReference}/>:reading?<>
     <header className="content-reader-heading">
      <div className="content-reader-bar">
-      {(()=>{const backLabel=tab==='references'?label('关闭预览','Close preview'):tab==='changes'?label('返回改动','Back to changes'):label('返回文件','Back to files');return <Button type="button" variant="ghost" className="content-reader-back icon-button" aria-label={backLabel} title={backLabel} onClick={back}><Icon name="arrowLeft" size={15}/></Button>;})()}
+      {(()=>{const backLabel=onClosePreview||tab==='references'?label('关闭预览','Close preview'):tab==='changes'?label('返回改动','Back to changes'):label('返回文件','Back to files');return <Button type="button" variant="ghost" className="content-reader-back icon-button" aria-label={backLabel} title={backLabel} onClick={back}><Icon name="arrowLeft" size={15}/></Button>;})()}
       <div className="content-reader-title"><Icon name={external?.kind==='image'?'image':tab==='changes'?'layers':'file'} size={16}/>
        <div className="content-reader-name"><h3 title={title}>{title}</h3>
         {path?<button type="button" className="content-reader-location" aria-label={label('复制路径','Copy path')} title={(activeFile?.value?.path??path)+' · '+label('点击复制路径','Click to copy path')} data-copied={!!copied||undefined} onClick={async()=>{try{await copyText(activeFile?.value?.path??path);setCopyError('');setCopied(label('路径已复制','Path copied'));}catch{clearCopied();setCopyError(label('复制失败','Copy failed'));}}}>{copied?<><Icon name="check" size={12}/>{String(copied)}</>:external?(external.kind==='file'?label('本地文件','Local file'):label('上传附件','Attachment')):materialChoice?label('引用文档','Referenced document')+(materialResult?.value?' · '+label('固定版本','Pinned version')+' · v'+materialResult.value.version.ordinal:''):tab==='changes'?(diffScope==='branch'?label('分支已提交','Branch commits'):diffScope==='staged'?label('已暂存','Staged'):diffScope==='unstaged'?label('未暂存','Unstaged'):label('全部未提交','All uncommitted'))+' · '+path:path}</button>:<p className="content-reader-location">{external?(external.kind==='file'?label('本地文件','Local file'):label('上传附件','Attachment')):materialChoice?label('引用文档','Referenced document')+(materialResult?.value?' · '+label('固定版本','Pinned version')+' · v'+materialResult.value.version.ordinal:''):tab==='changes'?(diffScope==='branch'?label('分支已提交','Branch commits'):diffScope==='staged'?label('已暂存','Staged'):diffScope==='unstaged'?label('未暂存','Unstaged'):label('全部未提交','All uncommitted'))+' · '+path:path}</p>}
@@ -276,7 +277,7 @@ export default function ConversationWorkspace({conversationId,projectId,activity
     <section ref={reader} tabIndex={-1} onScroll={event=>{if(tab==='files'&&selected&&restoredScroll.current===selected.path)openFileMemory(conversationId).scroll.set(selected.path,event.currentTarget.scrollTop);}} className={"conversation-workspace-preview"+(tab==='changes'&&!showFile?' is-diff':'')} aria-label={label('内容预览','Content preview')}>
      {external?.kind==='image'?<ReaderImage key={external.src} src={external.src} name={external.name}/>:materialChoice?<>
       {!materialResult||materialResult.busy?<p role="status">{loading}</p>:materialResult.error?<div role="alert"><p>{errorText(materialResult.error)}</p><Button type="button" onClick={()=>setMaterialSelection({...materialChoice,attempt:materialChoice.attempt+1})}>{retry}</Button></div>:materialResult.value&&<>
-       {materialResult.value.file?isImage(materialResult.value.file.mediaType)?<ReaderImage key={materialUrl(materialResult.value,materialResult.value.file)} src={materialUrl(materialResult.value,materialResult.value.file)} name={materialResult.value.file.name}/>:<ReaderText name={materialResult.value.file.name} text={materialResult.value.text} markdown={materialResult.value.file.mediaType.includes('markdown')}/>:<p>{label('暂不支持此格式或大小的预览。','This format or size cannot be previewed.')}</p>}
+       {materialResult.value.file?isImage(materialResult.value.file.mediaType)?<ReaderImage key={materialUrl(materialResult.value,materialResult.value.file)} src={materialUrl(materialResult.value,materialResult.value.file)} name={materialResult.value.file.name}/>:<ReaderText name={materialResult.value.file.name} text={materialResult.value.text} markdown={materialResult.value.file.mediaType.includes('markdown')} previewUrl={materialUrl(materialResult.value,materialResult.value.file)+'?preview=1'}/>:<p>{label('暂不支持此格式或大小的预览。','This format or size cannot be previewed.')}</p>}
        {(()=>{const value=materialResult.value!,primary=value.version.downloads.find(file=>file.fileId===value.file?.fileId)??value.version.downloads[0],others=value.version.downloads.filter(file=>file!==primary);return <>
         {primary&&primary.availability!=='managed_local'&&<p role="alert">{label('内容缺失，请从备份恢复。','Content is missing; restore it from a backup.')}</p>}
         {others.length>0&&<footer className="content-reader-downloads"><h4>{label('此版本的其他文件','Other files in this version')}</h4>{others.map(item=><div key={item.fileId} className="conversation-workspace-download"><Icon name="file" size={14}/><span title={item.name}>{item.name}</span>{item.availability==='managed_local'?<span className="content-reader-file-actions"><a className="icon-button" download={item.name} href={materialUrl(value,item)} aria-label={label('下载固定版本','Download pinned version')+' · '+item.name} title={label('下载固定版本','Download pinned version')}><Icon name="download" size={15}/></a><AssetLocalActions key={value.version.id+item.fileId} assetId={value.asset.id} versionId={value.version.id} file={item} compact/></span>:<small>{label('内容缺失，请从备份恢复。','Content is missing; restore it from a backup.')}</small>}</div>)}</footer>}

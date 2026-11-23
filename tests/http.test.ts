@@ -10,6 +10,9 @@ import { openStore, type Store } from "../server/store";
 
 import { createSessionManager, type SessionManager } from "../server/sessions";
 import { createHttpServer } from "../server/http";
+import { createAssets } from "../server/assets";
+import { createAssetFiles } from "../server/asset-files";
+import { createRunArtifacts } from "../server/run-artifacts";
 let home: string,
   store: Store,
   manager: SessionManager,
@@ -618,4 +621,53 @@ it('skips an abandoned queued list and continues serving later reads',async()=>{
   expect((await fetch(url+'/api/v2/tasks?invalid=1')).status).toBe(422);
   expect((await fetch(url+'/api/v2/tasks')).status).toBe(200);
  }finally{list.mockRestore();}
+});
+
+it('projects only an exact same-run published historical link into a pinned download', async () => {
+ const chat=store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null});
+ const other=store.createConversation({projectId:'p',agentId:'b',cli:'codex',model:null});
+ const runId='original-run';
+ const outputRoot=join(home,'outputs','conversations',chat.id,runId);
+ const source='panel.html', sourcePath=join(outputRoot,source);
+ mkdirSync(outputRoot,{recursive:true});
+ writeFileSync(sourcePath,'<p>immutable output</p>');
+ const files=createAssetFiles(home),assets=createAssets(store,files);
+ store.database.prepare('INSERT INTO file_execution_scopes VALUES (?,?,?,?,?)').run(runId,store.ownerUserId,'a','p',chat.id);
+ const tool=createRunArtifacts({store,files,assets,principal:{userId:store.ownerUserId,agentId:'a',runId},outputRoot,sourceVersions:[],assertActive(){}});
+ const published=await tool.publish({files:[{name:'dashboard.html',path:source}],title:'Board'},'publish-original');
+ const pinned=`/api/v2/assets/${published.asset.id}/versions/${published.version.id}/files/0`;
+ const raw=`[Open](${sourcePath}) [Wrong](${join(outputRoot,'dashboard.html')}) [Pinned](${pinned})
+
+\`[Code](${sourcePath})\``;
+ const user=store.appendEvent(chat.id,'user',{text:raw});
+ const data={runId,method:'item/completed',params:{item:{type:'agentMessage',id:'answer',text:raw}}};
+ const reply=store.appendEvent(chat.id,'tool',data);
+ const cross=store.appendEvent(other.id,'tool',data);
+ // History uses the committed Blob; no original source needs to exist.
+ rmSync(sourcePath);
+ const expected=raw.replace(`[Open](${sourcePath})`,`[Open](${pinned})`);
+ const path=`${url}/api/conversations/${chat.id}/history`;
+ const events=await fetch(path).then(r=>r.json());
+ expect(events).toEqual([user,{...reply,data:{...data,params:{item:{...data.params.item,text:expected}}}}]);
+ expect(await fetch(path+'?recent=5').then(r=>r.json())).toEqual({before:null,events});
+ expect(await fetch(`${url}/api/conversations/${other.id}/history`).then(r=>r.json())).toEqual([cross]);
+ expect(store.listEvents(chat.id,0)).toEqual([user,reply]);
+ expect(await fetch(url+pinned).then(r=>r.text())).toBe('<p>immutable output</p>');
+ const controller=new AbortController();
+ try{
+  const response=await fetch(path.replace(/history$/, 'events')+'?recent=5',{signal:controller.signal});
+  const reader=response.body!.getReader(),decoder=new TextDecoder();
+  let frames='';
+  while(!frames.includes('event: history-ready')){const chunk=await reader.read();if(chunk.done)break;frames+=decoder.decode(chunk.value,{stream:true});}
+  expect(frames).toContain('[Open]('+pinned+')');
+ }finally{controller.abort();}
+ // Identical relative source published into another immutable asset is ambiguous;
+ // even a retracted second version must not cause a fallback selection.
+ writeFileSync(sourcePath,'<p>different output</p>');
+ const second=await tool.publish({title:'Another board',files:[{path:source}]},'publish-again');
+ expect(await fetch(path).then(r=>r.json())).toEqual([user,reply]);
+ assets.setLifecycle({userId:store.ownerUserId},second.asset.id,'retracted',second.asset.revision);
+ expect(await fetch(path).then(r=>r.json())).toEqual([user,reply]);
+ assets.setLifecycle({userId:store.ownerUserId},published.asset.id,'retracted',published.asset.revision);
+ expect((await fetch(url+pinned)).status).toBe(403);
 });

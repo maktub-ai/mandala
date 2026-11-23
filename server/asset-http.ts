@@ -8,6 +8,8 @@ import { pipeline } from 'node:stream/promises';
 import { createAttachmentAssets } from './attachment-assets';
 import { createAssets } from './assets';
 import { createAssetFiles } from './asset-files';
+import { projectHistoricalOutputLinks } from './historical-output-links';
+import type { Conversation, DisplayEvent } from '../shared/types';
 import { readConfig } from './config';
 import type { Store } from './store';
 // Sandboxed: scripts may run inline, but no network, forms, frames or same-origin access.
@@ -29,7 +31,7 @@ export function createAssetHttp(home:string,store:Store,authorizeConversation:(i
   if(type==='agent'&&config.agents.some(a=>a.id===id)||type==='project'&&config.projects.some(p=>p.id===id))return;
   throw invalid();
  }
- return async (req:IncomingMessage,res:ServerResponse,url:URL,body:(req:IncomingMessage)=>Promise<any>):Promise<boolean>=>{
+ const handle = async (req:IncomingMessage,res:ServerResponse,url:URL,body:(req:IncomingMessage)=>Promise<any>):Promise<boolean>=>{
   if(!url.pathname.startsWith('/api/v2/assets'))return false;
   try {
    // This local user endpoint never accepts an authorization identity from clients.
@@ -125,4 +127,6 @@ export function createAssetHttp(home:string,store:Store,authorizeConversation:(i
   }catch(error){if(res.headersSent){res.destroy();return true;}const domain=error instanceof DomainError?error:null;json(res,domain?.status??400,{code:domain?.code??'invalid_request',error:domain?.message??'Invalid asset request'});}
   return true;
  };
+ return Object.assign(handle,{history:(conversation:Conversation,events:DisplayEvent[])=>projectHistoricalOutputLinks(home,store,assets,principal,conversation,events)});
+
 }

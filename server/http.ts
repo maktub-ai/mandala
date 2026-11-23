@@ -673,13 +673,13 @@ export function createHttpServer({
             // Re-read the previous live window so in-place updates and retired events
             // are reflected, including when a disconnect spans more than one page.
             const from = since === undefined ? start ?? 0 : Math.min(since, start ?? 0);
-            return json(res, 200, { events: store.listEarlierEvents(id, from, before, url.searchParams.get('compact')==='1'), before: start });
+            return json(res, 200, { events: handleAssetRequest.history(conversation,store.listEarlierEvents(id, from, before, url.searchParams.get('compact')==='1')), before: start });
           }
           const after = Number(url.searchParams.get('after') ?? 0);
           if (!Number.isSafeInteger(after) || after < 0) throw new Error('invalid event cursor');
           const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
           if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000)) throw new Error('invalid history limit');
-          return json(res,200,store.listEvents(id,after,limit));
+          return json(res,200,handleAssetRequest.history(conversation,store.listEvents(id,after,limit)));
         }
         if (action === "environment" && method === "GET") {
           const { config, revision } = await readConfig(home);
@@ -891,7 +891,7 @@ export function createHttpServer({
               // Keep the authorized batch together instead of re-reading its tail
               // and rechecking the same snapshot on every socket drain.
               cursor=batch.at(-1)!.id;
-              if(!res.write(batch.map(event=>`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`).join('')))return;
+              if(!res.write(handleAssetRequest.history(conversation,batch).map(event=>`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`).join('')))return;
             }
             if(batch.length===batchSize)setImmediate(pump);
             else if (replaying) {
