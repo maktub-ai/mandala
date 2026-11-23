@@ -352,7 +352,10 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
     validateLinks(p,input);
     if (previous) return getTask(p, previous.task_id as string);
     const id = randomUUID();
-    db.prepare(`INSERT INTO work_tasks VALUES (?,?,?,?,?,?,?,?,?,'todo',NULL,1,0,0,NULL,NULL,?,?)`).run(id, p.userId, p.agentId ?? null,
+    db.prepare(`INSERT INTO work_tasks (
+     id,owner_user_id,creator_agent_id,goal,criteria,acceptance,project_id,assignee_agent_id,origin_conversation_id,
+     state,waiting_reason,revision,continuation_epoch,future_auto_resume,completion,legacy_id,created_at,automatic_progress
+    ) VALUES (?,?,?,?,?,?,?,?,?,'todo',NULL,1,0,0,NULL,NULL,?,?)`).run(id, p.userId, p.agentId ?? null,
      input.goal, JSON.stringify(input.criteria), input.acceptance, input.projectId, input.assigneeAgentId, input.originConversationId, new Date().toISOString(),Number(input.automaticProgress));
     db.prepare('INSERT INTO task_creation_sources VALUES (?,?)').run(id,p.agentId?'agent':creationSource??'user');
     writeLinks(id,input);

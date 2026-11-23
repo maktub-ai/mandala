@@ -266,3 +266,27 @@ it('preserves delegation authority across repeated retries into fresh native con
  expect(manager.taskService.getTask(root,goal.id)).toMatchObject({state:'review',completion:null});
  expect(store.database.prepare('SELECT claim_id FROM task_native_uncertainty').all().length).toBeGreaterThanOrEqual(2);
 });
+
+it('creates and delivers a primary-chat delegation while retaining legacy task columns',async()=>{
+ const {manager,chat,entries,finish,store}=await setup(),db=store.database,owner={userId:store.ownerUserId};
+ await manager.send(chat.id,'Create and delegate an investigation');const token=entries[0].token;
+ const legacy=await manager.callBoundTool(token,'mandala_create',{goal:'Existing task',criteria,projectId:null},'existing-task') as import('../shared/tasks').Task;
+ db.exec('ALTER TABLE work_tasks ADD COLUMN project_ids_override TEXT; ALTER TABLE work_tasks ADD COLUMN module_ref TEXT');
+ db.prepare('UPDATE work_tasks SET project_ids_override=?,module_ref=? WHERE id=?').run('["previous-project"]','retained-module',legacy.id);
+
+ const goal=await manager.callBoundTool(token,'mandala_create',{goal:'Investigate and deliver',criteria,projectId:null},'new-task') as import('../shared/tasks').Task;
+ expect(goal).toMatchObject({originConversationId:chat.id,state:'todo',revision:1,automaticProgress:true,completion:null});
+ const args={taskId:goal.id,targetAgentId:'worker',projectId:null,request:'Find evidence',criteria};
+ const run=await manager.callBoundTool(token,'mandala_delegate',args,'migration-delegate') as import('../shared/tasks').Run;
+ expect(run).toMatchObject({taskId:goal.id,state:'queued',routing:{destinationConversationId:chat.id}});
+ await vi.waitFor(()=>expect(manager.taskService.getTask(owner,goal.id).executions[0]?.latestRun?.state).toBe('running'));
+ expect(entries).toHaveLength(2);
+ const worker=entries[1];
+ worker.options.onEvent({method:'item/completed',params:{threadId:worker.native,turnId:worker.native+'-turn',item:{id:'answer',type:'agentMessage',phase:'final_answer',text:'Evidence delivered'}}});
+ finish(worker);
+ await vi.waitFor(()=>expect(manager.taskService.getTask(owner,goal.id).state).toBe('review'));
+ expect(manager.taskService.listReceipts(owner,goal.id)).toEqual([expect.objectContaining({taskId:goal.id,destinationConversationId:chat.id,summary:'Evidence delivered'})]);
+ const fields=db.prepare('SELECT project_ids_override,module_ref FROM work_tasks WHERE id=?');
+ expect(fields.get(legacy.id)).toMatchObject({project_ids_override:'["previous-project"]',module_ref:'retained-module'});
+ expect(fields.get(goal.id)).toMatchObject({project_ids_override:null,module_ref:null});
+});
