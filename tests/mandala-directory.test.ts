@@ -47,3 +47,13 @@ it('exposes configuration completeness and valid icons without exposing private 
  expect(configured.agents[0]).toMatchObject({instructionsConfigured:true});
  expect(JSON.stringify(incomplete)+JSON.stringify(configured)).not.toMatch(/PRIVATE|SECRET/);
 });
+
+it('directs current primary hands-on work to an authorized specialist before self-work, without requiring a Task',()=>{
+ const primary=mandalaInstructions(config,{agentId:'main',purpose:'mandala-main'} as Conversation);
+ expect(primary).toMatch(/Before starting hands-on work, use mandala directory/);
+ expect(primary).toMatch(/messages ask for a one-off investigation without creating a Task/);
+ expect(primary).toMatch(/If the user explicitly asks you to do the work yourself/);
+ expect(primary).toMatch(/if no suitable Agent is available/);
+ expect(mandalaInstructions(config,{agentId:'main',purpose:'mandala-background'} as Conversation))
+   .not.toMatch(/Before starting hands-on work, use mandala directory/);
+});

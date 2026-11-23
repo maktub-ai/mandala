@@ -80,7 +80,7 @@ import { workspaceExecutionLocation } from '../shared/execution-machines';
 import { connectSshExecution, type SshExecution } from './ssh-execution';
 import { isSystemAgent, assertExecutionAvailable, conversationContext, hostContextInstructions } from "./conversation-context";
 import { join, isAbsolute, resolve } from "node:path";
-import { mkdirSync, realpathSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { stat, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { setTimeout as delay } from 'node:timers/promises';
 import { homedir, tmpdir } from "node:os";
@@ -500,7 +500,7 @@ export function createSessionManager(
       } catch (error) { if (!closed) throw error; }
     },
   });
-  const messages=createAgentMessages(store,(id,text,key)=>scheduler.enqueueUserInput(id,text,key));
+  const messages=createAgentMessages(store,(id,text,key)=>scheduler.enqueueUserInput(id,text,key),mayDeliverInquiry);
   const rejectMessageInput=(input:QueuedInput,reason:string)=>{
     messages.finish(input.id,'failed',reason);
     if(scheduler.listUserInputs(input.conversationId).find(i=>i.id===input.id)?.state==='running')scheduler.rejectUnsubmittedInput(input.id);
@@ -509,11 +509,30 @@ export function createSessionManager(
     messages.queueReplies(source);
     queueMicrotask(()=>{if(!closed){void pump(input.conversationId);if(source!==input.conversationId)void pump(source);}});
   };
+  function assertPrimaryInquiryScope(config:Config,source:Conversation,targetAgentId:string,projectId:string){
+    const target=config.agents.find(a=>a.id===targetAgentId),project=config.projects.find(p=>p.id===projectId);
+    if(!isSystemAgent(config,source.agentId)||!target||target.systemRole||target.temporary||target.archivedAt||
+      projectId&&(!project||project.archivedAt||!project.agentIds.includes(target.id)))
+      throw new DomainError('forbidden',403,'Specialist or Project unavailable');
+    if(!enabledRuntimes(config).includes(target.defaultCli))throw new DomainError('runtime_disabled',422,'Specialist runtime disabled');
+  }
+  function mayDeliverInquiry(sourceId:string,targetId:string){
+    try {
+      const source=chat(sourceId),target=chat(targetId);
+      if(source.purpose!=='mandala-main')return true;
+      // Delivery may happen from a synchronous native callback or recovery.
+      // Use persisted authorization, not the config retained when work began.
+      const config=JSON.parse(readFileSync(join(home,'config.json'),'utf8')) as Config;
+      assertPrimaryInquiryScope(config,source,target.agentId,target.projectId);
+      return true;
+    }catch{return false;}
+  }
   const validateMessageInput=async(input:QueuedInput)=>{
     const marker=input.agentMessage;if(!marker)return;
     const message=messages.get(marker.id),source=chat(message.sourceConversationId),target=chat(message.targetConversationId);
     const config=await loadConfig(),project=config.projects.find(p=>p.id===source.projectId);
-    if(!project||!project.agentIds.includes(source.agentId)&&!isSystemAgent(config,source.agentId)||!project.agentIds.includes(target.agentId)&&!isSystemAgent(config,target.agentId)||target.projectId!==source.projectId)throw new DomainError('forbidden',403,'Message context unavailable');
+    if(source.purpose==='mandala-main')assertPrimaryInquiryScope(config,source,target.agentId,target.projectId);
+    else if(!project||!project.agentIds.includes(source.agentId)&&!isSystemAgent(config,source.agentId)||!project.agentIds.includes(target.agentId)&&!isSystemAgent(config,target.agentId)||target.projectId!==source.projectId)throw new DomainError('forbidden',403,'Message context unavailable');
     authorizeConversationRead(input.conversationId,true);
     if(!messages.eligible(input))throw new DomainError('message_stopped',409,'Message continuation stopped');
   };
@@ -892,7 +911,8 @@ export function createSessionManager(
         if (!ownsPreparation()) { cli.dispose(); return; }
         current.businessCli = cli;
         if(remote&&'outputRoot'in cli)nativeOutputRoot=outputRoot?cli.outputRoot as string:undefined;
-        cliInstructions = businessCliInstructions(cli, { coordinator: config.mandala?.agentId===agent.id && agent.systemRole==='mandala', project: !!(project.id && agent.id), assets: !!outputRoot, memory: !!memoryRuntime, tasks: true, skills: !!(skillTools && agent.id), wiki:!!(project.id||agent.id), codeGraph:!!current.codeGraphScope?.bindings.length });
+        const coordinator=isSystemAgent(config,agent.id);
+        cliInstructions = businessCliInstructions(cli, { coordinator, primaryCoordinator:coordinator&&before.purpose==='mandala-main', project: !!(project.id && agent.id), assets: !!outputRoot, memory: !!memoryRuntime, tasks: true, skills: !!(skillTools && agent.id), wiki:!!(project.id||agent.id), codeGraph:!!current.codeGraphScope?.bindings.length });
       }
       const fileInputs=current.sourceVersions?.map(ref=>{try{const v=assets.getAuthorizedVersion({...root,agentId:agent.id,runId:invocationId},ref);return {...ref,title:assets.getAuthorizedAsset(root,ref.assetId).title,files:v.files.map((f,index)=>({fileId:String(index),name:f.path}))};}catch{return null;}}).filter(Boolean)??[];
       const availableSkills=[...new Map([...agent.skills,...project.skills].map(skill=>[skill.name,{name:skill.name,description:skill.content?.match(/description:\s*(.*)/)?.[1]??'External directory Skill'}])).values()];
@@ -1953,25 +1973,40 @@ export function createSessionManager(
       return this.listTasks().find(item => item.id === task.id&&item.targetConversationId===target!.id)!;
     },
     async askAgent(sourceId,input,options){
-      if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['targetAgentId','text','targetConversationId','policy'].includes(k))||typeof input.targetAgentId!=='string'||typeof input.text!=='string'||!input.text.trim()||input.text.length>65536||input.targetConversationId!==undefined&&typeof input.targetConversationId!=='string'||input.policy!==undefined&&!['notify','resume'].includes(input.policy)||!options.commandKey?.trim()||options.commandKey.length>200)throw new DomainError('invalid_message',422,'Invalid Agent message');
+      if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['targetAgentId','targetProjectId','text','targetConversationId','policy'].includes(k))||typeof input.targetAgentId!=='string'||input.targetProjectId!==undefined&&input.targetProjectId!==null&&(typeof input.targetProjectId!=='string'||!input.targetProjectId.trim())||typeof input.text!=='string'||!input.text.trim()||input.text.length>65536||input.targetConversationId!==undefined&&typeof input.targetConversationId!=='string'||input.policy!==undefined&&!['notify','resume'].includes(input.policy)||!options.commandKey?.trim()||options.commandKey.length>200)throw new DomainError('invalid_message',422,'Invalid Agent message');
       const source=chat(sourceId);
       const validate=()=>{if(closed)throw new Error('service closed');if(options.boundInvocationId){const runtime=live.get(sourceId);if(runtime?.runId!==options.boundInvocationId||!runtime.invocation||runtime.stopRequested)throw new DomainError('forbidden',403,'Expired tool binding');}};
-      validate();if(!source.projectId||!source.agentId)throw new DomainError('invalid_message_source',422,'Project and Agent required');
-      const {agent,project}=await selection(source.projectId,input.targetAgentId);validate();
-      if(!project.agentIds.includes(source.agentId)&&!isSystemAgent(await loadConfig(),source.agentId))throw new DomainError('forbidden',403,'Source unavailable');
-      const previous=messages.prior(sourceId,options.commandKey,input);if(previous)return previous;
-      const runtime=live.get(sourceId),origin=runtime?.queuedInputId?messages.metadata(runtime.queuedInputId):undefined;
+      validate();
+      const primary=source.purpose==='mandala-main',runtime=live.get(sourceId);
+      if(primary?input.targetProjectId===undefined:!source.projectId||!source.agentId||input.targetProjectId!==undefined)
+        throw new DomainError('invalid_message_source',422,'Primary inquiries require explicit targetProjectId (null when unbound); ordinary inquiries use their source Project');
+      if(primary){
+        if(!options.boundInvocationId||!runtime||input.targetConversationId!==undefined)throw new DomainError('forbidden',403,'Primary inquiries require a current bound invocation and a fresh target chat');
+        await coordination.verify({agentId:source.agentId,conversationId:sourceId,invocationId:options.boundInvocationId,humanEventId:runtime.humanEventId,assertActive:validate},true);
+      }
+      const config=await loadConfig();validate();
+      const targetProject=primary?input.targetProjectId??'':source.projectId;
+      if(primary)assertPrimaryInquiryScope(config,source,input.targetAgentId,targetProject);
+      const {agent,project,workspace,executionLocation}=conversationContext(config,{projectId:targetProject,agentId:input.targetAgentId},'');
+      if(!primary){
+        assertExecutionAvailable(config,{projectId:source.projectId,agentId:input.targetAgentId});
+        if(!project.agentIds.includes(source.agentId)&&!isSystemAgent(config,source.agentId))throw new DomainError('forbidden',403,'Source unavailable');
+      }
+      const prior=messages.prior(sourceId,options.commandKey,input);if(prior)return prior;
+      const origin=runtime?.queuedInputId?messages.metadata(runtime.queuedInputId):undefined;
       const event=origin?.direction==='reply'?store.listEvents(sourceId,0).find(e=>e.id===origin.sourceRequestEventId):store.listEvents(sourceId,0).filter(e=>e.kind==='user'&&(!runtime?.runId||(e.data as {runId?:string}).runId===runtime.runId)).at(-1);
       if(!event)throw new DomainError('message_source_missing',422,'Submitted source request required');
       let target=input.targetConversationId?chat(input.targetConversationId):undefined;
       if(target?.purpose==='mandala-main')throw new DomainError('primary_conversation',422,'Primary chat cannot execute messages');
       if(target&&(target.projectId!==source.projectId||target.agentId!==agent.id))throw new DomainError('forbidden',403,'Target unavailable');
-      const config=await loadConfig();validate();
-      conversationContext(config,{projectId:source.projectId,agentId:source.agentId},'');conversationContext(config,{projectId:source.projectId,agentId:agent.id},'');
+      if(!primary)conversationContext(config,{projectId:source.projectId,agentId:source.agentId},'');
       if(!target&&!enabledRuntimes(config).includes(agent.defaultCli))throw new Error('Runtime disabled');
+      const location=primary
+        ? {workspaceId:workspace?.id??null,executionLocation,...(workspace?{cwd:workspace.cwd,workspaceName:workspace.name}:{})}
+        : {workspaceId:source.workspaceId??null,executionLocation:source.executionLocation,...(source.cwd?{cwd:source.cwd,workspaceName:source.workspaceName}:{})};
       // No awaits between the last binding check and atomic acceptance.
       const message=store.transaction(()=>{
-        target??=store.createConversation({...(agent.systemRole==="mandala"?{purpose:"mandala-background" as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,cli:agent.defaultCli,model:agent.models[agent.defaultCli]??null,workspaceId:source.workspaceId??null,executionLocation:source.executionLocation,...(source.cwd?{cwd:source.cwd,workspaceName:source.workspaceName}: {})});
+        target??=store.createConversation({...(agent.systemRole==="mandala"?{purpose:"mandala-background" as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,cli:agent.defaultCli,model:agent.models[agent.defaultCli]??null,...location});
         const accepted=messages.create(sourceId,target.id,input,{eventId:event.id,invocationId:runtime?.runId??String(event.id)},options.commandKey);
         if(input.targetConversationId&&messages.isDedicated(target.id))markConversationProgress(store,target.id,false);
         return accepted;
@@ -1980,7 +2015,7 @@ export function createSessionManager(
     },
     getAgentMessage(id,agentId){
       const message=messages.get(id),source=chat(message.sourceConversationId),target=chat(message.targetConversationId);
-      if(agentId&&agentId!==source.agentId&&agentId!==target.agentId)throw new DomainError('forbidden',403,'Message unavailable');
+      if(agentId&&agentId!==source.agentId&&agentId!==target.agentId||!mayDeliverInquiry(source.id,target.id))throw new DomainError('forbidden',403,'Message unavailable');
       authorizeConversationRead(agentId===target.agentId?target.id:source.id,true);return message;
     },
     listTasks(projectId, controlOnly = false) {

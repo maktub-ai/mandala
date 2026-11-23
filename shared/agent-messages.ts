@@ -1,5 +1,5 @@
 export type AgentMessageInput = {
- targetAgentId:string; text:string; targetConversationId?:string; policy?:'notify'|'resume';
+ targetAgentId:string; text:string; targetProjectId?:string|null; targetConversationId?:string; policy?:'notify'|'resume';
 };
 export type AgentMessage = {
  sourceRequestEventId?:number;sourceAgentId?:string;targetAgentId?:string;createdAt?:string;

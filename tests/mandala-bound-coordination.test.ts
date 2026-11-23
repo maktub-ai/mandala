@@ -290,3 +290,58 @@ it('creates and delivers a primary-chat delegation while retaining legacy task c
  expect(fields.get(legacy.id)).toMatchObject({project_ids_override:'["previous-project"]',module_ref:'retained-module'});
  expect(fields.get(goal.id)).toMatchObject({project_ids_override:null,module_ref:null});
 });
+
+it('routes a primary specialist inquiry to a fresh scoped chat and resumes its original conversation without a Task',async()=>{
+ const {manager,chat,entries,store,home,finish}=await setup();
+ const current=await readConfig(home);
+ await writeConfig(home,{...current.config,projects:[{id:'reports',name:'Reports',cwd:home,agentIds:['worker'],resources:[],mcp:[],skills:[]}]},current.revision);
+ await manager.send(chat.id,'Diagnose the report rendering failure');const token=entries[0].token;
+ const args={targetAgentId:'worker',targetProjectId:'reports',text:'Diagnose the synthetic sample'};
+ await expect(manager.askAgent(chat.id,args,{commandKey:'unbound'})).rejects.toMatchObject({status:403});
+ await expect(manager.callBoundTool(token,'message_ask',{targetAgentId:'worker',text:'Missing scope'},'missing-project')).rejects.toMatchObject({status:422});
+ await expect(manager.callBoundTool(token,'message_ask',{...args,targetAgentId:'temp'},'temp')).rejects.toMatchObject({status:403});
+ await expect(manager.callBoundTool(token,'message_ask',{...args,targetConversationId:chat.id},'unfresh')).rejects.toMatchObject({status:403});
+ const result=await manager.callBoundTool(token,'message_ask',args,'specialist-once') as import('../shared/agent-messages').AgentMessage;
+ const again=await manager.callBoundTool(token,'message_ask',args,'specialist-once') as typeof result;
+ expect(again.id).toBe(result.id);
+ await expect(manager.callBoundTool(token,'message_ask',{...args,targetProjectId:null},'specialist-once')).rejects.toMatchObject({code:'idempotency_conflict'});
+ expect(store.getConversation(result.targetConversationId)).toMatchObject({agentId:'worker',projectId:'reports'});
+ expect(result.sourceConversationId).toBe(chat.id);
+ expect(manager.taskService.listTasks({userId:store.ownerUserId})).toHaveLength(0);
+ finish();
+ await vi.waitFor(()=>expect(store.getConversation(result.targetConversationId)?.turnId).toBeTruthy());
+ const worker=entries[1],turn=worker.native+'-turn';
+ worker.options.onEvent({method:'item/completed',params:{threadId:worker.native,turnId:turn,item:{id:'specialist-answer',type:'agentMessage',phase:'final_answer',text:'Synthetic diagnosis'}}});
+ finish(worker);
+ await vi.waitFor(()=>{
+  expect(manager.getAgentMessage(result.id)).toMatchObject({reply:'Synthetic diagnosis'});
+  expect(store.getConversation(chat.id)).toMatchObject({status:'running',turnId:expect.any(String)});
+  expect(store.listEvents(chat.id,0).some(e=>e.kind==='user'&&Boolean((e.data as {agentMessage?:unknown}).agentMessage))).toBe(true);
+ });
+ const resumed=entries.at(-1)!;
+ await expect(manager.callBoundTool(resumed.token,'message_ask',args,'receipt-cannot-dispatch')).rejects.toMatchObject({code:'human_request_required'});
+ const active=store.getConversation(chat.id)!;
+ resumed.options.onEvent({method:'turn/completed',params:{threadId:active.nativeId,turn:{id:active.turnId,status:'completed'}}});
+ await vi.waitFor(()=>expect(manager.getAgentMessage(result.id)).toMatchObject({replyState:'consumed'}));
+ expect(manager.taskService.listTasks({userId:store.ownerUserId})).toHaveLength(0);
+});
+
+it('blocks answer delivery and reading when specialist Project membership is revoked during execution',async()=>{
+ const {manager,chat,entries,store,home,finish}=await setup();
+ let state=await readConfig(home);
+ await writeConfig(home,{...state.config,projects:[{id:'reports',name:'Reports',cwd:home,agentIds:['worker'],resources:[],mcp:[],skills:[]}]},state.revision);
+ await manager.send(chat.id,'Diagnose the report rendering failure');const token=entries[0].token;
+ const args={targetAgentId:'worker',targetProjectId:'reports',text:'Check allowed scope'};
+ const result=await manager.callBoundTool(token,'message_ask',args,'revoke-specialist') as import('../shared/agent-messages').AgentMessage;
+ finish();
+ await vi.waitFor(()=>expect(store.getConversation(result.targetConversationId)?.turnId).toBeTruthy());
+ state=await readConfig(home);
+ await writeConfig(home,{...state.config,projects:state.config.projects.map(p=>({...p,agentIds:[]}))},state.revision);
+ const worker=entries[1],turn=worker.native+'-turn',answer='SYNTHETIC_REVOKED_RESULT';
+ worker.options.onEvent({method:'item/completed',params:{threadId:worker.native,turnId:turn,item:{id:'revoked-answer',type:'agentMessage',phase:'final_answer',text:answer}}});
+ finish(worker);
+ await vi.waitFor(()=>expect(store.database.prepare('SELECT state,reply_state,reply FROM agent_messages WHERE id=?').get(result.id)).toMatchObject({state:'failed',reply_state:'parked',reply:null}));
+ expect(JSON.stringify(store.listEvents(chat.id,0))).not.toContain(answer);
+ expect(manager.listUserInputs(chat.id).some(i=>i.agentMessage?.direction==='reply')).toBe(false);
+ expect(()=>manager.getAgentMessage(result.id)).toThrow(/unavailable/i);
+});
