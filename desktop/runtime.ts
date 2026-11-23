@@ -1,5 +1,6 @@
 export { backgroundLaunchArgument, loginStartupPaused, setLoginStartupPaused, registerMacLoginStartup } from './login-startup';
 export { readRuntimeBuild } from './service-discovery';
+export { claimServiceHome } from '../server/service-home-lock';
 export { desktopCliStatus, installDesktopCli } from './cli-registration';
 export { readDesktopPreferences, writeDesktopPreference } from './preferences';
 export { readDesktopAppearance, writeDesktopAppearance } from './appearance';

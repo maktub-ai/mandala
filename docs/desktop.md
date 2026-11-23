@@ -115,6 +115,51 @@ MANDALA_HOME="$HOME/.mandala-restored" /Applications/Mandala.app/Contents/MacOS/
 
 On Windows the runtime is under the installation's `resources\runtime`; run `bin\node.exe` and the same `.mjs` tools. Snapshots exclude native CLI authentication/history and external repositories; preserve those separately using their native tools. If a new version fails, stop it, restore the matching snapshot into a new HOME, and run the old retained installer with that HOME. Never overwrite live SQLite or assume an old binary supports a newer migrated database.
 
+## Public in-app updates on macOS
+
+This is an opt-in, signed Mac release lane. Existing desktop preview builds still use the manual installer flow. Windows remains manual. The canonical public distribution stays [maktub-ai/mandala-releases](https://github.com/maktub-ai/mandala-releases); do not attach update files to a source-repository release or use the website's installer list as an authority for automatic installation.
+
+### Prepare the signed bootstrap
+
+1. Use a clean, reviewed source commit and a new stable version above v1.0.3. Build on a supported native Mac and do not advertise untested architectures. Enable `MANDALA_SIGNED=1` with the release team's **Developer ID Application** certificate and Apple notarization configured through the established signing environment. Set both `MANDALA_PUBLIC_UPDATE_TEAM_ID` to the certificate's ten-character Team ID and `MANDALA_PUBLIC_UPDATE_PUBLIC_KEY` to the canonical base64 Ed25519 DER-SPKI **public** key. The app must contain the intended team and key inside its signed bundle. Do not set either variable in the usual ad-hoc preview lane.
+2. Confirm all executable components pass strict code-signature verification, Gatekeeper identifies the app as notarized Developer ID, and the notarization ticket is stapled to the **app before making the ZIP**. The DMG is the manual installer; verify the final DMG in its own right. The ZIP is the in-app payload. It must restore a sole `Mandala.app` with its code signature and staple intact. Do not regenerate, rename, sign, notarize, staple or otherwise change the ZIP or any archive content after recording the final ZIP digest. If anything changes, start in a new staging directory and regenerate all associated metadata. Do not reuse a version already published.
+3. Keep Apple signing/notarization credentials in the release signing infrastructure. The Ed25519 **private** key remains in the designated release signer; it must not be stored in source, installers, application settings, release assets, logs, or chat. Signing and notarization require approved provider accounts; no signing identity or credentials are included in this repository.
+
+### Produce and verify the artifact set
+
+On the native Mac, independently record the SHA-256 of the verified final ZIP in a clean staging directory. Example for Apple Silicon (substitute the reviewed version, exact Git source SHA, and recorded digest):
+
+```sh
+ZIP=release/desktop/Mandala-1.0.4-mac-arm64.zip
+node scripts/mac-public-update-release.mjs prepare "$ZIP" "$RECORDED_ZIP_SHA256" "$SOURCE_COMMIT"
+```
+
+The command verifies the expected ZIP bytes before extraction; checks the extracted app's exact version, architecture, bundle ID, clean build/source receipt, bundled public key and team; verifies Developer ID with the expected Team ID; and requires Gatekeeper and the stapled ticket. It refuses to overwrite metadata. Use the SHA-256 recorded from the approved final artifact, not a fresh digest of an unknown replacement.
+
+The per-version, per-architecture files are:
+
+- `Mandala-<version>-mac-<arch>.zip`
+- `Mandala-<version>-mac-<arch>.update.json`
+- `Mandala-<version>-mac-<arch>.update.sig`
+
+The manifest contains `schema: 1`, `version` without the `v` prefix, `platform: "darwin"`, `arch` (`arm64` or `x64`), exact ZIP `name`, byte `size`, lowercase hex `sha256`, `bundleId: "com.maktubcn.mandala"`, and `teamId`. Send the exact manifest bytes to the designated Ed25519 release signer using its authorized process. Save the detached 64-byte signature as canonical base64 in the matching `.update.sig` (an optional final LF is accepted). Do not reserialize the manifest or change line endings between signing and uploading.
+
+Back on the native Mac with only the public key and Team ID configured:
+
+```sh
+node scripts/mac-public-update-release.mjs verify "$ZIP" "$RECORDED_ZIP_SHA256" "$SOURCE_COMMIT"
+node --test scripts/mac-public-update-release.test.mjs
+```
+
+Verification rejects a mismatched signature or ZIP before archive extraction and rechecks the native trust evidence. These synthetic Node tests do not verify platform signing; the native command and the actual acceptance below are also required.
+
+### Release review and acceptance
+
+- Keep a dedicated-repository release private in draft while reviewing the exact signed DMG, ZIP, manifest, signature and `SHA256SUMS.txt`. Verify all four binary/metadata assets correspond to the same stable version, platform, architecture and immutable build. Compare server-side asset byte counts and SHA-256 with the staged originals; do not publish a partially uploaded triplet. Ordinary unsigned preview releases must **not** carry entry files intended for this opt-in signed updater.
+- An existing ad-hoc v1.0.3 Mac install can only offer its existing manual download flow. It cannot acquire the new updater or enroll a release key by itself. Stop runtime safely, use the normal signed/notarized manual DMG to replace the app without replacing the workspace, and verify the new signed app opens, retains data and uses the intended publisher/key. Do not disable Gatekeeper, bypass security warnings or silently switch existing trust.
+- Before public enablement, exercise a real signed N → N+1 upgrade on an isolated Mac installation using the exact release ZIP as accepted and staged by the runtime (including its path/layout and expansion checks), using only authorized staging fixtures or an isolated reviewed test feed. Test discovery, verification and download, preservation of work and user-selected safe quit, install/relaunch, workspace and session preservation, and recovery on interruption. Also prove a wrong signature, changed ZIP, unsupported architecture, or unnotarized build is rejected without replacing the existing app. Repeat for every advertised architecture. A normal signed DMG test is not proof of an in-app upgrade.
+- Publish through the normal maintainer review action only after the full set and acceptance pass. Verify public stable release entry and exact assets anonymously, and confirm the website continues to offer the ordinary signed manual installer. Keep the prior signed installer and deployment receipts for recovery.
+
 ## Signing and acceptance boundaries
 
 Ad-hoc Mac signing and unsigned Windows builds are the defaults. The Mac packaged smoke requires strict signature verification before any service starts or release artifacts are uploaded. A release maintainer can set `MANDALA_SIGNED=1` and provide `CSC_LINK`/`CSC_KEY_PASSWORD`; Mac notarization also needs Apple's supported `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` (or supported notarization API credentials). Signed mode forces code signing and Mac notarization, so missing credentials fail the build. Certificates, Apple team membership and Windows signing credentials are not provided by this source tree. Preserve the stable appId `com.maktubcn.mandala` across versions.

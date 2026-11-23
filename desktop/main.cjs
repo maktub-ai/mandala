@@ -1,10 +1,11 @@
 const { app, BrowserWindow, Menu, Tray, Notification, nativeImage, nativeTheme, dialog, shell, session, ipcMain, screen } = require('electron');
 const { homedir } = require('node:os');
 const { join, isAbsolute, resolve } = require('node:path');
-const { statSync, readFileSync, writeFileSync } = require('node:fs');
-const { resolveDesktopHome, desktopEnvironment, loginShellPath, prepareDesktopHome, connectOrStartService, stopBackgroundService, stopBackgroundServiceIfIdle, readRuntimeBuild, RuntimeShutdownTimeout, allowedNavigation, readDesktopAppearance, writeDesktopAppearance, readDesktopPreferences, writeDesktopPreference, desktopCliStatus, installDesktopCli, backgroundLaunchArgument, loginStartupPaused, setLoginStartupPaused, registerMacLoginStartup } = require('./runtime.cjs');
+const { lstatSync, statSync, readFileSync, writeFileSync } = require('node:fs');
+const { resolveDesktopHome, desktopEnvironment, loginShellPath, prepareDesktopHome, connectOrStartService, claimServiceHome, stopBackgroundService, stopBackgroundServiceIfIdle, readRuntimeBuild, RuntimeShutdownTimeout, allowedNavigation, readDesktopAppearance, writeDesktopAppearance, readDesktopPreferences, writeDesktopPreference, desktopCliStatus, installDesktopCli, backgroundLaunchArgument, loginStartupPaused, setLoginStartupPaused, registerMacLoginStartup } = require('./runtime.cjs');
 const { createUpdateController } = require('./updates.cjs');
 const { createLocalUpdate } = require('./local-update.cjs');
+const { createPublicMacUpdate } = require('./public-mac-update.cjs');
 let window, petWindow, petPosition, tray, service, confirming = false, stopping = false, finished = false, discardUnsaved = false;
 let homeError;
 let backgroundOnly = app.isPackaged && process.argv.includes(backgroundLaunchArgument);
@@ -203,7 +204,7 @@ async function start() {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   ipcMain.handle('mandala:account-restart', async event => {
     if(event.sender!==window.webContents||event.senderFrame!==window.webContents.mainFrame||!allowedNavigation(event.senderFrame?.url??'',service.origin))throw Error('Untrusted account request');
-    app.relaunch(); app.exit(0);
+    if (!stopping && !finished) { app.relaunch(); app.exit(0); }
   });
   ipcMain.on('mandala:directory-path', (event, path) => {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || !allowedNavigation(event.senderFrame?.url ?? '', service.origin)) {
@@ -318,6 +319,84 @@ async function start() {
     version: app.getVersion(), arch: process.arch,
   }) : null;
   const zh = app.getLocale?.().startsWith('zh');
+  let publicMac = null;
+  if (!local && app.isPackaged && process.platform === 'darwin') {
+    try {
+      publicMac = createPublicMacUpdate({
+        installed: resolve(process.resourcesPath, '../..'),
+        swap: join(runtime, 'bin', 'swap-app'),
+        version: app.getVersion(), arch: process.arch,
+        trust: JSON.parse(readFileSync(join(runtime, 'public-update.json'), 'utf8')),
+      });
+    } catch { /* Unconfigured and earlier public builds keep manual updates. */ }
+  }
+  const installPublic = async () => {
+    if (!publicMac || stopping || confirming || finished) return false;
+    confirming = true;
+    try {
+      const answer = await dialog.showMessageBox(window, {
+        type: 'question', message: zh ? '安装更新并重启 Mandala？' : 'Install the update and restart Mandala?',
+        detail: zh ? '仅在后台空闲并安全退出后替换应用。项目、对话和设置会保留。' : 'Mandala replaces the app only after the background runtime has safely stopped. Projects, chats and settings are kept.',
+        buttons: zh ? ['稍后', '安装并重启'] : ['Later', 'Install and restart'], defaultId: 0, cancelId: 0, noLink: true,
+      });
+      if (answer.response !== 1 || finished) return false;
+      // The existing workspace editors register unload guards. Recheck those
+      // immediately before drain, since archive verification can take time.
+      const canUnload = () => {
+        if (window.isDestroyed() || !allowedNavigation(window.webContents.mainFrame?.url ?? '', service.origin)) return false;
+        let checkTimer;
+        return Promise.race([
+          window.webContents.executeJavaScript("window.dispatchEvent(new Event('beforeunload', {cancelable:true}))", false).catch(() => false),
+          new Promise(resolve => { checkTimer = setTimeout(() => resolve(false), 3000); checkTimer.unref?.(); }),
+        ]).finally(() => clearTimeout(checkTimer));
+      };
+      const showSaveWarning = () => dialog.showMessageBox(window, {type:'info',
+        message: zh ? '请先保存更改' : 'Save your changes first',
+        detail: zh ? '当前版本未替换。保存更改后，再安装更新。' : 'The current app was not replaced. Save your changes, then try the update again.',
+        buttons:['OK']});
+      if (!await canUnload() || finished) { await showSaveWarning(); return false; }
+      stopping = true;
+      let inputBlocked = false, unsaved = false;
+      const unblockInput = () => {
+        if (inputBlocked && !window.isDestroyed() && !finished) window.setEnabled(true);
+        inputBlocked = false;
+      };
+      let drained = false;
+      const stillStopped = () => !lstatSync(join(service.home, '.service-home-lock'), {throwIfNoEntry:false}) &&
+        !lstatSync(join(service.home, '.desktop-runtime.json'), {throwIfNoEntry:false});
+      const relaunch = () => { app.relaunch(); finished = true; app.exit(0); };
+      try {
+        const result = await publicMac.install(async () => {
+          window.setEnabled(false);
+          inputBlocked = true;
+          if (!await canUnload()) { unsaved = true; return false; }
+          drained = await stopBackgroundServiceIfIdle(service) === 'accepted' && stillStopped();
+          return drained;
+        }, () => {
+          if(!stillStopped())return null;
+          try{return claimServiceHome(service.home);}
+          catch{return null;} // A competing startup or unsafe lease must never be taken over.
+        });
+        if (result === 'installed') { relaunch(); return true; }
+        unblockInput();
+        if (unsaved) { await showSaveWarning(); return false; }
+        await dialog.showMessageBox(window, { type:'info',
+          message: zh ? '更新尚未安装' : 'Update not installed',
+          detail: zh ? '当前版本未替换。等后台空闲后，回到设置再试。' : 'The current app was not replaced. Try again from Settings when the runtime is idle.',
+          buttons: ['OK'] });
+        if (drained) relaunch();
+        return false;
+      } catch {
+        unblockInput();
+        await dialog.showMessageBox(window, { type:'warning',
+          message: zh ? '无法安装更新' : 'Could not install the update',
+          detail: zh ? '无法完成更新验证或安全替换，请稍后重试。' : 'Update verification or safe replacement did not finish. Try again later.',
+          buttons: ['OK'] });
+        if (drained) relaunch(); // Reconnect using the installed app if preparation failed after a clean stop.
+        return false;
+      } finally { unblockInput(); stopping = false; }
+    } finally { confirming = false; }
+  };
   const readyToQuit = async () => {
     const { response } = await dialog.showMessageBox({
       type: 'info', message: zh ? '更新已下载' : 'Update downloaded',
@@ -347,7 +426,7 @@ async function start() {
       } finally { app.exit(0); }
     })();
   });
-  const updates = createUpdateController({ version: app.getVersion(), platform: process.platform, arch: process.arch, local, readyToQuit,
+  const updates = createUpdateController({ version: app.getVersion(), platform: process.platform, arch: process.arch, local, publicMac, installPublic, readyToQuit,
     store: { read: () => JSON.parse(readFileSync(updateStateFile(), 'utf8')), write: value => writeFileSync(updateStateFile(), JSON.stringify(value), { mode: 0o600 }) },
     isActive: () => !stopping && !finished, showMessage: options => dialog.showMessageBox(options), openExternal: url => shell.openExternal(url),
     onChange: value => { if (window && !window.isDestroyed()) window.webContents.send('mandala:update-state', value); },
@@ -359,6 +438,7 @@ async function start() {
       if (request.action === 'state') return { ok: true, value: updates.state() };
       if (request.action === 'check') return { ok: true, value: await updates.check('settings') };
       if (request.action === 'download') { await updates.download(); return { ok: true, value: updates.state() }; }
+      if (request.action === 'install') { await updates.install(); return { ok: true, value: updates.state() }; }
       if (request.action === 'auto' && typeof request.value === 'boolean') return { ok: true, value: updates.setAutoCheck(request.value) };
       throw Error('Invalid update request');
     } catch (error) { return { ok: false, error: error.message || 'Could not check for updates' }; }
@@ -368,7 +448,7 @@ async function start() {
       { label: 'Show Mandala', click: () => { window.show(); window.focus(); } },
       { label: 'Open data directory', click: () => shell.openPath(profileHome) },
       { label: 'Check for updates…', click: () => { void updates.check('menu'); } },
-      { label: 'About Mandala', click: () => dialog.showMessageBox({ title: 'Mandala', message: `Mandala ${app.getVersion()}`, detail: local ? 'Local development build. Download updates in Mandala and quit to apply them.' : 'Local service and native CLI authentication stay on this computer. This preview uses manual installer upgrades.' }) },
+      { label: 'About Mandala', click: () => dialog.showMessageBox({ title: 'Mandala', message: `Mandala ${app.getVersion()}`, detail: local ? 'Local development build. Download updates in Mandala and quit to apply them.' : 'Local service and native CLI authentication stay on this computer. Availability of in-app updates depends on this release’s signing channel.' }) },
       ...(service.upgradePending ? [{ label: upgrade.pending, click: () => dialog.showMessageBox(window, {
         type: 'info', message: upgrade.pending, detail: service.upgradePending === 'busy' ? upgrade.busy : upgrade.unknown,
       }) }] : []),

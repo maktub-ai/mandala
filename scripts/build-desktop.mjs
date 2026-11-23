@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { copyReleaseLicenses, copyElectronLicenses } from './copy-release-licenses.mjs';
 import { prepareVoiceRuntime } from './prepare-voice-runtime.mjs';
+import macUpdater from '../desktop/public-mac-update.cjs';
 import { pruneDesktopRuntime } from './prune-desktop-runtime.mjs';
 import { downloadArtifact } from '../desktop/node_modules/@electron/get/dist/index.js';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -15,6 +16,12 @@ const [major, minor, patch] = process.versions.node.split('.').map(Number);
 if (major !== 22 || minor < 23 || minor === 23 && patch < 2) throw new Error('Build with Node 22.23.2 or newer 22.x; the exact binary and native ABI are shipped.');
 const version = process.env.MANDALA_VERSION ?? manifest.version;
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('MANDALA_VERSION must be a semantic version without the tag prefix.');
+const updateTeam = process.env.MANDALA_PUBLIC_UPDATE_TEAM_ID, updateKey = process.env.MANDALA_PUBLIC_UPDATE_PUBLIC_KEY;
+const wantsPublicUpdater = updateTeam !== undefined || updateKey !== undefined;
+const publicUpdater = { schema: 1, teamId: updateTeam, publicKey: updateKey };
+if (wantsPublicUpdater && (process.platform !== 'darwin' || process.env.MANDALA_SIGNED !== '1' ||
+    !/^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$/.test(version) || !macUpdater.parseTrust(publicUpdater)))
+  throw new Error('Public in-app updates require a signed stable Mac build, an Apple Team ID and an Ed25519 public verification key.');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 function run(command, args, cwd = root) {
   // npm.cmd is a trusted fixed build command; user content never reaches this shell.
@@ -24,9 +31,10 @@ run(process.execPath, ['scripts/check-release-source.mjs']);
 run(npm, ['run', 'build']);
 await rm(runtime, { recursive: true, force: true }); await rm(app, { recursive: true, force: true });
 await mkdir(join(runtime, 'bin'), { recursive: true }); await mkdir(join(runtime, 'scripts'), { recursive: true }); await mkdir(app, { recursive: true });
-if (process.platform === 'darwin' && /^\d+\.\d+\.\d+-local\.main\.[a-f0-9]{7}$/.test(version)) {
+if (wantsPublicUpdater || process.platform === 'darwin' && /^\d+\.\d+\.\d+-local\.main\.[a-f0-9]{7}$/.test(version)) {
   run('/usr/bin/clang', ['desktop/swap-app.c', '-o', join(runtime, 'bin', 'swap-app')]);
 }
+if (wantsPublicUpdater) await writeFile(join(runtime,'public-update.json'),JSON.stringify(publicUpdater)+'\n');
 await cp(process.execPath, join(runtime, 'bin', process.platform === 'win32' ? 'node.exe' : 'node'));
 const nodeLicense = [join(dirname(process.execPath), 'LICENSE'), join(dirname(process.execPath), '..', 'LICENSE')].find(existsSync);
 if (nodeLicense) await cp(nodeLicense, join(runtime, 'LICENSE-node.txt'));
@@ -54,7 +62,7 @@ await cp(join(root, 'release/ssh-runner'), join(runtime, 'server/ssh-runner'), {
 await pruneDesktopRuntime(runtime, serverBuild.metafile);
 await prepareVoiceRuntime(runtime);
 await build({ entryPoints: [join(desktop, 'runtime.ts')], outfile: join(app, 'runtime.cjs'), bundle: true, platform: 'node', format: 'cjs', target: 'node22' });
-for (const file of ['main.cjs', 'updates.cjs', 'local-update.cjs', 'preload.cjs', 'trayTemplate.png', 'trayTemplate@2x.png', 'tray-color.png', 'icon-light.png', 'icon-dark.png']) await cp(join(desktop, file), join(app, file));
+for (const file of ['main.cjs', 'updates.cjs', 'local-update.cjs', 'public-mac-update.cjs', 'preload.cjs', 'trayTemplate.png', 'trayTemplate@2x.png', 'tray-color.png', 'icon-light.png', 'icon-dark.png']) await cp(join(desktop, file), join(app, file));
 await writeFile(join(app, 'package.json'), JSON.stringify({ name: 'mandala-desktop', productName: 'Mandala', version, description: 'Mandala personal desktop application', author: 'MaktubCN', main: 'main.cjs' }, null, 2));
 let commit = 'uncommitted';
 try { commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(); } catch {}

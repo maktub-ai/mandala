@@ -131,3 +131,26 @@ test('restores a staged local update on startup', () => {
   const { updates } = controller(vi.fn(), { local });
   expect(updates.state()).toMatchObject({ status: 'ready', update: { ...candidate, local: true } });
 });
+
+test('signed public Mac updates download in-app but never install until explicitly requested', async () => {
+  const candidate = { version:'1.0.1', size:200, notes:'https://github.com/maktub-ai/mandala-releases/releases/tag/v1.0.1', publicMac:true };
+  let staged=false;
+  const publicMac = { check:vi.fn(async()=>candidate), ready:vi.fn(()=>staged?candidate:null), download:vi.fn(async()=>{staged=true;}) };
+  const installPublic = vi.fn(async()=>false);
+  const {updates,openExternal} = controller(githubOnly([github('v1.0.1')]),{publicMac,installPublic});
+  expect(await updates.check()).toMatchObject({status:'available',update:candidate});
+  await updates.download();
+  expect(updates.state()).toMatchObject({status:'ready',update:candidate});
+  expect(openExternal).not.toHaveBeenCalled();
+  expect(installPublic).not.toHaveBeenCalled();
+  await updates.install();
+  expect(installPublic).toHaveBeenCalledOnce();
+  expect(updates.state().status).toBe('ready');
+});
+
+test('tampered signed offer does not expose a manual download for the same version',async()=>{
+ const publicMac={ready:()=>null,check:async()=>{throw Object.assign(Error('bad signature'),{name:'PublicUpdateVerificationError'});}};
+ const {updates,openExternal}=controller(githubOnly([github('v1.0.1')]),{publicMac});
+ expect(await updates.check()).toMatchObject({status:'error',update:null,error:'signed_verification'});
+ await updates.download();expect(openExternal).not.toHaveBeenCalled();
+});

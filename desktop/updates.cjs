@@ -65,12 +65,12 @@ async function checkForUpdate({ version, platform, arch, fetch = globalThis.fetc
 const memoryStore = () => { let saved = {}; return { read: () => saved, write: value => { saved = value; } }; };
 // Keeps the update state for the menu, the settings page and the background schedule.
 // mode: 'auto' (silent; notifies once per version), 'menu' (native dialogs), 'settings' (the page shows the result).
-function createUpdateController({ version, platform, arch, fetch, local, readyToQuit = () => {}, store = memoryStore(), now = Date.now, isActive = () => true, showMessage, openExternal, notify = () => {}, onChange = () => {} }) {
+function createUpdateController({ version, platform, arch, fetch, local, publicMac, installPublic = async () => false, readyToQuit = () => {}, store = memoryStore(), now = Date.now, isActive = () => true, showMessage, openExternal, notify = () => {}, onChange = () => {} }) {
   let saved = {};
   try { const value = store.read(); if (value && typeof value === 'object') saved = value; } catch { /* Start fresh. */ }
   const supported = platform === 'darwin' || platform === 'win32';
   const localInfo = build => build && { version: build.version, local: true };
-  const staged = localInfo(local?.ready());
+  const staged = localInfo(local?.ready()) ?? publicMac?.ready();
   let state = { supported, current: version, status: staged ? 'ready' : 'idle', update: staged ?? null, checkedAt: Number.isFinite(saved.checkedAt) ? saved.checkedAt : null, autoCheck: saved.autoCheck !== false, error: null };
   let pending = null;
   const persist = () => { try { store.write({ autoCheck: state.autoCheck, checkedAt: state.checkedAt, notified: saved.notified ?? null }); } catch { /* Convenience only. */ } };
@@ -78,37 +78,48 @@ function createUpdateController({ version, platform, arch, fetch, local, readyTo
   const download = async () => {
     if (state.status !== 'available' || !isActive()) return;
     const { update } = state;
-    if (!local) return openExternal(update.url);
+    const source = update.publicMac ? publicMac : local;
+    if (!source) return openExternal(update.url);
     set({ status: 'downloading' });
     try {
-      await local.download(update);
+      await source.download(update);
       set({ status: 'ready' });
     } catch (error) {
       set({ status: 'available' });
       throw error;
     }
-    if (isActive()) await readyToQuit();
+    if (isActive() && !update.publicMac) await readyToQuit();
+  };
+  const install = async () => {
+    if (state.status !== 'ready' || !state.update.publicMac || !isActive()) return;
+    set({ status: 'installing' });
+    try { await installPublic(); }
+    finally {
+      const staged=publicMac?.ready();
+      set(staged ? {status:'ready',update:staged} : {status:'idle',update:null});
+    }
   };
   // One request at a time; callers that arrive meanwhile share its result.
   const refresh = () => pending ??= (async () => {
-    if (state.status === 'ready' || state.status === 'downloading') return;
+    if (['ready','downloading','installing'].includes(state.status)) return;
     set({ status: 'checking', error: null });
     try {
-      const update = local ? localInfo(local.check()) : await checkForUpdate({ version, platform, arch, fetch });
+      const installer = local ? null : await checkForUpdate({ version, platform, arch, fetch });
+      const update = local ? localInfo(local.check()) : (await publicMac?.check(installer)) ?? installer;
       set({ status: update ? 'available' : 'current', update, checkedAt: now() });
       persist();
-    } catch { set({ status: 'error', error: 'Could not reach the release service.' }); }
+    } catch (error) { set({ status: 'error', update: null, error: error?.name === 'PublicUpdateVerificationError' ? 'signed_verification' : 'release_unavailable' }); }
   })().finally(() => { pending = null; });
   const present = async mode => {
     const { status, update } = state;
     if (mode === 'auto') {
       if (status === 'available' && saved.notified !== update.version) { saved.notified = update.version; persist(); notify(update); }
     } else if (mode === 'menu') {
-      if (status === 'ready') await readyToQuit();
-      else if (status === 'downloading') return;
-      else if (status === 'error') await showMessage({ type: 'warning', title: 'Could not check for updates', message: 'Check your connection and try again later. You can keep using Mandala.', buttons: ['OK'] });
+      if (status === 'ready') { if (update.publicMac) await install(); else await readyToQuit(); }
+      else if (status === 'downloading' || status === 'installing') return;
+      else if (status === 'error') await showMessage({ type: 'warning', title: 'Could not check for updates', message: state.error === 'signed_verification' ? 'Could not verify the signed update. The current app was not changed.' : 'Check your connection and try again later. You can keep using Mandala.', buttons: ['OK'] });
       else if (status === 'available') {
-        const answer = await showMessage({ type: 'info', title: 'Mandala update available', message: `Mandala ${update.version} is available`, detail: local ? 'Download this local build in Mandala. Quit and reopen to apply it.' : 'Download the installer, then use “Stop runtime and quit…” before replacing Mandala.', buttons: ['Later', 'Download update'], defaultId: 0, cancelId: 0 });
+        const answer = await showMessage({ type: 'info', title: 'Mandala update available', message: `Mandala ${update.version} is available`, detail: update.publicMac ? 'Download and verify the signed update in Mandala. Installation is a separate step.' : local ? 'Download this local build in Mandala. Quit and reopen to apply it.' : 'Download the installer, then use “Stop runtime and quit…” before replacing Mandala.', buttons: ['Later', 'Download update'], defaultId: 0, cancelId: 0 });
         if (answer.response === 1) {
           try { await download(); }
           catch { if (isActive()) await showMessage({ type: 'warning', title: 'Could not download the update', message: 'Check for updates again and retry.', buttons: ['OK'] }); }
@@ -129,6 +140,6 @@ function createUpdateController({ version, platform, arch, fetch, local, readyTo
     first.unref?.(); repeat.unref?.();
     return () => { timers.clearTimeout(first); timers.clearInterval(repeat); };
   };
-  return { state: () => state, check, download, setAutoCheck, schedule };
+  return { state: () => state, check, download, install, setAutoCheck, schedule };
 }
 module.exports = { checkForUpdate, createUpdateController, CHECK_INTERVAL, STARTUP_DELAY };

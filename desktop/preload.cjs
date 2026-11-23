@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('mandalaDesktop', Object.freeze({ platform: proc
   state: () => updateRequest('state'),
   check: () => updateRequest('check'),
   download: () => updateRequest('download'),
+  install: () => updateRequest('install'),
   setAutoCheck: value => updateRequest('auto', value === true),
   onChange: listener => subscribe('mandala:update-state', listener, value => !!value && typeof value === 'object' && typeof value.status === 'string'),
 }), preferences: Object.freeze({

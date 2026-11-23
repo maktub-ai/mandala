@@ -20,9 +20,9 @@ export default function DesktopUpdateSettings(){
  const run=async(action:()=>Promise<typeof state>)=>{setBusy(true);setError('');try{const value=await action();if(value)setState(value);}catch(cause){setError((cause as Error).message);}finally{setBusy(false);}};
  const when=(time:number)=>new Date(time).toLocaleString(language==='zh-CN'?'zh-CN':'en',{dateStyle:'medium',timeStyle:'short'});
  const checking=state?.status==='checking';
- const downloading=state?.status==='downloading',ready=state?.status==='ready';
+ const downloading=state?.status==='downloading',installing=state?.status==='installing',ready=state?.status==='ready'||installing;
  const update=state?.status==='available'||downloading||ready?state?.update:null;
- const latest=!state?'':checking?say('正在检查…','Checking…'):downloading?say('正在下载…','Downloading…'):ready?say('已下载，等待重启','Downloaded, awaiting restart'):update?say(`${update.version} 可下载`,`${update.version} available`):state.status==='current'?say('已是最新版本','Up to date'):state.status==='error'?say('检查失败','Check failed'):say('尚未检查','Not checked yet');
+ const latest=!state?'':checking?say('正在检查…','Checking…'):installing?say('正在安装…','Installing…'):downloading?say('正在下载…','Downloading…'):ready?say('已下载，等待重启','Downloaded, awaiting restart'):update?say(`${update.version} 可下载`,`${update.version} available`):state.status==='current'?say('已是最新版本','Up to date'):state.status==='error'?say('检查失败','Check failed'):say('尚未检查','Not checked yet');
  return <DetailSection title={say('关于与更新','About and updates')}>
   <p className="field-hint">{say('Mandala 会在启动后检查一次新版本，之后每 6 小时检查一次。','Mandala checks for a new version shortly after it starts, then every 6 hours.')}</p>
   {!bridge?<StatusLabel icon="info">{say('仅桌面版可用','Desktop only')}</StatusLabel>:!state?<StatusLabel icon="refresh">{say('正在读取版本信息…','Reading version information…')}</StatusLabel>:<>
@@ -32,12 +32,13 @@ export default function DesktopUpdateSettings(){
     {label:say('上次检查','Last checked'),value:state.checkedAt?when(state.checkedAt):say('从未','Never'),icon:'clock'},
    ]}/>
    {!state.supported&&<Notice>{say('此平台暂无安装包，请从源码更新。','No installer is published for this platform. Update from source.')}</Notice>}
-   {update&&!update.local&&<p className="field-hint">{say(`安装包 ${megabytes(update.size)}。下载后，先从菜单选择“Stop runtime and quit…”，再用新安装包替换 Mandala；项目、对话和设置都会保留。`,`Installer ${megabytes(update.size)}. After downloading, choose “Stop runtime and quit…” from the menu, then replace Mandala with the new installer. Projects, chats and settings are kept.`)}</p>}
-   {ready&&<Notice>{say('退出并重新打开 Mandala 即可安装更新。后台有活动时，安装会延后。','Quit and reopen Mandala to install the update. If the runtime is busy, installation will wait.')}</Notice>}
-   {state.status==='error'&&<p className="field-hint">{say('暂时连不上发布服务，请检查网络后重试。不影响继续使用。','Could not reach the release service. Check your connection and try again; Mandala keeps working.')}</p>}
+   {update&&!update.local&&!update.publicMac&&<p className="field-hint">{say(`安装包 ${megabytes(update.size)}。下载后，先从菜单选择“Stop runtime and quit…”，再用新安装包替换 Mandala；项目、对话和设置都会保留。`,`Installer ${megabytes(update.size)}. After downloading, choose “Stop runtime and quit…” from the menu, then replace Mandala with the new installer. Projects, chats and settings are kept.`)}</p>}
+   {ready&&<Notice tone="info">{update?.publicMac?say('更新已验证。选择安装并重启；后台有活动时，不会替换当前版本。','The update is verified. Choose Install and restart. Mandala will not replace the current app while the runtime is busy.'):say('退出并重新打开 Mandala 即可安装更新。后台有活动时，安装会延后。','Quit and reopen Mandala to install the update. If the runtime is busy, installation will wait.')}</Notice>}
+   {state.status==='error'&&<p className="field-hint">{state.error==='signed_verification'?say('无法验证签名更新。当前应用未更改，请稍后重试。','Could not verify the signed update. The current app was not changed; try again later.'):say('暂时连不上发布服务，请检查网络后重试。不影响继续使用。','Could not reach the release service. Check your connection and try again; Mandala keeps working.')}</p>}
    <label className="voice-enable"><Input type="checkbox" checked={state.autoCheck} disabled={busy||!state.supported} onChange={event=>void run(()=>bridge.setAutoCheck(event.target.checked))}/>{say('自动检查更新','Check for updates automatically')}</label>
    <div className="desktop-cli-actions">
     {update&&!ready&&<Button className="primary" disabled={busy||downloading} onClick={()=>void run(bridge.download)}><Icon name="download" size={15}/>{downloading?say('正在下载…','Downloading…'):say(`下载 ${update.version}`,`Download ${update.version}`)}</Button>}
+    {update?.publicMac&&ready&&<Button className="primary" disabled={busy||installing} onClick={()=>void run(bridge.install)}><Icon name="refresh" size={15}/>{installing?say('正在安装…','Installing…'):say('安装并重启','Install and restart')}</Button>}
     <Button disabled={busy||checking||downloading||ready||!state.supported} onClick={()=>void run(bridge.check)}>{checking?say('正在检查…','Checking…'):say('检查更新','Check for updates')}</Button>
     {update&&!update.local&&<a className="desktop-update-notes" href={update.notes} target="_blank" rel="noopener noreferrer">{say('发行说明','Release notes')}<Icon name="external-link" size={14}/></a>}
    </div>
