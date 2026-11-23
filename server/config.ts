@@ -10,6 +10,9 @@ import { linkedCapabilities } from "../shared/catalog";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
+import { platform } from "node:os";
+import { setTimeout as delay } from "node:timers/promises";
+import { DomainError } from "../shared/workspace-contracts";
 import type { Config, LegacyConfig } from "../shared/types";
 import { projectWorkspaces } from "../shared/workspaces";
 import { isRemoteAbsolutePath, isValidSshHost } from "../shared/execution-machines";
@@ -18,6 +21,7 @@ import { validateManagedSkillContent } from "../shared/skills";
 import { isIdentityEmoji, projectIcons } from "../shared/identity";
 import { clawHubCatalogIdPattern } from "../shared/market";
 const mandalaAuthority = Symbol("mandala-config");
+const windowsReplaceBackoff = [15, 35] as const;
 const empty: Config = { version: 2, projects: [], agents: [] };
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 function normalizeConfig(value: unknown): Config {
@@ -371,29 +375,52 @@ export async function writeConfig(
       const text = JSON.stringify({ ...config, projects: config.projects.map(({ cwd, resources, ...project }) => project) }, null, 2) + "\n";
       const temp = join(home, `config-${randomUUID()}.tmp`);
       await writeFile(temp, text, { mode: 0o600 });
+      let busySave = false;
       try {
-        if (
-          hash(await readFile(join(home, "config.json"), "utf8")) !==
-          expectedRevision
-        )
-          throw new Error("configuration changed");
-        assertAuthorized?.();
-        // Invalidate in-flight evaluations before the asynchronous save can race with their commit.
-        if(config.system?.automaticTaskProgress===false)progressRevisions.set(home,taskProgressSettingsRevision(home)+1);
-        if(config.system?.skillLearning===false){
-          const store=openStore(home);try{store.database.exec('CREATE TABLE IF NOT EXISTS skill_learning_policy(id INTEGER PRIMARY KEY,epoch INTEGER NOT NULL); INSERT INTO skill_learning_policy VALUES(1,1) ON CONFLICT(id) DO UPDATE SET epoch=epoch+1');}finally{store.close();}
+        const destination = join(home, "config.json");
+        for (let attempt = 0; ; attempt++) {
+          if (hash(await readFile(destination, "utf8")) !== expectedRevision)
+            throw new Error("configuration changed");
+          assertAuthorized?.();
+          // Invalidate any evaluations that started before this publication attempt.
+          if(config.system?.automaticTaskProgress===false)progressRevisions.set(home,taskProgressSettingsRevision(home)+1);
+          if(config.system?.skillLearning===false){
+            const store=openStore(home);try{store.database.exec('CREATE TABLE IF NOT EXISTS skill_learning_policy(id INTEGER PRIMARY KEY,epoch INTEGER NOT NULL); INSERT INTO skill_learning_policy VALUES(1,1) ON CONFLICT(id) DO UPDATE SET epoch=epoch+1');}finally{store.close();}
+          }
+          try {
+            // Guarded commits and Skill-head publication cannot yield between
+            // the authorization check and the atomic same-directory replace.
+            if(assertAuthorized||config.skillLibrary?.some(skill=>skill.versionRef))renameSync(temp, destination);
+            else await rename(temp, destination);
+            break;
+          } catch(error) {
+            if(platform()!=="win32"||(error as NodeJS.ErrnoException).code!=="EPERM")throw error;
+            const wait = windowsReplaceBackoff[attempt];
+            if(wait === undefined){
+              busySave = true;
+              throw new DomainError("config_busy",409,"Configuration could not be saved right now. Try again.");
+            }
+            // Wait without blocking the event loop. The existing temp remains
+            // intact, and revision and authorization are rechecked before retry.
+            await delay(wait);
+          }
         }
-        // Guarded commits cannot yield between the final authorization check and publication.
-        // Skill-head publication also shares this synchronous commit boundary.
-        if(assertAuthorized||config.skillLibrary?.some(skill=>skill.versionRef))renameSync(temp, join(home, "config.json"));
-        else await rename(temp, join(home, "config.json"));
         codeGraphRevisions.set(home,(codeGraphRevisions.get(home)??0)+1);
         if(config.skillLibrary?.some(skill=>skill.versionRef)){const store=openStore(home);try{createSkillCatalog(home,store).recover(config);}finally{store.close();}}
       } catch(error){
-        const store=openStore(home);try{createSkillCatalog(home,store).recover(JSON.parse(readFileSync(join(home,'config.json'),'utf8')));}finally{store.close();}
+        try {
+          const store=openStore(home);try{createSkillCatalog(home,store).recover(JSON.parse(readFileSync(join(home,'config.json'),'utf8')));}finally{store.close();}
+        } catch(recoveryError) {
+          if(!busySave)throw recoveryError;
+          console.warn("Configuration recovery after a busy save was unsuccessful.");
+        }
         throw error;
       } finally {
-        await rm(temp, { force: true });
+        try { await rm(temp, { force: true }); }
+        catch(cleanupError) {
+          if(!busySave)throw cleanupError;
+          console.warn("Temporary configuration cleanup after a busy save was unsuccessful.");
+        }
       }
       return hash(text);
     });
