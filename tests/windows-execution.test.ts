@@ -263,12 +263,17 @@ test.skipIf(process.platform !== 'win32' || !sandboxCodex)('Windows Codex prepar
   }
 }, 90000);
 
+// cmd.exe reads batch source using the active code page. Keep the shim ASCII and
+// pass fixture paths as Unicode environment values.
+const windowsFixtureShim = '@echo off\r\n"%MANDALA_TEST_NODE%" "%MANDALA_TEST_ENTRY%" %*\r\n';
+const windowsFixtureEnv = (entry: string) => ({ MANDALA_TEST_NODE: process.execPath, MANDALA_TEST_ENTRY: entry });
+
 test.skipIf(process.platform !== 'win32')('Windows npm-style codex.cmd uses a hidden piped launch and starts the mock protocol', async () => {
-  const home = mkdtempSync(join(tmpdir(), 'mandala cmd shim ')); homes.push(home);
+  const home = mkdtempSync(join(tmpdir(), 'mandala cmd shim 中文 ')); homes.push(home);
   const shim = join(home, 'codex.cmd');
   const fixture = resolve('tests/fixtures/fake-cli.mjs');
-  writeFileSync(shim, `@echo off\r\n"${process.execPath}" "${fixture}" %*\r\n`);
-  const client = await startCodex({ cwd: home, env: { PATH: home + ';' + process.env.PATH }, onEvent() {}, onApproval() {}, onExit() {} });
+  writeFileSync(shim, windowsFixtureShim);
+  const client = await startCodex({ cwd: home, env: { ...windowsFixtureEnv(fixture), PATH: home + ';' + process.env.PATH }, onEvent() {}, onApproval() {}, onExit() {} });
   try {
     expect(await client.getStatus()).toMatchObject({ status: 'ready' });
     expect(await client.listModels()).toEqual([{ id: 'model-fixture', label: 'Fixture' }]);
@@ -285,12 +290,12 @@ test.skipIf(process.platform !== 'win32')('running desktop discovers a newly reg
   const fixture = pathToFileURL(resolve('tests/fixtures/fake-cli.mjs')).href;
   const bridge = join(home, 'check-path.mjs');
   writeFileSync(bridge, `if (!process.env.PATH?.split(';').includes(${JSON.stringify(installed)})) process.exit(42);\nawait import(${JSON.stringify(fixture)});\n`);
-  writeFileSync(join(installed, 'codex.cmd'), `@echo off\r\n"${process.execPath}" "${bridge}" %*\r\n`);
+  writeFileSync(join(installed, 'codex.cmd'), windowsFixtureShim);
   const inherited = join(home, 'startup-path');
   vi.stubEnv('PATH', inherited);
   vi.stubEnv('MANDALA_DESKTOP', '1');
   const query = vi.mocked(execFileSync);
-  const options = { cwd: home, onEvent() {}, onApproval() {}, onExit() {} };
+  const options = { cwd: home, env: windowsFixtureEnv(bridge), onEvent() {}, onApproval() {}, onExit() {} };
   try {
     query.mockReturnValueOnce('');
     await expect(startCodex(options)).rejects.toMatchObject({ code: 'ENOENT' });
