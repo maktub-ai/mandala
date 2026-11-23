@@ -40,7 +40,8 @@ export async function createBusinessCliRuntime(home: string, invocationId: strin
       const bridge = join(directory, 'invoke.mjs');
       await writeFile(bridge, `process.env.OPEN_MANA_CONTEXT=${JSON.stringify(contextFile)};process.env.MANDALA_CONTEXT=${JSON.stringify(contextFile)};const args=JSON.parse(process.env.MANDALA_CLI_ARGUMENTS||'[]');delete process.env.MANDALA_CLI_ARGUMENTS;const {main}=await import(${JSON.stringify(pathToFileURL(cliFile).href)});process.exitCode=await main(args);`, { mode: 0o600, flag: 'wx' });
       // JSON in an inherited environment preserves PowerShell 5/7 argument bytes through native Node launch.
-      await writeFile(launcher, `$ErrorActionPreference='Stop'\n$env:PSModulePath=$PSHOME+'\\Modules'\n$env:MANDALA_CLI_ARGUMENTS=ConvertTo-Json -Compress -InputObject @($args)\n& ${powerShellQuote(process.execPath)} ${powerShellQuote(bridge)}\nexit $LASTEXITCODE\n`, { mode: 0o700, flag: 'wx' });
+      // Windows PowerShell 5.1 assumes ANSI for a script without a UTF-8 BOM.
+      await writeFile(launcher, `\uFEFF$ErrorActionPreference='Stop'\n$env:PSModulePath=$PSHOME+'\\Modules'\n$env:MANDALA_CLI_ARGUMENTS=ConvertTo-Json -Compress -InputObject @($args)\n& ${powerShellQuote(process.execPath)} ${powerShellQuote(bridge)}\nexit $LASTEXITCODE\n`, { mode: 0o700, flag: 'wx' });
     } else await writeFile(launcher, `#!/bin/sh\nexport MANDALA_CONTEXT=${shellQuote(contextFile)}\nexec ${shellQuote(process.execPath)} ${shellQuote(cliFile)} "$@"\n`, { mode: 0o700, flag: "wx" });
     await link(launcher, join(directory, windows ? "openmana.ps1" : "openmana"));
     if (mailboxPath && invoke) {

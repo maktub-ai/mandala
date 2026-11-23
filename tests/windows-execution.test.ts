@@ -74,8 +74,8 @@ test('native adapter spawn prepares npm cmd shims with escaping instead of inter
   expect(input[2]).toBe('x & whoami');
 });
 
-test.skipIf(process.platform !== 'win32')('Windows PowerShell invocation preserves exact quoted arguments and succeeds without a credential on argv', async () => {
-  const home = mkdtempSync(join(tmpdir(), "mandala win $ invocation '")); homes.push(home);
+test.skipIf(process.platform !== 'win32')('Windows PowerShell invocation under a Unicode path preserves exact quoted arguments and succeeds without a credential on argv', async () => {
+  const home = mkdtempSync(join(tmpdir(), "mandala win $ invocation ' 中文")); homes.push(home);
   const runtime = await createBusinessCliRuntime(home, 'invocation', { baseUrl: 'http://127.0.0.1:1', token: 'private-Windows-token' }, async request => ({ request }));
   try {
     const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', runtime.command + " project agents --key 'literal&key'"], { stdio: 'pipe' });
