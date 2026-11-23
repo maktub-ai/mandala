@@ -44,9 +44,10 @@ let turns: string[],
   resumed: string[],
   replies: unknown[],
   model: string | undefined;
-const config: Config = {runtimes:['codex','omp'],
+let config: Config;
+const configTemplate: Config = {runtimes:['codex','omp'],
   version: 2,
-  projects: [{ id: "p", name: "Project", cwd: "/tmp", agentIds: ["a"], resources: [], mcp: [], skills: [] }],
+  projects: [{ id: "p", name: "Project", cwd: "", agentIds: ["a"], resources: [], mcp: [], skills: [] }],
   agents: [
     {
       id: "a",
@@ -120,6 +121,10 @@ it("uses an invocation CLI instead of injecting the built-in task MCP", async ()
 });
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "mana-session-"));
+  const workspace = join(home, "workspace");
+  mkdirSync(workspace);
+  config = structuredClone(configTemplate);
+  config.projects[0].cwd = realpathSync(workspace);
   store = openStore(home);
   turns = [];
   resumed = [];
@@ -1130,7 +1135,7 @@ it.each([["", ""], ["", "a"], ["p", ""], ["p", "a"]])("runs optional Project=%s 
 it("selects independent Workspaces within one Project and rejects an unknown selection", async () => {
   manager.close();
   const c = structuredClone(config);
-  c.projects[0].workspaces = [{ id: "writing", name: "Writing", cwd: "/tmp", resources: [] },
+  c.projects[0].workspaces = [{ id: "writing", name: "Writing", cwd: c.projects[0].cwd, resources: [] },
     { id: "reading", name: "Reading", cwd: home, resources: [] }];
   manager = createSessionManager(store, async () => c, factory, undefined, home);
   const reading = await manager.create("p", "a", undefined, "codex", { workspaceId: "reading" });
@@ -1738,7 +1743,8 @@ it('branch reuses submitted attachment identity and original bytes without impor
  const user=store.listEvents(c.id,0).find(e=>e.kind==='user')!;const branch=await manager.branch(c.id,user.id,'revised');
  expect(store.getConversation(branch.id)).toMatchObject({status:'running',nativeId:'native-branch',turnId:'turn-1'});expect((store.listEvents(branch.id,0).find(e=>e.kind==='user')!.data as any).text).toBe('revised');expect((store.listEvents(c.id,0).find(e=>e.kind==='user')!.data as any).text).toBe('original');expect(store.listEvents(branch.id,0).filter(e=>e.kind==='error')).toHaveLength(0);
  expect(store.database.prepare('SELECT id FROM assets').all()).toHaveLength(1);expect(store.database.prepare('SELECT conversation_id FROM attachment_asset_links').all()).toEqual([{conversation_id:c.id}]);
- expect(turns.at(-1)).toContain(attachments[0].path);
+ const references=JSON.parse(turns.at(-1)!.split('\n\n').at(-1)!);
+ expect(references).toEqual([{name:attachments[0].name,path:attachments[0].path}]);
 });
 it('ordinary publisher includes lazily imported historical private attachment lineage and blocks unresolved history',async()=>{
  await manager.close();manager=createSessionManager(store,async()=>structuredClone(config),factory,undefined,home);
@@ -1841,7 +1847,7 @@ it('close waits for an in-flight queue pump before callers remove its HOME',asyn
 it('requeues a keyed continuation with its original identity behind a delegated directory owner',async()=>{
  const {createTaskResources}=await import('../server/task-resources');
  const resources=createTaskResources(store);
- resources.claimDirectory('held-delegated-run','/tmp','write');
+ resources.claimDirectory('held-delegated-run',config.projects[0].cwd,'write');
  const second=await manager.create('p','a');
  store.updateConversation(second.id,{status:'interrupted'});
  await manager.continue(second.id,'resume after owner finishes',[],[],'continue-contention');
