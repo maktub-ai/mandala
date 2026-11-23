@@ -59,6 +59,9 @@ export default function AgentSettings({agent,config,savedConfig,catalog,disabled
      <Select ariaLabel={t('Agent 回答风格')} disabled={disabled} searchable={false} value={agent.responseStyle??''} onChange={value=>patch({responseStyle:value as ResponseStyle||undefined})} options={[{value:'',label:t('继承全局（{style}）',{style:t(responseStyleLabels[effectiveResponseStyle(config)])})},...responseStyles.map(value=>({value,label:t(responseStyleLabels[value])}))]}/>
     </Field>
    </div>
+   <Field label={say('分派范围（可选）','Routing remit (optional)')} hint={say('简述这个 Agent 适合处理什么。Mandala 会用它选人。不要填内部指令或敏感信息。','Describe what this Agent handles. Mandala uses it to choose an Agent. Do not include private instructions or sensitive information.')}>
+    <Input aria-label={say('分派范围（可选）','Routing remit (optional)')} maxLength={200} disabled={disabled} value={agent.routingRemit??''} onChange={event=>patch({routingRemit:event.target.value||undefined})}/>
+   </Field>
    <Field className="agent-settings-instructions" label={t('职责与指令')} hint={say('修改后从下一次执行生效；当轮要求优先。','Changes apply on the next execution; instructions for the current turn take priority.')}>
     <Textarea aria-label={t('职责与指令')} disabled={disabled} rows={4} value={agent.instructions} onChange={event=>patch({instructions:event.target.value})}/>
    </Field>

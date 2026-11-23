@@ -75,6 +75,7 @@ export type Agent = {
   id: string;
   name: string;
   instructions: string;
+  routingRemit?: string;
   defaultCli: Cli;
   models: Partial<Record<Cli, string>>;
   mcp: McpServer[];

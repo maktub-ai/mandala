@@ -2,7 +2,7 @@ import {diagnoseNativeCli} from './native-spawn';
 import {runtimeCatalog as diagnosticCatalog} from '../shared/runtimes';
 import { createConversationApprovals, type ConversationApprovalScope } from './conversation-approvals';
 import { supportsConversationApproval } from '../shared/approvals';
-import {mandalaDirectory} from './mandala-directory';
+import {mandalaDirectory,mandalaRoutingDirectory} from './mandala-directory';
 import {boundTaskCriteria} from './task-criteria';
 import {hasOperationOutcome,projectOperationOutcome} from './operation-results';
 import {isDeepStrictEqual} from 'node:util';
@@ -2173,7 +2173,7 @@ export function createSessionManager(
         const source={agentId:bound.agentId,conversationId:bound.conversationId,invocationId:bound.invocationId,humanEventId:runtime.humanEventId,assertActive:()=>assertActive()};
         const assertActive=()=>{if(tools.get(token)!==bound||live.get(bound.conversationId)!==runtime||runtime.runId!==bound.invocationId||!runtime.invocation||runtime.stopRequested||runtime.controller.signal.aborted)throw new DomainError('forbidden',403,'Expired tool binding');};
         await coordination.verify(source);assertActive();
-        const fields:Record<string,string[]>={mandala_directory:[],mandala_discover_capabilities:['runtimes','directories','query','limit'],mandala_discover_work:['runtimes','includePaths','excludePaths','limit'],mandala_planning_guide:[],mandala_goals:[],mandala_receipts:['taskId'],mandala_create:['goal','criteria','projectId'],mandala_takeover:['taskId','expectedRevision','criteria'],mandala_request:['taskId','expectedRevision','text','blocked'],mandala_configure:['change','mode'],mandala_temporary:['templateAgentId','name','projectId'],mandala_delegate:['taskId','targetAgentId','projectId','request','criteria']};
+        const fields:Record<string,string[]>={mandala_directory:['query','projectId'],mandala_discover_capabilities:['runtimes','directories','query','limit'],mandala_discover_work:['runtimes','includePaths','excludePaths','limit'],mandala_planning_guide:[],mandala_goals:[],mandala_receipts:['taskId'],mandala_create:['goal','criteria','projectId'],mandala_takeover:['taskId','expectedRevision','criteria'],mandala_request:['taskId','expectedRevision','text','blocked'],mandala_configure:['change','mode'],mandala_temporary:['templateAgentId','name','projectId'],mandala_delegate:['taskId','targetAgentId','projectId','request','criteria']};
         if(!fields[name]||!args||Array.isArray(args)||Object.keys(args).some(k=>!fields[name].includes(k)))throw new DomainError('invalid_tool_arguments',422,'Unknown coordination argument');
         if(Object.hasOwn(args,'criteria'))args={...args,criteria:boundTaskCriteria(args.criteria)};
         if(name==='mandala_planning_guide')return mandalaPlanningSkill;
@@ -2182,7 +2182,9 @@ export function createSessionManager(
           const config=await coordination.verify(source,true);assertActive();
           const result=name==='mandala_discover_work'?await discoverWorkDirectories(config,args as WorkDiscoveryInput):await discoverTeamCapabilities(config,args as TeamCapabilityInput);assertActive();return result;
         }
-        if(name==='mandala_directory'){const config=await loadConfig();assertActive();return {...mandalaDirectory(config),invocation:{tasks:true,automations:!!automationService,project:!!bound.projectId,assets:!!runtime.artifacts,memory:!!memoryRuntime,skills:!!skillTools,wiki:!!(bound.projectId||bound.agentId),codeGraph:!!runtime.codeGraphScope?.bindings.length,coordinator:true}};}
+        if(name==='mandala_directory'){
+          if(Object.keys(args).length){const current=await coordination.verify(source);assertActive();return mandalaRoutingDirectory(current,args);}
+          const config=await loadConfig();assertActive();return {...mandalaDirectory(config),invocation:{tasks:true,automations:!!automationService,project:!!bound.projectId,assets:!!runtime.artifacts,memory:!!memoryRuntime,skills:!!skillTools,wiki:!!(bound.projectId||bound.agentId),codeGraph:!!runtime.codeGraphScope?.bindings.length,coordinator:true}};}
         if(name==='mandala_goals')return coordination.list().map(own=>({...own,task:tasks.getTask({...root,agentId:source.agentId},own.taskId)}));
         if(name==='mandala_receipts'){coordination.requireOwned(source,String(args.taskId));const p={...root,agentId:source.agentId};return tasks.listReceipts(p,String(args.taskId));}
         if(name==='mandala_create')return coordination.create(source,args as unknown as Parameters<typeof coordination.create>[1],commandKey);

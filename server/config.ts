@@ -272,6 +272,7 @@ export function validateConfig(value: unknown): asserts value is Config {
       (a.maxParallel !== undefined && (!Number.isSafeInteger(a.maxParallel) || a.maxParallel < 1)) ||
       (a.responseStyle !== undefined && !responseStyles.includes(a.responseStyle)) ||
       typeof a.instructions !== "string" ||
+      (a.routingRemit !== undefined && (typeof a.routingRemit !== "string" || a.routingRemit.length > 200 || /[\p{Cc}\p{Zl}\p{Zp}]/u.test(a.routingRemit))) ||
       !isCli(a.defaultCli) ||
       !a.models ||
       typeof a.models !== "object" ||

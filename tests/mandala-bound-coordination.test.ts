@@ -444,3 +444,38 @@ it('keeps a prior unknown when a later same-key call with different input is rej
  expect(settled.map(result=>result?.state)).toEqual(['unknown']);
  expect(store.listEvents(chat.id,0).filter(event=>(event.data as {agentMessage?:{direction:string}}).agentMessage?.direction==='sent')).toHaveLength(1);
 });
+
+it('routes using current Project membership and rejects expired lookup authority',async()=>{
+ const {home,manager,chat,entries,finish}=await setup();
+ const first=await readConfig(home);
+ await writeConfig(home,{...first.config,projects:[{id:'routing',name:'Routing',cwd:home,agentIds:['worker','temp'],resources:[],mcp:[],skills:[]}],agents:first.config.agents.map(a=>a.systemRole?a:{...a,routingRemit:'Render HTML',instructions:'PRIVATE INSTRUCTIONS'})},first.revision);
+ await manager.send(chat.id,'Find existing HTML expertise');
+ const token=entries[0].token,args={query:'HTML rendering',projectId:'routing'};
+ await expect(manager.callBoundTool(token,'mandala_directory',{...args,unexpected:true},'route-unknown')).rejects.toMatchObject({status:422});
+ const result=await manager.callBoundTool(token,'mandala_directory',args,'route-first');
+ expect(result).toMatchObject({eligibleCount:1,candidates:[{id:'worker',routingRemit:'Render HTML',evidence:'keyword_overlap',readiness:'unverified'}]});
+ expect(JSON.stringify(result)).not.toContain('PRIVATE INSTRUCTIONS');
+ for(const mode of ['direct','propose'])await expect(manager.callBoundTool(token,'mandala_configure',{mode,change:{kind:'agent',action:'update',id:'worker',values:{routingRemit:'Tool must not set remit'}}},'routing-settings-'+mode)).rejects.toMatchObject({status:422,code:'invalid_management_change'});
+ const current=await readConfig(home);
+ expect(current.config.agents.find(a=>a.id==='worker')?.routingRemit).toBe('Render HTML');
+ await writeConfig(home,{...current.config,projects:current.config.projects.map(p=>({...p,agentIds:[]}))},current.revision);
+ await expect(manager.callBoundTool(token,'mandala_directory',args,'route-after-removal')).resolves.toMatchObject({eligibleCount:0,candidates:[]});
+ finish();
+ await expect(manager.callBoundTool(token,'mandala_directory',args,'route-expired')).rejects.toMatchObject({status:403});
+});
+
+it('does not turn a directory candidate or queue receipt into a runtime-ready claim',async()=>{
+ const {home,store,manager,chat,entries,finish}=await setup();
+ const initial=await readConfig(home);
+ await writeConfig(home,{...initial.config,projects:[{id:'stale',name:'Stale',cwd:home,agentIds:['worker'],resources:[],mcp:[],skills:[]}]},initial.revision);
+ await manager.send(chat.id,'Check this task');const token=entries[0].token,args={query:'Check',projectId:'stale'};
+ expect(await manager.callBoundTool(token,'mandala_directory',args,'route-ready-before')).toMatchObject({candidates:[{id:'worker',readiness:'unverified'}]});
+ const current=await readConfig(home);
+ await writeConfig(home,{...current.config,agents:current.config.agents.map(a=>a.id==='worker'?{...a,runtime:{codex:{gateway:'unavailable'}}}:a)},current.revision);
+ expect(await manager.callBoundTool(token,'mandala_directory',args,'route-unavailable-after')).toMatchObject({eligibleCount:0,candidates:[]});
+ const receipt=await manager.callBoundTool(token,'message_ask',{targetAgentId:'worker',targetProjectId:'stale',text:'Check this task'},'dispatch-stale') as import('../shared/agent-messages').AgentMessage;
+ expect(receipt.state).toBe('queued');
+ finish();
+ await vi.waitFor(()=>expect(store.database.prepare('SELECT state FROM agent_messages WHERE id=?').get(receipt.id)).toMatchObject({state:'failed'}));
+ expect(store.getConversation(receipt.targetConversationId)).toMatchObject({nativeId:null,turnId:null});
+});

@@ -1,6 +1,7 @@
 import {expect,it} from 'vitest';
-import {mandalaDirectory} from '../server/mandala-directory';
+import {mandalaDirectory,mandalaRoutingDirectory} from '../server/mandala-directory';
 import {mandalaInstructions} from '../server/mandala';
+import {validateConfig} from '../server/config';
 import {COMMANDS} from '../cli/commands.mjs';
 import {projectIcons} from '../shared/identity';
 import type {Config,Conversation} from '../shared/types';
@@ -56,4 +57,47 @@ it('directs current primary hands-on work to an authorized specialist before sel
  expect(primary).toMatch(/if no suitable Agent is available/);
  expect(mandalaInstructions(config,{agentId:'main',purpose:'mandala-background'} as Conversation))
    .not.toMatch(/Before starting hands-on work, use mandala directory/);
+});
+
+it('validates remit length and single-line plain text while retaining optional legacy shape',()=>{
+ const a={version:2,projects:[],agents:[{id:'test',name:'Test',instructions:'',defaultCli:'codex',models:{},mcp:[],skills:[]}]} as const;
+ expect(()=>validateConfig(a)).not.toThrow();
+ for(const routingRemit of ['界'.repeat(201),'not\nplain',{}])expect(()=>validateConfig({...a,agents:[{...a.agents[0],routingRemit}]})).toThrow();
+ expect(()=>validateConfig({...a,agents:[{...a.agents[0],routingRemit:'界'.repeat(200)}]})).not.toThrow();
+});
+
+it('ranks public remit evidence before opaque fillers, not by vendor or array order',()=>{
+ const worker=config.agents[1], search='排查同步失败', remit='排查同步失败、诊断后台数据';
+ const a={...worker,id:'alpha',name:'Opaque Alpha',defaultCli:'codex' as const,routingRemit:remit};
+ const b={...worker,id:'beta',name:'Opaque Beta',routingRemit:'UI colors and typography'};
+ const filler=Array.from({length:10},(_,i)=>({...worker,id:'filler'+i,name:'Filler '+i}));
+ const wrong={...a,id:'wrong'}, temp={...a,id:'temp',temporary:true}, archived={...a,id:'archived',archivedAt:'yesterday'};
+ const disabled={...a,id:'disabled',defaultCli:'claude' as const};
+ const off={...a,id:'offline',runtime:{codex:{gateway:'unavailable' as const}}};
+ const project={...config.projects[0],agentIds:[...filler,a,b,temp,archived,disabled,off].map(x=>x.id)};
+ const input={query:search,projectId:project.id};
+ const scoped={...config,projects:[project],agents:[config.agents[0],...filler,a,b,wrong,temp,archived,disabled,off]};
+ const result=mandalaRoutingDirectory(scoped,input);
+ expect(result.eligibleCount).toBe(12);
+ expect(result.candidates[0]).toMatchObject({id:a.id,routingRemit:remit,evidence:'keyword_overlap',readiness:'unverified'});
+ expect(JSON.stringify(result)).not.toMatch(/PRIVATE|SECRET|wrong|temp|archived|disabled|offline/);
+ const reordered=mandalaRoutingDirectory({...scoped,agents:[...scoped.agents].reverse()},input);
+ expect(reordered.candidates.map(x=>x.id)).toEqual(result.candidates.map(x=>x.id));
+ const swapped=mandalaRoutingDirectory({...scoped,agents:scoped.agents.map(x=>x.id===a.id?{...x,routingRemit:b.routingRemit}:x.id===b.id?{...x,routingRemit:a.routingRemit}:x)},input);
+ expect(swapped.candidates[0].id).toBe(b.id);
+ const noMatch=mandalaRoutingDirectory(scoped,{...input,query:'snowboard'});
+ expect(noMatch.candidates.length).toBeGreaterThan(0);
+ expect(noMatch.candidates.every(x=>x.evidence==='no_keyword_overlap')).toBe(true);
+ expect(()=>mandalaRoutingDirectory({...scoped,projects:[{...project,archivedAt:'yesterday'}]},input)).toThrow();
+});
+
+it('distinguishes explicit unbound routing from an omitted Project filter',()=>{
+ const agent={...config.agents[1],id:'unbound',routingRemit:'Database reconciliation'};
+ const model={...config,agents:[...config.agents,agent]};
+ const unbound=mandalaRoutingDirectory(model,{query:'Database',projectId:null});
+ expect(unbound.scope).toBe('unbound');
+ expect(unbound.candidates).toEqual(expect.arrayContaining([expect.objectContaining({id:'unbound',projectIds:[]}),expect.objectContaining({id:'worker',projectIds:[]})]));
+ const discover=mandalaRoutingDirectory(model,{query:'Database'});
+ expect(discover.scope).toBe('projects');
+ expect(discover.candidates).toEqual([expect.objectContaining({id:'worker',projectIds:['p']})]);
 });
