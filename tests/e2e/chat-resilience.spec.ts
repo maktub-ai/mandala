@@ -173,6 +173,9 @@ test('writer conflict retains the submitted request and attachment across reload
     await downloadStarted;
     await composer.fill('Draft typed during recovery');
   } finally { releaseDownload(); }
+  // This control is disabled for the lifetime of the restore; don't clear the
+  // draft until the completed attachment request has been handled.
+  await expect(message.getByRole('button', { name: '编辑消息', exact: true })).toBeEnabled();
   await expect(composer).toHaveValue('Draft typed during recovery');
   await expect(page.locator('.composer-attachments')).toHaveCount(0);
   await composer.fill('');
