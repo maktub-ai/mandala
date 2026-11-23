@@ -128,13 +128,19 @@ html[data-desktop=darwin] .sidebar-heading { display:none; }
    sidebar toggle float over the sidebar's top band; empty chrome (sidebar gaps, page and chat headers) drags the window. */
 html[data-desktop=darwin] .desktop-titlebar { inset:0 auto auto 0; height:48px; padding:0 0 0 88px; background:transparent; pointer-events:none; -webkit-app-region:no-drag; }
 html[data-desktop=darwin] .desktop-titlebar button { pointer-events:auto; }
-html[data-desktop=darwin] .product-frame .sidebar.area-sidebar { padding-top:52px; -webkit-app-region:drag; }
+html[data-desktop=darwin] .product-frame .sidebar.area-sidebar { padding-top:52px; }
 html[data-desktop=darwin] .product-frame .sidebar.area-sidebar > * { -webkit-app-region:no-drag; }
 html[data-desktop=darwin] :is(.topbar, .workspace-page-header) { -webkit-app-region:drag; }
 html[data-desktop=darwin] :is(.topbar, .workspace-page-header) :is(a, button, input, select, textarea, [role=button], [role=combobox], [tabindex]) { -webkit-app-region:no-drag; }
 /* With the sidebar collapsed, the card keeps a top band for the traffic lights and the toggle. */
-html[data-desktop=darwin] .product-frame .app-shell:has(> .sidebar[data-collapsed="true"]) { padding-top:40px; -webkit-app-region:drag; }
+html[data-desktop=darwin] .product-frame .app-shell:has(> .sidebar[data-collapsed="true"]) { padding-top:40px; }
 html[data-desktop=darwin] .product-frame .app-shell:has(> .sidebar[data-collapsed="true"]) > * { -webkit-app-region:no-drag; }
 /* Drag regions ignore what is drawn over them, so a dialog, menu or popover over a header would lose its clicks
    (e.g. a dialog's close button). While any of them is open, nothing drags the window. */
 html[data-desktop=darwin]:has(:is([role=dialog], [role=alertdialog], [role=menu], [role=listbox], [data-radix-popper-content-wrapper])) * { -webkit-app-region:no-drag !important; }
+
+/* Keep the titlebar button outside native drag regions. */
+html[data-desktop=darwin] .product-frame .sidebar.area-sidebar::before,
+html[data-desktop=darwin] .product-frame .app-shell:has(> .sidebar[data-collapsed="true"])::after { content:""; position:absolute; top:0; left:120px; right:0; height:40px; -webkit-app-region:drag; }
+html[data-desktop=darwin]:has(:is([role=dialog], [role=alertdialog], [role=menu], [role=listbox], [data-radix-popper-content-wrapper])) .product-frame .sidebar.area-sidebar::before,
+html[data-desktop=darwin]:has(:is([role=dialog], [role=alertdialog], [role=menu], [role=listbox], [data-radix-popper-content-wrapper])) .product-frame .app-shell::after { -webkit-app-region:no-drag !important; }

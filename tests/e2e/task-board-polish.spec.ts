@@ -74,7 +74,24 @@ test('board keyboard moves handle rejection and terminal reopen without starting
 });
 test('mac titlebar slots preserve accessible sidebar controls and no repeated branding',async({page})=>{
  await page.addInitScript(()=>Object.defineProperty(window,'mandalaDesktop',{value:{platform:'darwin'}}));
- await page.goto('/tasks');await expect(page.locator('.workspace-brand')).toHaveCount(0);
+ await page.goto('/tasks');
+ // Chromium clicks alone do not exercise Electron's native hit-test. Read the
+ // intended drag regions directly, even while an overlay disables all drag.
+ const regions=await page.evaluate(()=>{
+  const rules=[...document.styleSheets].flatMap(sheet=>{try{return [...sheet.cssRules];}catch{return [];}});
+  const normalize=(selector:string)=>selector.replace(/[\"'\s]/g,'');
+  const values=(selector:string)=>rules.flatMap(rule=>rule instanceof CSSStyleRule&&normalize(rule.selectorText)===normalize(selector)?
+   [rule.style.getPropertyValue('app-region')||rule.style.getPropertyValue('-webkit-app-region')]:[]);
+  const sidebar='html[data-desktop=darwin] .product-frame .sidebar.area-sidebar';
+  const collapsed='html[data-desktop=darwin] .product-frame .app-shell:has(> .sidebar[data-collapsed="true"])';
+  return {sidebar:values(sidebar),collapsed:values(collapsed),windowDrag:values(sidebar+'::before, '+collapsed+'::after')};
+ });
+ expect(regions.sidebar.length).toBeGreaterThan(0);
+ expect(regions.collapsed.length).toBeGreaterThan(0);
+ expect(regions.sidebar).not.toContain('drag');
+ expect(regions.collapsed).not.toContain('drag');
+ expect(regions.windowDrag).toContain('drag');
+ await expect(page.locator('.workspace-brand')).toBeHidden();
  const toggle=page.locator('#desktop-titlebar-left').getByRole('button',{name:'收起侧栏',exact:true});await expect(toggle).toBeVisible();await toggle.click();
  await expect(page.locator('.sidebar')).toHaveAttribute('data-collapsed','true');await page.getByRole('button',{name:'展开侧栏',exact:true}).click();
  await expect(page.locator('.sidebar')).toHaveAttribute('data-collapsed','false');
