@@ -13,6 +13,38 @@ test('preserves the retired sidebar preference when saving existing settings',()
  writeDesktopPreference(home,'mana-language','zh-CN');
  expect(JSON.parse(readFileSync(join(home,'desktop-preferences.json'),'utf8')).values).toEqual({'mana-sidebar-more':'false','mana-language':'zh-CN'});
 });
+test.each(['list','board'])('upgrades the old task view %s and saves other preferences without resetting them',(view)=>{
+ const home=mkdtempSync(join(tmpdir(),'device-prefs-'));homes.push(home);
+ const path=join(home,'desktop-preferences.json');
+ const before=JSON.stringify({version:1,values:{'mana-progress-view-v2':view,'mana-language':'en','mana-content-width':'wide'}});
+ writeFileSync(path,before);
+ expect(readDesktopPreferences(home)).toEqual({'mana-progress-view':view,'mana-language':'en','mana-content-width':'wide'});
+ expect(readFileSync(path,'utf8')).toBe(before);
+ writeDesktopPreference(home,'mana-language','zh-CN');
+ expect(JSON.parse(readFileSync(path,'utf8')).values).toEqual({'mana-progress-view':view,'mana-language':'zh-CN','mana-content-width':'wide'});
+});
+test.each([
+ [{ 'mana-progress-view-v2':'board','mana-progress-view':'list' },{'mana-progress-view':'board'}],
+ [{ 'mana-progress-view-v2':'invalid-old-view','mana-progress-view':'list' },{'mana-progress-view':'list'}],
+ [{ 'mana-progress-view-v2':'invalid-old-view' },{}],
+])('prefers the old explicit selection over obsolete defaults without promoting an unrecognized value (%j)',(values,expected)=>{
+ const home=mkdtempSync(join(tmpdir(),'device-prefs-'));homes.push(home);
+ const path=join(home,'desktop-preferences.json');
+ writeFileSync(path,JSON.stringify({version:1,values}));
+ expect(readDesktopPreferences(home)).toEqual(expected);
+ writeDesktopPreference(home,'mana-language','en');
+ expect(JSON.parse(readFileSync(path,'utf8')).values).toEqual({...expected,'mana-language':'en'});
+});
+test('does not open the preference write allowlist or overwrite other invalid stored entries during migration',()=>{
+ const home=mkdtempSync(join(tmpdir(),'device-prefs-'));homes.push(home);
+ const path=join(home,'desktop-preferences.json');
+ expect(()=>writeDesktopPreference(home,'mana-progress-view-v2','list')).toThrow();
+ for(const values of [{'mana-progress-view-v2':false},{'mana-progress-view-v2':'list','unrecognized-key':'value'}]){
+  const before=JSON.stringify({version:1,values});writeFileSync(path,before);
+  expect(()=>writeDesktopPreference(home,'mana-language','en')).toThrow();
+  expect(readFileSync(path,'utf8')).toBe(before);
+ }
+});
 test('every allowed UI preference survives a new origin and a new adapter',()=>{
  const home=mkdtempSync(join(tmpdir(),'device-prefs-'));homes.push(home);
  const native={read:()=>readDesktopPreferences(home),write:(key:string,value:string|null)=>writeDesktopPreference(home,key,value)};
