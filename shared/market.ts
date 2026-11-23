@@ -11,6 +11,8 @@ export const marketSources = [
 ] as const;
 export type MarketSourceId = string;
 export const marketSourceOf = (catalogId: string): MarketSourceId => catalogId.startsWith("plugin:") ? pluginSourceId(pluginIdentity(catalogId).repository) : catalogId.startsWith("theme:") ? "mandala-themes" : catalogId.startsWith("language:") ? "mandala-languages" : catalogId.startsWith("pet:") ? "mandala-pets" : catalogId.startsWith("skill:github:") ? catalogId.slice(6).split("/").slice(0, 2).join("/") : catalogId.startsWith("skill:clawhub/") ? "clawhub" : catalogId.startsWith("mcp:") ? "mcp-registry" : "anthropic";
+// ClawHub publisher handles are URL path segments; reject dot segments explicitly.
+export const clawHubCatalogIdPattern = /^skill:clawhub\/(?!\.{1,2}\/)([A-Za-z0-9_.-]{1,100})\/([A-Za-z0-9_-]{1,100})$/;
 export const marketSorts = ["default", "downloads", "stars", "updated"] as const;
 export type MarketSort = typeof marketSorts[number];
 export type MarketKind = "skill" | "mcp" | "theme" | "language" | "pet" | "plugin";

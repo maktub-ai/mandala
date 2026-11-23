@@ -33,6 +33,46 @@ it("lists and searches owner-qualified ClawHub identities, including search entr
   expect((await market.search("skill", "sample", "", "clawhub")).items[0].catalogId).toBe(listed.items[0].catalogId);
   expect(fetcher.mock.calls.some(([url]) => url.includes("nonSuspiciousOnly=true"))).toBe(true);
 });
+it("installs and persists a Skill from a dotted publisher", async () => {
+  const publisher = "taskfuel.ai", catalogId = "skill:clawhub/taskfuel.ai/sample";
+  const source = vi.fn(async (input: string) => {
+    if (new URL(input).pathname.endsWith("/skills/sample")) return Response.json({
+      skill: { slug: "sample" }, owner: { handle: publisher }, latestVersion: { version: "1.0.0" },
+    });
+    return fetcher(input);
+  });
+  const market = createMarket(home, source);
+  const detail = await market.detail(catalogId);
+  expect(detail).toMatchObject({ publisher, catalogId, sourceUrl: "https://clawhub.ai/taskfuel.ai/skills/sample" });
+  await market.install({ catalogId, version: detail.version, revision: (await readConfig(home)).revision, targets: [{ kind: "agent", id: "a" }] });
+  expect((await readConfig(home)).config.marketInstallations?.[0].catalogId).toBe(catalogId);
+  expect(source.mock.calls.every(([url]) => new URL(url).searchParams.get("owner") === publisher)).toBe(true);
+});
+it("skips isolated malformed directory rows without relaxing the trust filter or losing pagination", async () => {
+  const entries = [
+    { ownerHandle: "original", slug: "first" }, null, 42, {}, { slug: "missing-owner" },
+    { ownerHandle: ["array"], slug: "invalid" }, { ownerHandle: ".", slug: "one-dot" },
+    { ownerHandle: "..", slug: "two-dots" }, { ownerHandle: "bad/owner", slug: "invalid" },
+    { ownerHandle: "normal", slug: "bad.slug" }, { ownerHandle: "normal", slug: 123 },
+    { ownerHandle: "normal", slug: "blocked", trust: { installability: "blocked" } },
+    { ownerHandle: "normal", slug: "third-party", source: "other" },
+    { owner: { handle: "taskfuel.ai" }, slug: "last", latestVersion: { version: 123 } },
+  ];
+  const market = createMarket(home, async input => Response.json(new URL(input).pathname.endsWith("/search")
+    ? { results: entries } : { items: entries, nextCursor: "next-page" }));
+  const expected = ["skill:clawhub/original/first", "skill:clawhub/taskfuel.ai/last"];
+  const page = await market.search("skill", "", "", "clawhub");
+  expect(page.items.map(item => item.catalogId)).toEqual(expected);
+  expect(page.items[1].version).toBe("");
+  expect(page.nextCursor).toBe("next-page");
+  expect((await market.search("skill", "sample", "", "clawhub")).items.map(item => item.catalogId)).toEqual(expected);
+});
+it("rejects a wholly malformed response and preserves an intentionally empty directory", async () => {
+  const malformed = createMarket(home, async () => Response.json({items: [null, 123]}));
+  await expect(malformed.search("skill", "", "", "clawhub")).rejects.toThrow("invalid ClawHub directory response");
+  const empty = createMarket(home, async () => Response.json({items: []}));
+  expect((await empty.search("skill", "", "", "clawhub")).items).toEqual([]);
+});
 it("installs all pinned files with hashes, preserves requirements and removes them after unlink/uninstall", async () => {
   const market = createMarket(home, fetcher), detail = await market.detail("skill:clawhub/example/sample");
   expect(detail.description).toBe("A multiline skill description\nfor real catalog cards.");

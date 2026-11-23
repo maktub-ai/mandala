@@ -16,6 +16,7 @@ import { isRemoteAbsolutePath, isValidSshHost } from "../shared/execution-machin
 import { validateRuntimeArgs, validateRuntimeEnv } from "./runtime";
 import { validateManagedSkillContent } from "../shared/skills";
 import { isIdentityEmoji, projectIcons } from "../shared/identity";
+import { clawHubCatalogIdPattern } from "../shared/market";
 const mandalaAuthority = Symbol("mandala-config");
 const empty: Config = { version: 2, projects: [], agents: [] };
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -74,7 +75,9 @@ export function validateConfig(value: unknown): asserts value is Config {
     for (const item of c.marketInstallations) {
       if (!item || !/^market-[a-f0-9]{20}$/.test(item.id) || seen.has(item.id) ||
           !["skill", "mcp"].includes(item.kind) || typeof item.catalogId !== "string" ||
-          !(item.kind === "skill" ? /^skill:(?:anthropics\/[A-Za-z0-9_-]+|github:[A-Za-z0-9_-]{1,39}\/[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_-]{1,100}|clawhub\/[A-Za-z0-9_-]{1,100}\/[A-Za-z0-9_-]{1,100})$/ : /^mcp:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).test(item.catalogId) ||
+          !(item.kind === "skill"
+            ? clawHubCatalogIdPattern.test(item.catalogId) || /^skill:(?:anthropics\/[A-Za-z0-9_-]+|github:[A-Za-z0-9_-]{1,39}\/[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_-]{1,100})$/.test(item.catalogId)
+            : /^mcp:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(item.catalogId)) ||
           typeof item.name !== "string" || !/^[A-Za-z0-9_-]+$/.test(item.name) ||
           typeof item.description !== "string" || item.description.length > 5000 ||
           typeof item.version !== "string" || !item.version || item.version.length > 100 ||

@@ -1,25 +1,25 @@
 import { createHash } from "node:crypto";
 import { fromBuffer, type Entry } from "yauzl";
-import { sortMarketItems, type MarketSort, type MarketDetail, type MarketItem } from "../shared/market";
+import { clawHubCatalogIdPattern, sortMarketItems, type MarketSort, type MarketDetail, type MarketItem } from "../shared/market";
 import { marketBytes, safeMarketPath, skillHeader, type MarketFetcher } from "./market-source";
 
 const base = "https://clawhub.ai/api/v1";
 type File = { path: string; size: number; sha256: string };
 const identity = (id: string) => {
-  const match = id.match(/^skill:clawhub\/([A-Za-z0-9_-]{1,100})\/([A-Za-z0-9_-]{1,100})$/);
+  const match = id.match(clawHubCatalogIdPattern);
   if (!match) throw new Error("invalid ClawHub identity"); return { owner: match[1], slug: match[2] };
 };
 export function createClawHub(fetcher: MarketFetcher, json: (url: string, signal?: AbortSignal) => Promise<any>) {
   const manifests = new Map<string, File[]>();
-  const item = (entry: any): MarketItem => {
-    const owner = entry.ownerHandle ?? entry.owner?.handle, slug = entry.slug;
-    const catalogId = `skill:clawhub/${owner}/${slug}`; identity(catalogId);
+  const item = (entry: any, owner: string, slug: string): MarketItem => {
+    const catalogId = `skill:clawhub/${owner}/${slug}`;
+    const version = entry.latestVersion?.version ?? entry.version;
     const rawStats = entry.stats ?? entry.native?.skill?.stats ?? {};
     const stats = Object.fromEntries((["downloads", "stars", "installs", "comments"] as const).map(key => [key, rawStats[key] ?? (key === "downloads" ? entry.downloads : undefined)])
       .filter(([, value]) => Number.isSafeInteger(value) && value >= 0));
     const updatedAt = entry.updatedAt ?? entry.native?.skill?.updatedAt;
     return { catalogId, name: slug, kind: "skill", description: typeof entry.summary === "string" ? entry.summary.slice(0, 5000) : "",
-      version: entry.latestVersion?.version ?? (typeof entry.version === "string" ? entry.version : ""), publisher: owner,
+      version: typeof version === "string" ? version : "", publisher: owner,
       sourceUrl: `https://clawhub.ai/${owner}/skills/${slug}`, ...(Object.keys(stats).length ? { stats } : {}),
       ...(Number.isSafeInteger(updatedAt) && updatedAt > 0 && updatedAt <= 8640000000000000 ? { updatedAt } : {}) };
   };
@@ -27,9 +27,21 @@ export function createClawHub(fetcher: MarketFetcher, json: (url: string, signal
     const params = new URLSearchParams({ limit: "24", nonSuspiciousOnly: "true" });
     if (query) params.set("q", query); else { params.set("sort", sort === "default" ? "updated" : sort); if (cursor) params.set("cursor", cursor); }
     const result = await json(`${base}/${query ? "search" : "skills"}?${params}`, signal);
-    const entries = query ? result.results : result.items;
+    const entries = query ? result?.results : result?.items;
     if (!Array.isArray(entries) || entries.length > 200) throw new Error("invalid ClawHub directory response");
-    return { items: sortMarketItems(entries.filter(entry => (!entry.source || entry.source === "clawhub") && (!entry.trust || entry.trust.installability === "installable")).map(item), sort),
+    const items: MarketItem[] = [];
+    let malformed = 0;
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) { malformed++; continue; }
+      if (entry.source && entry.source !== "clawhub" || entry.trust && entry.trust.installability !== "installable") continue;
+      const owner = entry.ownerHandle ?? entry.owner?.handle, slug = entry.slug;
+      if (typeof owner !== "string" || typeof slug !== "string" || !clawHubCatalogIdPattern.test(`skill:clawhub/${owner}/${slug}`)) {
+        malformed++; continue;
+      }
+      items.push(item(entry, owner, slug));
+    }
+    if (malformed > 0 && malformed === entries.length) throw new Error("invalid ClawHub directory response");
+    return { items: sortMarketItems(items, sort),
       ...(!query && typeof result.nextCursor === "string" ? { nextCursor: result.nextCursor } : {}) };
   };
   const versionFiles = async (catalogId: string, version: string, signal?: AbortSignal) => {
@@ -60,7 +72,7 @@ export function createClawHub(fetcher: MarketFetcher, json: (url: string, signal
     try { header = skillHeader(readme); } catch { /* Invalid metadata must not hide the verified source contents. */ }
     const unsupported = ["malicious", "suspicious", "blocked"].includes(security) || result.moderation?.isSuspicious || result.moderation?.isMalwareBlocked
       ? "unsupported ClawHub security status" : !header ? "unsupported ClawHub Skill metadata" : undefined;
-    return { ...item({ ...result.skill, ownerHandle: owner, latestVersion: result.latestVersion }), ...header, readme, fileCount: files.length,
+    return { ...item({ ...result.skill, latestVersion: result.latestVersion }, owner, slug), ...header, readme, fileCount: files.length,
       ...(unsupported ? { unsupported } : {}) };
   };
   const download = async (info: MarketDetail) => {
