@@ -42,3 +42,21 @@ it('does not auto-suggest a runtime from a transport/version probe alone',async(
  expect(canSuggestRuntime({status:'ready',version:'fixture',diagnostics:{host:'local',executable:'executable',probe:'acp',auth:'not-verified'}})).toBe(false);
  expect(canSuggestRuntime({status:'ready',version:'fixture',diagnostics:{host:'local',executable:'executable',probe:'account',auth:'native-account-ready'}})).toBe(true);
 });
+
+it('checks every exact registered launcher and only demands a separate Claude executable when explicitly configured',async()=>{
+ const {runtimeCatalog,runtimeIds}=await import('../shared/runtimes');
+ const {diagnoseRuntimePrerequisites}=await import('../server/native-spawn');
+ const x=await fixture(),folder=x.env.PATH;
+ for(const id of runtimeIds) {
+  const command=runtimeCatalog[id].command;
+  expect(diagnoseRuntimePrerequisites(id,x.env)).toMatchObject({executable:'missing'});
+  const path=join(folder,command+(process.platform==='win32'?'.cmd':''));
+  await writeFile(path,'never executed',{mode:0o755});
+  expect(diagnoseRuntimePrerequisites(id,x.env)).toMatchObject({executable:'executable'});
+ }
+ expect(diagnoseRuntimePrerequisites('claude',x.env)).not.toHaveProperty('requiredDependency');
+ expect(diagnoseRuntimePrerequisites('claude',{...x.env,CLAUDE_CODE_EXECUTABLE:'./not-a-trusted-absolute-path'})).toMatchObject({requiredDependency:'claude-override-unavailable'});
+ expect(diagnoseRuntimePrerequisites('claude',{...x.env,CLAUDE_CODE_EXECUTABLE:x.path})).toMatchObject({requiredDependency:'claude-override-unavailable'});
+ await writeFile(x.path,'never executed',{mode:0o755});
+ expect(diagnoseRuntimePrerequisites('claude',{...x.env,CLAUDE_CODE_EXECUTABLE:x.path})).not.toHaveProperty('requiredDependency');
+});

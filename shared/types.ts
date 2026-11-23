@@ -189,6 +189,8 @@ export type CliStatus = {
     probe: 'failed' | 'version-only' | 'rpc' | 'acp' | 'account' | 'gateway-session';
     auth: 'not-verified' | 'login-required' | 'native-account-ready' | 'configuration-required';
     standaloneClaude?: boolean;
+    requiredDependency?: 'claude-override-unavailable';
+    capabilityIssue?: 'durable-resume-unsupported';
   };
 };
 

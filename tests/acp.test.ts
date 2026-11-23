@@ -108,8 +108,11 @@ it('cancels a prompt without claiming success and rejects unsupported resume/inp
 });
 
 it('rejects agents without durable session loading before starting a chat',async()=>{
- const {client}=await fixture(false);
+ const {client,sessions,prompts}=await fixture(false);
  try {
+  expect(await client.getStatus(true)).toMatchObject({status:'unavailable',capabilityIssue:'durable-resume-unsupported'});
+  expect(await client.listModels()).toEqual([]);
+  expect(sessions).toHaveLength(0);expect(prompts).toHaveLength(0);
   await expect(client.resumeThread('old')).rejects.toThrow(/resume/);
   await expect(client.startThread({cwd:fixtureCwd,instructions:''})).rejects.toThrow(/resume/);
  } finally {await client.close();}
@@ -237,7 +240,7 @@ it('interrupts a pending DSH whole-turn grant without sending its prompt',async(
 
 for(const cli of ['hermes','openclaw'] as const){
  it.each(['default','strict'] as const)(`${cli} refuses %s turns before dispatch when the whole-turn grant is denied`,async mode=>{
-  const {client,approvals,events,prompts}=await fixture(true,false,undefined,undefined,false,false,false,cli);
+  const {client,approvals,events,prompts}=await fixture(true,false,undefined,undefined,cli==='openclaw',false,false,cli);
   try{const id=await client.startThread({cwd:fixtureCwd,instructions:''});await client.startTurn(id,'structured-tool',mode);
    await expect.poll(()=>approvals.length,{timeout:5000}).toBe(1);expect(prompts).toEqual([]);expect(approvals[0].params.wholeTurnApproval).toBe(true);
    client.replyApproval(approvals[0].id,nativeApprovalResponse(approvals[0],'reject'));
@@ -245,7 +248,7 @@ for(const cli of ['hermes','openclaw'] as const){
   }finally{await client.close();}
  });
  it(`${cli} dispatches once after whole-turn approval and stop prevents a pending dispatch`,async()=>{
-  const {client,approvals,events,prompts}=await fixture(true,false,undefined,undefined,false,false,false,cli);
+  const {client,approvals,events,prompts}=await fixture(true,false,undefined,undefined,cli==='openclaw',false,false,cli);
   try{const id=await client.startThread({cwd:fixtureCwd,instructions:''});await client.startTurn(id,'structured-tool','strict');
    await expect.poll(()=>approvals.length,{timeout:5000}).toBe(1);expect(prompts).toEqual([]);
    client.replyApproval(approvals[0].id,nativeApprovalResponse(approvals[0],'approve'));
@@ -256,7 +259,7 @@ for(const cli of ['hermes','openclaw'] as const){
  });
 }
 it.each(['hermes','openclaw'] as const)('rejects %s session MCP before any grant can survive removal and adapter restart',async cli=>{
- const {client,sessions}=await fixture(true,false,undefined,undefined,false,false,false,cli);
+ const {client,sessions}=await fixture(true,false,undefined,undefined,cli==='openclaw',false,false,cli);
  const mcp=[{name:'bound',transport:'stdio' as const,command:'node',args:[]}];
  try{
   await expect(client.startThread({cwd:fixtureCwd,instructions:'',mcp})).rejects.toThrow(/session.*MCP/);expect(sessions).toEqual([]);
@@ -280,7 +283,7 @@ it.each(['empty-native-error','gateway-interruption'])('does not report OpenClaw
 });
 
 it.each(['hermes','openclaw'] as const)('%s exposes Gateway setup failures in model discovery',async cli=>{
- const {client}=await fixture(true,false,undefined,undefined,false,false,false,cli,true);
+ const {client}=await fixture(true,false,undefined,undefined,cli==='openclaw',false,false,cli,true);
  try{await expect(client.listModels()).rejects.toThrow(/Gateway.*native.*login/);}finally{await client.close();}
 });
 
@@ -395,3 +398,28 @@ it('aborting a stalled handshake also reaps a native process that ignores SIGTER
   await result;await rm(directory,{recursive:true,force:true});
  }
 },15000);
+
+it('rejects a missing explicitly configured Claude binary before starting its ACP adapter',async()=>{
+ const {startAcp}=await import('../server/acp');
+ await expect(startAcp('claude',{cwd:fixtureCwd,env:{CLAUDE_CODE_EXECUTABLE:join(fixtureCwd,'mandala-fixture-missing-claude-binary')},onEvent(){},onApproval(){},onExit(){}})).rejects.toThrow(/configured Claude Code executable is not runnable/);
+});
+
+it('does not offer legacy-load-only OpenClaw for durable conversations',async()=>{
+ const {client,sessions,prompts}=await fixture(true,false,undefined,undefined,false,false,false,'openclaw');
+ try{
+  expect(await client.getStatus(true)).toMatchObject({status:'unavailable',capabilityIssue:'durable-resume-unsupported'});
+  expect(await client.listModels()).toEqual([]);
+  await expect(client.startThread({cwd:fixtureCwd,instructions:''})).rejects.toThrow(/OpenClaw.*strict session resume/);
+  await expect(client.resumeThread('old')).rejects.toThrow(/OpenClaw.*strict session resume/);
+  expect(sessions).toHaveLength(0);expect(prompts).toHaveLength(0);
+ } finally {await client.close();}
+});
+
+it('still offers legacy durable session loading for non-OpenClaw ACP',async()=>{
+ const {client,sessions}=await fixture(true);
+ try{
+  expect(await client.getStatus(true)).toEqual({status:'ready',version:'1.0'});
+  expect(await client.startThread({cwd:fixtureCwd,instructions:''})).toBe('session-1');
+  expect(sessions).toHaveLength(1);
+ } finally {await client.close();}
+});

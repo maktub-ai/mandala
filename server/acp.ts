@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import {join} from 'node:path';
 import {claudeNativeEnv} from './runtime-credentials';
-import { spawn,resolveNativeCli } from './native-spawn';
+import { spawn,resolveNativeCli,diagnoseRuntimePrerequisites } from './native-spawn';
 import type { CodexClient, CodexOptions } from './codex';
 import type { Cli, McpServer, ApprovalMode, ModelChoice } from '../shared/types';
 import { runtimeCatalog,runtimeLabel,supportsSystemTasks } from '../shared/runtimes';
@@ -148,6 +148,10 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
  try {options.signal?.throwIfAborted();initialized=await bounded(runtime.doctor(),setupTimeout);if(!initialized.ok)throw new Error(initialized.details?.at(-1)??initialized.message);}
  catch(error){await close();throw new Error(runtimeError(String(error),stderr,options.env??{}),{cause:error});}
  const capabilities=initialized.agentCapabilities;
+ const strictResume=options.runtimeCli==='openclaw';
+ const nativeResume=Boolean(capabilities?.sessionCapabilities?.resume);
+ const durableResume=nativeResume||(!strictResume&&Boolean(capabilities?.loadSession));
+ const strictResumeMessage='OpenClaw must support strict session resume; upgrade the native CLI.';
  const mcpServers=(servers:McpServer[]=[]):AcpMcpServer[]=>{
   if(servers.length&&(options.runtimeCli==='hermes'||options.runtimeCli==='openclaw'))throw new Error(`${runtimeLabel(options.runtimeCli)} session MCP bindings are unavailable in Mandala. ${options.runtimeCli==='hermes'?'The native Gateway cannot reliably revoke an empty binding set on resume.':'OpenClaw ACP does not support per-session MCP.'} Remove the session bindings and manage MCP in the native Gateway.`);
   return servers.map(server=>{
@@ -189,8 +193,13 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
  };
  return {
   prepareTurn,
-  async getStatus(){if(gatewayBacked)await ensureSession();return {status:'ready',version:initialized.agentInfo?.version??null};},
+  async getStatus(){
+   if(!options.safeSystem&&!durableResume)return {status:'unavailable',version:initialized.agentInfo?.version??null,capabilityIssue:'durable-resume-unsupported'};
+   if(gatewayBacked)await ensureSession();
+   return {status:'ready',version:initialized.agentInfo?.version??null};
+  },
   async listModels(){
+   if(!options.safeSystem&&!durableResume)return [];
    if(options.runtimeCli==='openclaw'){await ensureSession();return options.nativeModel?[options.nativeModel]:[];}
    await ensureSession();
    const setting=configuration.find(option=>option.category==='model');
@@ -200,7 +209,7 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
   async startThread(input){
    if(closed||active)throw new Error('ACP session is unavailable or busy');
    if(input.safeSystem&&!options.safeSystem)throw new Error('Restricted ACP must be configured before launch');
-   if(!options.safeSystem&&!capabilities?.loadSession&&!capabilities?.sessionCapabilities?.resume)throw new Error('ACP agent must support session resume for durable chats');
+   if(!options.safeSystem&&!durableResume)throw new Error(strictResume?strictResumeMessage:'ACP agent must support session resume for durable chats');
    const result=await setup(attach(input.cwd,options.safeSystem?[]:mcpServers(input.mcp)));
    sessionId=result.sessionId;instructions=input.instructions;configure(result);
    await setModel(input.model);return sessionId;
@@ -209,9 +218,7 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
    if(closed||active)throw new Error('ACP turn is still running or the session is closed');
    const servers=mcpServers(mcp);
    if(id!==sessionId){
-    if(!capabilities?.loadSession&&!capabilities?.sessionCapabilities?.resume)throw new Error('ACP agent cannot resume this session; start a new chat');
-    const openclaw=options.runtimeCli==='openclaw';
-    if(openclaw&&!capabilities?.sessionCapabilities?.resume)throw new Error('OpenClaw must support strict session resume; upgrade the native CLI.');
+    if(!durableResume)throw new Error(strictResume?strictResumeMessage:'ACP agent cannot resume this session; start a new chat');
     const result=await attach(options.cwd,options.safeSystem?[]:servers,id);
     sessionId=id;configure(result);
    }
@@ -267,7 +274,11 @@ export async function startAcp(cli:Cli,options:CodexOptions):Promise<CodexClient
  if(cli==='hermes'&&({...process.env,...options.env}).HERMES_TUI_GATEWAY_URL?.trim())throw new Error('Hermes Gateway must run on the selected execution machine. Use Mandala SSH execution on its host with a native local Gateway profile; HERMES_TUI_GATEWAY_URL overrides are unavailable.');
  const native=cli==='openclaw'?await openClawNativeSettings(options):undefined;
  let env={...options.env};
- if(cli==='claude')env=await claudeNativeEnv(env);
+ if(cli==='claude'){
+  if(diagnoseRuntimePrerequisites(cli,{...process.env,...env}).requiredDependency)
+   throw new Error('The configured Claude Code executable is not runnable. Correct or remove CLAUDE_CODE_EXECUTABLE in the execution environment.');
+  env=await claudeNativeEnv(env);
+ }
  if(options.safeSystem&&cli==='gemini'){
   const settings=join(options.cwd,'mandala-system-settings.json');
   await writeFile(settings,JSON.stringify({tools:{core:[],discoveryCommand:'',callCommand:''},admin:{mcp:{enabled:false},extensions:{enabled:false},skills:{enabled:false}},hooksConfig:{enabled:false},telemetry:{enabled:false}}),{mode:0o600});

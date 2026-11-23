@@ -22,3 +22,15 @@ it('explains that a standalone Claude installation does not supply the ACP adapt
   }));
   expect(html).toContain('separate ACP adapter is not runnable');
 });
+
+it('explains verified incompatibility without treating an ACP handshake as runnable',()=>{
+ const html=renderToStaticMarkup(createElement(RuntimeProbeSummary,{status:{status:'unavailable',version:'1.0',diagnostics:{...diagnostics,executable:'executable',standaloneClaude:false,capabilityIssue:'durable-resume-unsupported'}}}));
+ expect(html).toContain('cannot resume conversations');
+ expect(html).not.toContain('Connection check passed');
+});
+it('explains the actionable Claude override without showing a configured path',()=>{
+ const html=renderToStaticMarkup(createElement(RuntimeProbeSummary,{status:{status:'unavailable',version:null,diagnostics:{...diagnostics,requiredDependency:'claude-override-unavailable'}}}));
+ expect(html).toContain('CLAUDE_CODE_EXECUTABLE');
+ expect(html).toContain('bundled executable');
+ expect(html).not.toContain('adapter is not runnable');
+});

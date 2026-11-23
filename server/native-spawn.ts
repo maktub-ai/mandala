@@ -1,3 +1,5 @@
+import {runtimeCatalog} from '../shared/runtimes';
+import type {Cli,CliStatus} from '../shared/types';
 import { windowsSystemBinary } from '../cli/windows-system.mjs';
 import { productEnv } from '../cli/product-env.mjs';
 import { accessSync, constants, lstatSync, statSync } from 'node:fs';
@@ -29,6 +31,16 @@ export function diagnoseNativeCli(command: string, env: NodeJS.ProcessEnv = proc
     }catch(error){if(!['ENOENT','ENOTDIR'].includes((error as NodeJS.ErrnoException).code??''))problem='blocked';}
   }
   return {state:problem};
+}
+// Only an explicitly selected Claude executable is mandatory. The vendor
+// adapter otherwise resolves its bundled/adjacent Claude executable itself.
+export function diagnoseRuntimePrerequisites(cli:Cli,env:NodeJS.ProcessEnv=process.env):Pick<NonNullable<CliStatus['diagnostics']>,'executable'|'standaloneClaude'|'requiredDependency'> {
+ const executable=diagnoseNativeCli(runtimeCatalog[cli].command,env).state;
+ if(cli!=='claude')return {executable};
+ const standaloneClaude=executable!=='executable'&&diagnoseNativeCli('claude',env).state==='executable';
+ const override=env.CLAUDE_CODE_EXECUTABLE;
+ const requiredDependency=override&&(!(isAbsolute(override)||process.platform==='win32'&&win32.isAbsolute(override)||/^[a-z0-9_.-]+$/i.test(override))||diagnoseNativeCli(override,env).state!=='executable')?'claude-override-unavailable' as const:undefined;
+ return {executable,...standaloneClaude?{standaloneClaude}:{},...requiredDependency?{requiredDependency}:{}};
 }
 export function resolveNativeCli(command: string, env: NodeJS.ProcessEnv = process.env): string {
   const found=diagnoseNativeCli(command,env);

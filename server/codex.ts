@@ -92,7 +92,7 @@ export type CodexOptions = {
 export interface CodexClient {
   inspectContext?(nativeId:string):Promise<{settled:boolean;completedCompactions?:string[]}>;
   compactThread?(nativeId:string):Promise<'started'|'completed'|'noop'|'unsupported'>;
-  getStatus(explain?:boolean): Promise<CliStatus & {nativeAccountPresent?:boolean}>;
+  getStatus(explain?:boolean): Promise<CliStatus & {nativeAccountPresent?:boolean;capabilityIssue?:NonNullable<CliStatus['diagnostics']>['capabilityIssue']}>;
   requiresRuntimeReload?(runtimeMailboxPath?:string):Promise<boolean>;
   assertReloadable?(nativeId:string):Promise<void>;
   inspectInvocation?(identity: RunIdentity): Promise<"running" | "succeeded" | "failed" | "unknown">;

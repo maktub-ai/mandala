@@ -1,5 +1,4 @@
-import {diagnoseNativeCli} from './native-spawn';
-import {runtimeCatalog as diagnosticCatalog} from '../shared/runtimes';
+import {diagnoseRuntimePrerequisites} from './native-spawn';
 import { createConversationApprovals, type ConversationApprovalScope } from './conversation-approvals';
 import { supportsConversationApproval } from '../shared/approvals';
 import {mandalaDirectory,mandalaRoutingDirectory} from './mandala-directory';
@@ -1837,9 +1836,7 @@ export function createSessionManager(
       try {
         const options=runtimeOptions(cli,context,config,scope);
         if(explain&&diag.host==='local'){
-          const env={...process.env,...options.env};
-          diag.executable=diagnoseNativeCli(diagnosticCatalog[cli].command,env).state;
-          if(cli==='claude'&&diag.executable!=='executable')diag.standaloneClaude=diagnoseNativeCli('claude',env).state==='executable';
+          Object.assign(diag,diagnoseRuntimePrerequisites(cli,{...process.env,...options.env}));
         }
         client = await startClient(cli,{
           cwd,
@@ -1851,7 +1848,8 @@ export function createSessionManager(
           onExit() {},
           ...(cli === "omp" ? { ephemeral: true } : {}),
         },context,catalogId,config);
-        const {nativeAccountPresent,...value}=await client.getStatus(explain);
+        const {nativeAccountPresent,capabilityIssue,...value}=await client.getStatus(explain);
+        if(explain&&capabilityIssue){diag.capabilityIssue=capabilityIssue;diag.probe='acp';}
         if(explain&&value.status!=='unavailable'){
           diag.probe=cli==='codex'?'account':cli==='cursor'||cli==='antigravity'?'version-only':cli==='omp'||cli==='pi'?'rpc':cli==='hermes'||cli==='openclaw'?'gateway-session':'acp';
           if(cli==='codex')diag.auth=nativeAccountPresent?'native-account-ready':value.status==='login-required'?'login-required':'not-verified';

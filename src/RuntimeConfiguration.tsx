@@ -39,8 +39,13 @@ export default function RuntimeConfiguration({ config, savedConfig, onDraftChang
   useEffect(() => {
     if (!cli) return;
     let active = true; setStatus(undefined); setModels([]); setProbeError('');
-    api<CliStatus>('/cli/status?scope=runtime&explain=1&cli=' + cli).then(result => { if (active) setStatus(result); }).catch(e => { if (active) { setStatus({ status: 'unavailable', version: null }); setProbeError(e.message); } });
-    api<ModelChoice[]>('/models?scope=runtime&cli=' + cli).then(result => { if (active) setModels(result); }).catch(e => { if (active) setProbeError(e.message); });
+    api<CliStatus>('/cli/status?scope=runtime&explain=1&cli=' + cli).then(result => {
+      if (!active) return;
+      setStatus(result);
+      // Native model enumeration may create a provider session. Only request
+      // it after the selected CLI has passed its own setup check.
+      if (result.status==='ready') void api<ModelChoice[]>('/models?scope=runtime&cli=' + cli).then(models => { if (active) setModels(models); }).catch(e => { if (active) setProbeError(e.message); });
+    }).catch(e => { if (active) { setStatus({ status: 'unavailable', version: null }); setProbeError(e.message); } });
     return () => { active = false; };
   }, [cli, JSON.stringify(savedConfig.runtimeDefaults), refresh]);
   const save = async (enable: boolean) => {
