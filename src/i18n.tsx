@@ -82,9 +82,14 @@ const errors: Record<string, Message> = {
 function translatedError(language: Language, message: string, pack?: LanguagePack) {
   const ssh = sshErrorText(language, message);
   if (ssh) return ssh;
-  if (/already has an active writer/i.test(message)) return language !== "zh-CN"
-    ? "This native thread is still held by another writer. Wait for its execution to finish, or use the saved request in a new chat.\n" + message
-    : "此原生线程仍被其他执行进程占用。可等待原执行结束，或将已保存的请求用于新对话。\n" + message;
+  if (message === "Codex conversation is open in another client") return language !== "zh-CN"
+    ? "Another Codex client is holding this conversation open. Close the conversation in that client before retrying, or use the saved request in a new Mandala chat."
+    : "另一个 Codex 客户端仍占用此对话。请先在那边关闭对话再重试，或将已保存的请求用于 Mandala 的新对话。";
+  // Earlier versions stored Codex's raw error message. Suppress its native ID;
+  // that message alone does not prove the attempted turn was never submitted.
+  if (/^thread [a-zA-Z0-9_-]+ already has an active writer$/i.test(message)) return language !== "zh-CN"
+    ? "Another Codex client is holding this conversation open."
+    : "另一个 Codex 客户端仍占用此对话。";
   if (Object.hasOwn(errors, message)) return translate(language, errors[message], {}, pack);
   const reserved = message.match(/^Reserved (codex|omp) runtime argument: (.+)$/);
   const environment = message.match(/^Reserved runtime environment variable: (.+)$/);

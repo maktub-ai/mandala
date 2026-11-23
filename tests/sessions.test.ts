@@ -6,6 +6,7 @@ import { openStore, type Store } from "../server/store";
 import { createSessionManager, type SessionManager } from "../server/sessions";
 import type { CodexOptions, CodexClient } from "../server/codex";
 import type { Config } from "../shared/types";
+import { DomainError } from "../shared/workspace-contracts";
 import type { OmpOptions } from "../server/omp";
 import { createKnowledge, updateKnowledge } from "../server/knowledge";
 import { getUsage } from '../server/usage';
@@ -314,6 +315,42 @@ it("selects_model_without_changing_agent_and_lists_without_a_turn", async () => 
   expect(model).toBe("chosen-model");
   expect(config.agents[0].models.codex).toBe("default-model");
 });
+it("keeps the existing native thread and one saved draftable request when Codex rejects resume before submission", async () => {
+  await manager.close();
+  const close = vi.fn();
+  manager = createSessionManager(store, async () => config, async o => ({
+    ...await factory(o),
+    resumeThread: async () => { throw new DomainError("native_thread_busy", 409, "Codex conversation is open in another client"); },
+    close,
+  }));
+  const chat = await manager.create("p", "a");
+  store.updateConversation(chat.id, { nativeId: "native-owned-elsewhere" });
+  await expect(manager.send(chat.id, "Do not duplicate this request")).rejects.toMatchObject({code:"native_thread_busy", status:409});
+  expect(turns).toEqual([]);
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(store.getConversation(chat.id)).toMatchObject({nativeId:"native-owned-elsewhere", status:"error"});
+  const events = store.listEvents(chat.id, 0);
+  expect(events.filter(event=>event.kind==="user")).toEqual([
+    expect.objectContaining({data:expect.objectContaining({text:"Do not duplicate this request"})}),
+  ]);
+  expect(events.filter(event=>event.kind==="error")).toEqual([
+    expect.objectContaining({data:expect.objectContaining({code:"native_thread_busy", nativeTurnSubmitted:false})}),
+  ]);
+});
+
+it("does not mark an uncertain rejected turn as safe to resend based on error wording", async () => {
+  await manager.close();
+  manager = createSessionManager(store, async () => config, async o => ({
+    ...await factory(o),
+    startTurn: async () => { throw new Error("thread other-id already has an active writer"); },
+  }));
+  const chat = await manager.create("p", "a");
+  await expect(manager.send(chat.id, "Already attempted")).rejects.toThrow("active writer");
+  const error=store.listEvents(chat.id, 0).find(event=>event.kind==="error")!;
+  expect(error.data).toMatchObject({nativeTurnSubmitted:true});
+  expect(error.data).not.toHaveProperty("code", "native_thread_busy");
+});
+
 it.each([false, true])("keeps accepted Stop authoritative when a pending native request rejects (stopped=%s)", async stopped => {
   await manager.close();
   let rejectTurn!: (error: Error) => void, entered!: () => void;

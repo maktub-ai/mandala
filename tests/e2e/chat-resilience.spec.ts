@@ -131,8 +131,11 @@ test('a lost interrupt-and-send receipt is checked without repeating the interru
 
 test('writer conflict retains the submitted request and attachment across reload and copies them into a new draft', async ({ page, request }) => {
   const { config, revision } = await (await request.get('/api/config')).json();
-  config.agents[0].runtime = { codex: { args: ['--resume-conflict'] } };
-  await request.put('/api/config', { data: { config, revision } });
+  const first = config.agents.find((agent: {id: string}) => agent.id === 'first');
+  expect(first).toBeDefined();
+  first.runtime = { codex: { args: ['--resume-conflict'] } };
+  const configured = await request.put('/api/config', { data: { config, revision } });
+  expect(configured.ok(), await configured.text()).toBe(true);
   const chat = await (await request.post('/api/conversations', { data: { projectId: 'resilience', agentId: 'first' } })).json();
   await request.post(`/api/conversations/${chat.id}/messages`, { data: { text: 'Establish native thread' } });
   await expect.poll(async () => (await (await request.get(`/api/conversations/${chat.id}`)).json()).conversation.status).toBe('idle');
@@ -143,7 +146,8 @@ test('writer conflict retains the submitted request and attachment across reload
   await expect(page.locator('.composer-attachments')).toContainText('keep-me.txt');
   await composer.fill('Retain my failed request');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
-  await expect(page.locator('.message.error')).toContainText('active writer');
+  await expect(page.getByRole('alert').filter({hasText:'另一个 Codex 客户端仍占用此对话'})).toBeVisible();
+  await expect(page.getByText('Fixture reply: Retain my failed request', {exact:true})).toHaveCount(0);
   await expect(page.locator('.message.user').last()).toContainText('Retain my failed request');
   await expect(composer).toHaveValue('');
   await page.reload();
@@ -158,7 +162,12 @@ test('writer conflict retains the submitted request and attachment across reload
   await expect(composer).toHaveValue('Retain my failed request');
   await expect(page.locator('.composer-attachments')).toContainText('keep-me.txt');
   expect(new URL(page.url()).searchParams.has('conversation')).toBe(false);
-  expect((await(await request.get('/api/drafts/entry?scope='+sourceScope)).json()).draft).toEqual(originalDraft);await page.reload();await expect(composer).toHaveValue('Retain my failed request');await expect(page.locator('.composer-attachments')).toContainText('keep-me.txt');
+  expect((await(await request.get('/api/drafts/entry?scope='+sourceScope)).json()).draft).toEqual(originalDraft);
+  const draftScope=encodeURIComponent(JSON.stringify({kind:'chat',conversationId:'',projectId:'resilience',agentId:'first'}));
+  await expect.poll(async () => (await (await request.get('/api/drafts/entry?scope='+draftScope)).json()).draft?.text).toBe('Retain my failed request');
+  await page.reload();
+  await expect(composer).toHaveValue('Retain my failed request');
+  await expect(page.locator('.composer-attachments')).toContainText('keep-me.txt');
   expect((await (await request.get(`/api/conversations/${chat.id}`)).json()).conversation.status).toBe('error');
 });
 

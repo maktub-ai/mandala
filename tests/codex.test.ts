@@ -38,6 +38,28 @@ it("passes_agent_instructions_and_parses_native_ids_and_models", async () => {
     cli.close();
   }
 });
+it("classifies a definite Codex resume writer conflict without exposing the native ID", async () => {
+  const cli = await connectCodex(createRpcClient(
+    spawn(process.execPath, ["tests/fixtures/fake-cli.mjs", "--resume-conflict"], { stdio: "pipe" }), {},
+  ));
+  try {
+    await expect(cli.resumeThread("native-owned-elsewhere")).rejects.toMatchObject({
+      code: "native_thread_busy", status: 409,
+      message: "Codex conversation is open in another client",
+    });
+  } finally { await cli.close(); }
+});
+
+it("does not classify a rejection against another thread as a writer conflict for this one", async () => {
+  const cli = await connectCodex({
+    async request(method) {
+      if (method === "initialize") return { userAgent: "codex/0.170.0" };
+      if (method === "thread/resume") throw new Error("thread different-id already has an active writer");
+      throw new Error("Unexpected request");
+    }, notify() {}, reply() {}, close() {},
+  });
+  await expect(cli.resumeThread("expected-id")).rejects.toThrow("thread different-id already has an active writer");
+});
 it("reports_native_login_requirement_without_exposing_account_identity", async () => {
   const cli = await connectCodex(
     createRpcClient(

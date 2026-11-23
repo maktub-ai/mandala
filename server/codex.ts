@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdtemp } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { createRpcClient } from "./rpc";
+import { createRpcClient, RpcResponseError } from "./rpc";
 import type { CliStatus, ModelChoice, McpServer, ApprovalMode } from "../shared/types";
 import type { RpcClient, RpcMessage } from "./rpc";
 import { runtimeError, validateRuntimeArgs } from "./runtime";
@@ -238,14 +238,22 @@ export async function connectCodex(rpc: RpcClient, cwd?: string, fullAccess = tr
       const permissions = fullAccess ? { selection: { sandbox: "danger-full-access" }, profiles: undefined, signature:undefined, needsMailboxPreparation: false } : await readPermissions(runtimeMailboxPath);
       // Restored tokenUsage notifications can arrive before the resume reply.
       onUsageEvent({method:'mandala/usageBaseline',params:{threadId,fresh:false,model}});
-      const result=await rpc.request("thread/resume", {
-        ...permissions.selection,
-        threadId,
-        ...(runtimeWorkspaceRoots ? { runtimeWorkspaceRoots } : {}),
-        ...(model ? { model } : {}),
-        ...(instructions !== undefined ? { developerInstructions: instructions } : {}),
-        config: { mcp_servers: { ...codexMcp(mcp ?? []), mandala_tasks: { command: process.execPath, args: ['--version'], enabled: false }, openmana_tasks: { command: process.execPath, args: ['--version'], enabled: false } }, ...(permissions.profiles ? { permissions: permissions.profiles } : {}) },
-      });
+      let result: Awaited<ReturnType<RpcClient["request"]>>;
+      try {
+        result = await rpc.request("thread/resume", {
+          ...permissions.selection,
+          threadId,
+          ...(runtimeWorkspaceRoots ? { runtimeWorkspaceRoots } : {}),
+          ...(model ? { model } : {}),
+          ...(instructions !== undefined ? { developerInstructions: instructions } : {}),
+          config: { mcp_servers: { ...codexMcp(mcp ?? []), mandala_tasks: { command: process.execPath, args: ['--version'], enabled: false }, openmana_tasks: { command: process.execPath, args: ['--version'], enabled: false } }, ...(permissions.profiles ? { permissions: permissions.profiles } : {}) },
+        });
+      } catch (error) {
+        if (error instanceof RpcResponseError && error.code === -32600 &&
+            error.message === `thread ${threadId} already has an active writer`)
+          throw new DomainError("native_thread_busy", 409, "Codex conversation is open in another client");
+        throw error;
+      }
       if (permissions.needsMailboxPreparation && runtimeMailboxPath)
         await prepareMailbox?.(runtimeMailboxPath, authorizedWorkspaceSandbox(result, runtimeMailboxPath, !!permissions.profiles));
       // Codex 0.160 accepts resume overrides but ignores them on loaded threads.

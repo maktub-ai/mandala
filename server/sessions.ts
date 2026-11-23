@@ -1262,7 +1262,12 @@ export function createSessionManager(
           current.generation !== submittedInvocation.generation)) return;
       if (closed) throw new Error("service closed");
       if (live.get(id) !== current || current.controller.signal.aborted) return;
-      const error = e as Error;
+      let error = e as Error;
+      const nativeThreadBusy = !turnSubmitted && before.cli === "codex" &&
+        (error as Partial<DomainError>).code === "native_thread_busy" && (error as Partial<DomainError>).status === 409;
+      // Remote runtime errors cross the SSH protocol as plain Errors with code/status.
+      if (nativeThreadBusy && !(error instanceof DomainError))
+        error = new DomainError("native_thread_busy", 409, "Codex conversation is open in another client");
       const reloadBlocked=backgroundNotConfirmed(error)&&!turnSubmitted;
       const recoveredReceipt=!turnSubmitted&&!!current.queuedInputId&&scheduler.recoverReceiptInput(current.queuedInputId,invocationId);
       const deferredReceipt=!turnSubmitted&&!recoveredReceipt&&inputSource?.kind==='coordination'&&!!current.queuedInputId&&
@@ -1273,7 +1278,7 @@ export function createSessionManager(
       if (memoryTrace && !memoryLoaded) appendEvent(id, "metadata", { ...memoryTrace, status: "failed",
         message: memoryReadFailed ? error.message : "CLI did not acknowledge memory instructions; retry this turn." });
       appendEvent(id, "error", { message: error.message, nativeTurnSubmitted: turnSubmitted,
-        ...(reloadBlocked?{code:(error as DomainError).code}:/already has an active writer/i.test(error.message)?{code:'native_thread_busy'}:{}) });
+        ...(reloadBlocked?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy'}:{}) });
       if (current.queuedInputId && !turnSubmitted && error instanceof DomainError && ["reference_changed", "invalid_references"].includes(error.code)) {
         scheduler.rejectUnsubmittedInput(current.queuedInputId);
         current.queuedInputId = undefined;
@@ -1299,7 +1304,7 @@ export function createSessionManager(
         if (chat(id).status !== "interrupted") state(id, current.stopRequested ? "interrupted" : "error");
       }
       if((recoveredReceipt||deferredReceipt)&&!current.stopRequested){state(id,'idle');queueMicrotask(()=>{void pump(id);});}
-      throw e;
+      throw error;
     } finally {
       if (!turnSubmitted && current.runId === invocationId) revokeBusinessCli(current);
     }

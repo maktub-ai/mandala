@@ -4,8 +4,14 @@ export type RpcMessage = {
   method?: string;
   params?: any;
   result?: any;
-  error?: { message: string };
+  error?: { message: string; code?: number };
 };
+export class RpcResponseError extends Error {
+  constructor(message: string, public readonly code?: number) {
+    super(message);
+    this.name = "RpcResponseError";
+  }
+}
 export type RpcCallbacks = {
   jsonRpc?: boolean;
   onRequest?: (message: RpcMessage) => void;
@@ -70,7 +76,7 @@ export function createRpcClient(
           if (!p) continue;
           pending.delete(message.id);
           clearTimeout(p.timer);
-          if (message.error) p.reject(new Error(message.error.message));
+          if (message.error) p.reject(new RpcResponseError(message.error.message, message.error.code));
           else p.resolve(message.result);
         }
       } catch (e) {
