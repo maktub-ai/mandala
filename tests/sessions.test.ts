@@ -1500,6 +1500,25 @@ it('answers a native question by request id without adding a queued message', as
  expect(store.getConversation(chat.id)?.status).toBe('running');
  await expect(manager.answerQuestions(chat.id,approval.id,{choice:{answers:['Again']}})).rejects.toThrow();
 });
+it('records only a safe selected option for a submitted native question', async () => {
+ const chat=await manager.create('p','a');await manager.send(chat.id,'ask');
+ options.onEvent({method:'turn/started',params:{threadId:'native-1',turn:{id:'turn-1'}}});
+ const question=(id:string,labels:string[],isSecret?:boolean)=>({id,header:'Preview',question:'Where?',isSecret,options:labels.map(label=>({label,description:'DO_NOT_PROJECT_DESCRIPTION'}))});
+ options.onApproval({id:91,method:'item/tool/requestUserInput',params:{threadId:'native-1',turnId:'turn-1',isBlocking:true,questions:[
+  question('choice',['In app','DO_NOT_PROJECT_UNSELECTED']),question('secret',['DO_NOT_PROJECT_SECRET'],true),
+  question('custom',['Listed']),question('duplicate',['DO_NOT_PROJECT_DUPLICATE','DO_NOT_PROJECT_DUPLICATE']),
+ ]}});
+ const approval=manager.getApprovals(chat.id)[0];
+ const answer={choice:{answers:['In app']},secret:{answers:['DO_NOT_PROJECT_SECRET']},custom:{answers:['DO_NOT_PROJECT_CUSTOM']},duplicate:{answers:['DO_NOT_PROJECT_DUPLICATE']}};
+ await manager.answerQuestions(chat.id,approval.id,answer);
+ expect(replies).toEqual([{id:91,result:{answers:answer}}]);
+ const records=store.listEvents(chat.id,0).filter(e=>e.kind==='metadata'&&(e.data as any).answeredQuestionId===approval.id);
+ expect(records).toHaveLength(1);
+ expect(records[0].data).toMatchObject({answeredQuestionId:approval.id,questionAnswerDisplay:{version:1,selectedOptions:['In app']}});
+ expect(JSON.stringify(records[0].data)).not.toContain('DO_NOT_PROJECT');
+ expect(manager.listUserInputs(chat.id)).toEqual([]);
+});
+
 it('rejects missing, foreign and expired question answers', async () => {
  const chat=await manager.create('p','a');await manager.send(chat.id,'ask');
  options.onEvent({method:'turn/started',params:{threadId:'native-1',turn:{id:'turn-1'}}});

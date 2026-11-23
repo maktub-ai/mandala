@@ -47,7 +47,7 @@ import { validateEffort, type NativeAttachment, type ReasoningEffort } from "../
 import { createTaskResources, type DirectoryOwner } from './task-resources';
 import {createTaskRecovery, retainNativeOccupancy, canReleaseNativeOccupancy, hasUnprovenNativeOccupancy, type RecoveryReport} from './task-recovery';
 import type {AutomationRun} from '../shared/automations';
-import { questionResponse, hasBlockingApprovals } from "../shared/questions";
+import { questionResponse, projectQuestionAnswer, hasBlockingApprovals } from "../shared/questions";
 import { asyncQuestions, asyncQuestionReply, initializeAsyncQuestions } from './async-questions';
 import { nativeApprovalResponse, type ApprovalDecision } from "../shared/approvals";
 import { createAttachmentAssets } from "./attachment-assets";
@@ -2507,7 +2507,7 @@ export function createSessionManager(
       const response=questionResponse(approval,answers);
       r.client.replyApproval(approval.nativeRequestId,response);
       r.approvals.delete(approvalId);
-      store.appendEvent(id,"metadata",{answeredQuestionId:approvalId});
+      store.appendEvent(id,"metadata",{answeredQuestionId:approvalId,questionAnswerDisplay:projectQuestionAnswer(approval,response)});
       state(id,hasBlockingApprovals(r.approvals.values())?"approval":"running");
     },
     async approve(id, approvalId, decision) {

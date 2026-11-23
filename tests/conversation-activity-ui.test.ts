@@ -87,3 +87,14 @@ it('retains startup status before the native CLI accepts the request',()=>{
  const html=render([event(2,'status',{status:'running'}),event(3,'metadata',{status:'applying',cli:'codex'})]);
  expect(html).toContain('正在启动执行端');
 });
+
+it('shows the safe selected option by itself even without the original question page',()=>{
+ const html=render([event(2,'metadata',{answeredQuestionId:'q1',questionAnswerDisplay:{version:1,selectedOptions:['In app']}}),event(3,'status',{status:'idle'})]);
+ expect(html).toContain('已提交回答');
+ expect(html).toContain('In app');
+});
+it('does not infer submitted options from a legacy or unrelated event',()=>{
+ const html=render([event(2,'metadata',{answeredQuestionId:'legacy',answers:{choice:'RAW_UNVERIFIED'}}),event(3,'metadata',{questionAnswerDisplay:{version:1,selectedOptions:['UNCORRELATED']}})]);
+ expect(html).not.toContain('RAW_UNVERIFIED');
+ expect(html).not.toContain('UNCORRELATED');
+});

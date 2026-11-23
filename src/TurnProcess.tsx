@@ -13,7 +13,7 @@ import Dialog from "./Dialog";
 import Icon from "./ui/Icon";
 import "./observability.css";
 import {reasoningTitle,type ActivityTimelineItem} from "./activity-presentation";
-import {nativeQuestions} from "../shared/questions";
+import {nativeQuestions, readQuestionAnswerDisplay} from "../shared/questions";
 
 const running = (status: string) => ["running", "inProgress", "approval"].includes(status);
 const failed = (status: string) => ["failed", "error", "declined", "blocked"].includes(status);
@@ -96,6 +96,13 @@ export default function TurnProcess({turn,run:providedRun,onInspect,approvals=[]
   </Button></div>
   {connecting&&<p className="run-quiet" title={connection?.host}>{localize('首次使用这台机器时会在远端安装执行服务，可能需要一分钟。','The first run on a machine installs the remote execution service and can take about a minute.')}</p>}
   {!showHistory&&(active||run.incomplete)&&run.latestProgress&&<ExplicitProgressView progress={run.latestProgress} compact hideOutputLabel live={active}/>}
+  {turn.events.map(event=>{
+   const display=event.kind==='metadata'?readQuestionAnswerDisplay(event.data):null;
+   return display&&<div key={event.id} className="run-question-answer">
+    <span>{localize('已提交回答','Answer submitted')}</span>
+    {display.options.map((label,index)=><span key={index} className="run-question-option">{label}</span>)}
+   </div>;
+  })}
   {active&&quietTime>=15000&&<p className="run-quiet" title={t('仅表示最近收到的事件，不代表 CLI 失去响应。')}>{t('{duration} 未收到新事件',{duration:formatDuration(quietTime)})}</p>}
   <div id={'run-'+turn.key} className="turn-process-detail" data-expanded={showHistory}>
    {showHistory&&!run.timeline.length&&<p>{t('本轮没有可展示的过程事件。')}</p>}

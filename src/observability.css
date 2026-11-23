@@ -10,6 +10,8 @@
 .run-overview-button:hover { background: var(--raised); }
 .run-current { margin: 0 0 2px 21px; max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-ui); font-size: var(--control-font-size); line-height: 1.6; }
 .run-quiet, .run-incomplete { margin: 4px 0 0 21px; font-size: var(--type-meta); }
+.run-question-answer { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:4px 0 4px 21px; }
+.run-question-option { max-width:100%; padding:2px 8px; border-radius:var(--control-radius); color:var(--text); background:var(--accent-bg); overflow-wrap:anywhere; }
 .turn-process-detail { margin: 8px 0 4px; min-width:0; }
 .turn-process-detail h4 { font-size: var(--type-meta); font-weight: var(--weight-heading); margin: 10px 0 6px; color: var(--muted); }
 .run-progress { font-size: var(--type-ui); color: var(--text); overflow-wrap: anywhere; }

@@ -22,6 +22,28 @@ export function questionResponse(approval:Approval, answers:unknown) {
  return {answers:result};
 }
 
+const safeOptionLabel = (label:unknown):label is string =>
+ typeof label==='string'&&!!label.trim()&&label.length<=160&&!/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(label);
+
+// Persist display evidence from the authoritative request, never a raw answer.
+export function projectQuestionAnswer(approval:Approval,response:ReturnType<typeof questionResponse>) {
+ const selectedOptions=nativeQuestions(approval).flatMap(question=>{
+  if(question.isSecret!==undefined&&question.isSecret!==false)return [];
+  const value=response.answers[question.id]?.answers[0];
+  const matches=question.options?.filter(option=>option.label===value);
+  return matches?.length===1&&safeOptionLabel(matches[0].label)?[matches[0].label]:[];
+ });
+ return {version:1 as const,selectedOptions};
+}
+
+export function readQuestionAnswerDisplay(data:unknown) {
+ if(!data||typeof data!=='object')return null;
+ const {answeredQuestionId, questionAnswerDisplay}=data as {answeredQuestionId?:unknown;questionAnswerDisplay?:{version?:unknown;selectedOptions?:unknown}};
+ if(typeof answeredQuestionId!=='string'||!answeredQuestionId||answeredQuestionId.length>200||questionAnswerDisplay?.version!==1)return null;
+ const options=questionAnswerDisplay.selectedOptions;
+ return Array.isArray(options)&&options.length<=10&&options.every(safeOptionLabel)?{id:answeredQuestionId,options}:null;
+}
+
 export function hasBlockingApprovals(approvals:Iterable<Approval>) {
  return [...approvals].some(a=>a.method!=="item/tool/requestUserInput"||(a.params as {isBlocking?:boolean})?.isBlocking!==false);
 }
