@@ -38,3 +38,22 @@ export function effectiveRuntime(cli: Cli, agent?: RuntimeConfig, defaults?: Run
     ...(approvalMode !== undefined ? { approvalMode } : {}),
   };
 }
+
+type OfficialRuntimeSetup = { method:'vendor'|'npm'|'native-release'|'gateway'; source:string; nodeMinimum?:string; windowsGitBash?:boolean };
+/** Installation guidance only. A listing is never authorization to run a package or download. */
+export const officialRuntimeSetup:Record<Cli,OfficialRuntimeSetup> = {
+  codex:{method:'native-release',source:'OpenAI Codex CLI'},
+  omp:{method:'native-release',source:'Oh My Pi releases'},
+  claude:{method:'vendor',source:'claude-agent-acp'},
+  gemini:{method:'npm',source:'@google/gemini-cli'},
+  opencode:{method:'native-release',source:'OpenCode standalone'},
+  codebuddy:{method:'npm',source:'@tencent-ai/codebuddy-code',nodeMinimum:'18.20'},
+  pi:{method:'npm',source:'@earendil-works/pi-coding-agent',nodeMinimum:'22.19'},
+  cursor:{method:'vendor',source:'Cursor Agent CLI'},
+  kimi:{method:'npm',source:'@moonshot-ai/kimi-code',nodeMinimum:'22.19',windowsGitBash:true},
+  dsh:{method:'vendor',source:'DeepSeek Harness CLI'},
+  antigravity:{method:'vendor',source:'Antigravity CLI'},
+  grok:{method:'vendor',source:'Grok CLI'},
+  hermes:{method:'gateway',source:'Hermes Agent (ACP extra)'},
+  openclaw:{method:'gateway',source:'OpenClaw Gateway'},
+};

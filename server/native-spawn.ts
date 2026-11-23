@@ -1,26 +1,39 @@
 import { windowsSystemBinary } from '../cli/windows-system.mjs';
 import { productEnv } from '../cli/product-env.mjs';
-import { accessSync, constants, statSync } from 'node:fs';
+import { accessSync, constants, lstatSync, statSync } from 'node:fs';
 import { delimiter, isAbsolute, join, resolve, win32 } from 'node:path';
 import crossSpawn from 'cross-spawn';
 import { fileURLToPath } from 'node:url';
 import { execFileSync, type SpawnOptionsWithoutStdio, type ChildProcessWithoutNullStreams } from 'node:child_process';
-export function resolveNativeCli(command: string, env: NodeJS.ProcessEnv = process.env): string {
+export type NativeCliDetection = {state:'missing'|'broken'|'blocked'} | {state:'executable';path:string};
+export function diagnoseNativeCli(command: string, env: NodeJS.ProcessEnv = process.env): NativeCliDetection {
   const windows = process.platform === 'win32';
-  if (isAbsolute(command) || windows && win32.isAbsolute(command)) {
-    try { if (statSync(command).isFile()) { accessSync(command, constants.X_OK); return command; } } catch {}
-    throw Object.assign(new Error(`${command} not found`), { code: 'ENOENT' });
-  }
+  const direct = isAbsolute(command) || windows && win32.isAbsolute(command);
   const extensions = windows && /\.(?:com|exe|bat|cmd)$/i.test(command) ? [''] : windows ? (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').map(value => value.toLowerCase()).filter(value => ['.com','.exe','.bat','.cmd'].includes(value)) : [''];
-  for (const entry of (env.PATH ?? env.Path ?? '').split(windows ? ';' : delimiter)) {
-    const directory = entry.replace(/^"(.*)"$/, '$1');
-    if (!directory || !isAbsolute(directory)) continue;
-    for (const extension of extensions) {
-      const file = resolve(join(directory, command + extension));
-      try { if (!statSync(file).isFile()) continue; accessSync(file, constants.X_OK); return file; } catch {}
-    }
+  const candidates=direct?[command]:(env.PATH ?? env.Path ?? '').split(windows ? ';' : delimiter).flatMap(entry=>{
+    const directory=entry.replace(/^"(.*)"$/, '$1');
+    return !directory||!isAbsolute(directory)?[]:extensions.map(extension=>resolve(join(directory,command+extension)));
+  });
+  let problem: 'missing'|'broken'|'blocked'='missing';
+  for(const path of candidates){
+    try {
+      const node=lstatSync(path);
+      let target;
+      try {target=statSync(path);}
+      catch(error){
+        if(node.isSymbolicLink()&&['ENOENT','ENOTDIR','ELOOP'].includes((error as NodeJS.ErrnoException).code??'')){if(problem==='missing')problem='broken';continue;}
+        problem='blocked';continue;
+      }
+      if(!target.isFile()){problem='blocked';continue;}
+      accessSync(path,constants.X_OK);return {state:'executable',path};
+    }catch(error){if(!['ENOENT','ENOTDIR'].includes((error as NodeJS.ErrnoException).code??''))problem='blocked';}
   }
-  throw Object.assign(new Error(`${command} not found in explicit PATH directories`), { code: 'ENOENT' });
+  return {state:problem};
+}
+export function resolveNativeCli(command: string, env: NodeJS.ProcessEnv = process.env): string {
+  const found=diagnoseNativeCli(command,env);
+  if(found.state==='executable')return found.path;
+  throw Object.assign(new Error(isAbsolute(command) || process.platform==='win32'&&win32.isAbsolute(command)? `${command} not found` : `${command} not found in explicit PATH directories`),{code:'ENOENT'});
 }
 
 const registeredPathScript = Buffer.from(`

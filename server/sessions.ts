@@ -1,3 +1,5 @@
+import {diagnoseNativeCli} from './native-spawn';
+import {runtimeCatalog as diagnosticCatalog} from '../shared/runtimes';
 import { createConversationApprovals, type ConversationApprovalScope } from './conversation-approvals';
 import { supportsConversationApproval } from '../shared/approvals';
 import {mandalaDirectory} from './mandala-directory';
@@ -116,7 +118,7 @@ export interface SessionManager {
   listReferenceSummary(id:string,outputsOnly?:boolean):Promise<ConversationReferenceSummary>;
   startDurableTask(taskId:string,expectedRevision:number,commandKey:string,conversationId?:string|null,coordination?:{continuation:Continuation;assertActive:()=>void;agentId?:string;projectId?:string|null;request?:string;criteria?:import('../shared/tasks').Criterion[]}):Promise<Run>;
   stopDurableTask(taskId:string,expectedRevision?:number,cancel?:boolean):Promise<{taskId:string;status:'stopped'|'cancelled'|'already_finished';runId:string|null}>;
-  getCliStatus(projectId?: string, cli?: Cli, environment?: { workspaceId?: string | null; cwd?: string; agentId?: string }, scope?: "runtime" | "system"): Promise<CliStatus>;
+  getCliStatus(projectId?: string, cli?: Cli, environment?: { workspaceId?: string | null; cwd?: string; agentId?: string }, scope?: "runtime" | "system", explain?:boolean): Promise<CliStatus>;
   listModels(projectId?: string, cli?: Cli, environment?: { workspaceId?: string | null; cwd?: string; agentId?: string }, scope?: "runtime" | "system"): Promise<ModelChoice[]>;
   create(
     projectId: string,
@@ -1800,7 +1802,7 @@ export function createSessionManager(
       if(chat(c.id).status==='interrupted'&&canReleaseNativeOccupancy(store,c.id))store.updateConversation(c.id,{status:'idle',turnId:null});
       setImmediate(()=>{if(!closed)void pump(run.routing!.executionConversationId);});return run;
     },
-    async getCliStatus(projectId, cli = "codex", environment, scope = "runtime") {
+    async getCliStatus(projectId, cli = "codex", environment, scope = "runtime", explain=false) {
       // Discovery needs runtime routing, not executable Skill bodies or their history.
       const config = await loadConfig({hydrateSkills:false});
       const context = projectId || environment ? conversationContext(config, { projectId: projectId ?? "", ...environment }, "") : undefined;
@@ -1808,20 +1810,34 @@ export function createSessionManager(
       const cwd = project?.cwd || await mkdtemp(join(tmpdir(), "mana-catalog-"));
       const catalogId='catalog-'+randomUUID();
       let client: CodexClient | undefined;
+      const diag:NonNullable<CliStatus['diagnostics']>={host:context?.executionLocation?'remote':'local',executable:'not-verified',probe:'failed',auth:'not-verified'};
+      const withDetails=(value:CliStatus):CliStatus=> explain?{...value,diagnostics:diag}:value;
       try {
+        const options=runtimeOptions(cli,context,config,scope);
+        if(explain&&diag.host==='local'){
+          const env={...process.env,...options.env};
+          diag.executable=diagnoseNativeCli(diagnosticCatalog[cli].command,env).state;
+          if(cli==='claude'&&diag.executable!=='executable')diag.standaloneClaude=diagnoseNativeCli('claude',env).state==='executable';
+        }
         client = await startClient(cli,{
           cwd,
           model:config.chatDefaults?.[cli]?.model,
-          ...runtimeOptions(cli,context,config,scope),
+          ...options,
           signal: lifetime.signal,
           onEvent() {},
           onApproval() {},
           onExit() {},
           ...(cli === "omp" ? { ephemeral: true } : {}),
         },context,catalogId,config);
-        return await client.getStatus();
+        const {nativeAccountPresent,...value}=await client.getStatus(explain);
+        if(explain&&value.status!=='unavailable'){
+          diag.probe=cli==='codex'?'account':cli==='cursor'||cli==='antigravity'?'version-only':cli==='omp'||cli==='pi'?'rpc':cli==='hermes'||cli==='openclaw'?'gateway-session':'acp';
+          if(cli==='codex')diag.auth=nativeAccountPresent?'native-account-ready':value.status==='login-required'?'login-required':'not-verified';
+          else if(value.status==='login-required')diag.auth='configuration-required';
+        }
+        return withDetails(value);
       } catch {
-          return { status: "unavailable", version: null };
+          return withDetails({ status: "unavailable", version: null });
       } finally {
         await client?.close();
         if (!project?.cwd) await rm(cwd, { recursive: true, force: true });

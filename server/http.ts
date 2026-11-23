@@ -554,7 +554,7 @@ export function createHttpServer({
           { ...environment, ...(url.searchParams.get("agentId") ? { agentId: string(url.searchParams.get("agentId")) } : {}) } : undefined;
         const probeScope = scope === "system" ? "system" : "runtime";
         const projectId = scope === "project" ? url.searchParams.get("projectId") || undefined : undefined;
-        return json(res, 200, path === "/api/cli/status" ? await manager.getCliStatus(projectId, cli, probeEnvironment, probeScope) :
+        return json(res, 200, path === "/api/cli/status" ? await manager.getCliStatus(projectId, cli, probeEnvironment, probeScope, url.searchParams.get("explain")==="1") :
           await manager.listModels(projectId, cli, probeEnvironment, probeScope));
       }
       if(path==='/api/conversation-progress'&&method==='GET'){

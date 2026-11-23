@@ -66,3 +66,15 @@ it.each(['claude','gemini','opencode','codebuddy','kimi','dsh','grok'] as const)
   expect(native.launches[1]).toMatchObject({cli,...cli!=='opencode'?{gateway:'native'}:{},env:{AUTH_ROUTE:'connection-fixture'},extraArgs:[]});expect(native.launches[1].safeSystem).not.toBe(true);
  }finally{await manager.close();store.close();await rm(home,{recursive:true,force:true});}
 });
+
+it('labels an ACP handshake as protocol evidence, not provider authentication', async()=>{
+ const home=await mkdtemp(join(tmpdir(),'mandala-acp-status-'));const store=openStore(home);
+ const config:Config={version:2,runtimes:['gemini'],projects:[],agents:[]};
+ const manager=createSessionManager(store,async()=>config,undefined,undefined,home);
+ try{
+  const details=await manager.getCliStatus(undefined,'gemini',undefined,'runtime',true);
+  expect(details).toMatchObject({status:'ready',version:'synthetic',diagnostics:{host:'local',probe:'acp',auth:'not-verified'}});
+  expect(Object.keys(details.diagnostics!).sort()).toEqual(['auth','executable','host','probe']);
+  expect(await manager.getCliStatus(undefined,'gemini')).toEqual({status:'ready',version:'synthetic'});
+ }finally{await manager.close();store.close();await rm(home,{recursive:true,force:true});}
+});

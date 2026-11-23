@@ -25,7 +25,7 @@ export function scanRuntimes(onResult: (cli: Cli, status: RuntimeProbe, error?: 
     const cli = queue.shift();
     if (!cli || cancelled) return;
     try {
-      const status = await api<CliStatus>('/cli/status?scope=runtime&cli=' + cli);
+      const status = await api<CliStatus>('/cli/status?scope=runtime&explain=1&cli=' + cli);
       if (!cancelled) onResult(cli, status);
     } catch (reason) {
       if (!cancelled) onResult(cli, null, (reason as Error).message);
@@ -50,3 +50,6 @@ export async function adoptRuntime(cli: Cli, forMandala: boolean): Promise<Saved
     current = await api<Saved>('/mandala', 'PUT', { revision: current.revision, settings: { name: mandala.name, soul: current.config.mandala.soul, cli, models: mandala.models, maxParallel: current.config.mandala.maxParallel } });
   return current;
 }
+
+/** Legacy probes have no evidence projection. New probes must establish account readiness before suggestion. */
+export const canSuggestRuntime = (probe:RuntimeProbe) => probe?.status==='ready' && (!probe.diagnostics || probe.diagnostics.auth==='native-account-ready');

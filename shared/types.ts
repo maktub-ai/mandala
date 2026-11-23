@@ -182,6 +182,13 @@ export type ModelChoice = { id: string; label: string; isDefault?: boolean; defa
 export type CliStatus = {
   status: "ready" | "login-required" | "unavailable";
   version: string | null;
+  diagnostics?: {
+    host: 'local' | 'remote';
+    executable: 'missing' | 'broken' | 'blocked' | 'executable' | 'not-verified';
+    probe: 'failed' | 'version-only' | 'rpc' | 'acp' | 'account' | 'gateway-session';
+    auth: 'not-verified' | 'login-required' | 'native-account-ready' | 'configuration-required';
+    standaloneClaude?: boolean;
+  };
 };
 
 export type MandalaContextMaintenance = {

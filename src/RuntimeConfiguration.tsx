@@ -1,3 +1,4 @@
+import RuntimeSetup,{RuntimeProbeSummary} from './RuntimeSetup';
 import Button from './ui/Button';
 import { useEffect, useRef, useState } from 'react';
 import type { Cli, CliStatus, Config, ModelChoice, RuntimeConfig } from '../shared/types';
@@ -38,7 +39,7 @@ export default function RuntimeConfiguration({ config, savedConfig, onDraftChang
   useEffect(() => {
     if (!cli) return;
     let active = true; setStatus(undefined); setModels([]); setProbeError('');
-    api<CliStatus>('/cli/status?scope=runtime&cli=' + cli).then(result => { if (active) setStatus(result); }).catch(e => { if (active) { setStatus({ status: 'unavailable', version: null }); setProbeError(e.message); } });
+    api<CliStatus>('/cli/status?scope=runtime&explain=1&cli=' + cli).then(result => { if (active) setStatus(result); }).catch(e => { if (active) { setStatus({ status: 'unavailable', version: null }); setProbeError(e.message); } });
     api<ModelChoice[]>('/models?scope=runtime&cli=' + cli).then(result => { if (active) setModels(result); }).catch(e => { if (active) setProbeError(e.message); });
     return () => { active = false; };
   }, [cli, JSON.stringify(savedConfig.runtimeDefaults), refresh]);
@@ -59,7 +60,8 @@ export default function RuntimeConfiguration({ config, savedConfig, onDraftChang
       options={available.map(item => ({value:item,label:runtimeLabel(item),icon:<RuntimeIcon cli={item}/>}))} onChange={item => setCli(item as Cli)}/></label> : <p>{localize('所有支持的 CLI 均已启用。', 'All supported CLI adapters are enabled.')}</p>)}
     {cli && <>
       <div role="status" className="runtime-connection-status">{!status ? t('正在检测…') : status.status === 'ready' ? (localize('CLI 可启动', 'CLI can launch')) : status.status === 'login-required' ? (localize('CLI 要求登录', 'CLI requires login')) : (localize('CLI 不可用', 'CLI unavailable'))}{status?.version && <code>{status.version}</code>}</div>
-      {status && status.status !== 'ready' && <p className="field-hint">{localize('检查原生 CLI 安装和认证后重新检测。', 'Check the native CLI installation and authentication, then detect again.')}</p>}
+      {status && (status.status === 'ready' ? <RuntimeProbeSummary status={status}/> : <RuntimeSetup cli={cli} status={status}/>)}
+      {status && status.status !== 'ready' && !status.diagnostics && <p className="field-hint">{localize('检查原生 CLI 安装和认证后重新检测。', 'Check the native CLI installation and authentication, then detect again.')}</p>}
       {probeError && <p role="status" className="form-error">{errorText(probeError)}</p>}
       {(cli==='cursor'||cli==='antigravity')&&<p className="field-hint">{localize('工具权限按整轮授权；不支持逐工具审批或会话级 MCP 绑定。', 'Tool permission applies to an entire turn. Per-tool approvals and isolated session MCP bindings are unavailable.')}</p>}
       {cli==='dsh'&&<p className="field-hint">{localize('DSH 工具权限按整轮授权；本轮内的单个工具不会再次请求审批。', 'DSH tool permission applies to an entire turn; individual tools do not prompt again.')}</p>}

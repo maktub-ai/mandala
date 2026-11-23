@@ -92,6 +92,7 @@ it.each([
   );
   try {
     expect(await cli.getStatus()).toEqual({ status, version: "0.154.0" });
+    expect(await cli.getStatus(true)).toEqual({ status, version:"0.154.0", nativeAccountPresent:false });
   } finally {
     cli.close();
   }

@@ -92,7 +92,7 @@ export type CodexOptions = {
 export interface CodexClient {
   inspectContext?(nativeId:string):Promise<{settled:boolean;completedCompactions?:string[]}>;
   compactThread?(nativeId:string):Promise<'started'|'completed'|'noop'|'unsupported'>;
-  getStatus(): Promise<CliStatus>;
+  getStatus(explain?:boolean): Promise<CliStatus & {nativeAccountPresent?:boolean}>;
   requiresRuntimeReload?(runtimeMailboxPath?:string):Promise<boolean>;
   assertReloadable?(nativeId:string):Promise<void>;
   inspectInvocation?(identity: RunIdentity): Promise<"running" | "succeeded" | "failed" | "unknown">;
@@ -181,7 +181,7 @@ export async function connectCodex(rpc: RpcClient, cwd?: string, fullAccess = tr
         return turn?.status === "completed" ? "succeeded" : ["failed","interrupted"].includes(turn?.status) ? "failed" : "unknown";
       } catch { return "unknown"; }
     },
-    async getStatus() {
+    async getStatus(explain=false) {
       const result = await rpc.request("account/read", { refreshToken: false });
       if (typeof result.requiresOpenaiAuth !== "boolean")
         throw new Error("Invalid native account status");
@@ -191,6 +191,7 @@ export async function connectCodex(rpc: RpcClient, cwd?: string, fullAccess = tr
             ? "login-required"
             : "ready",
         version,
+        ...(explain?{nativeAccountPresent:!!result.account&&typeof result.account==='object'}:{}),
       };
     },
     async listModels() {
