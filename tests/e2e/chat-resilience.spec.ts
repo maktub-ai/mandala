@@ -155,6 +155,34 @@ test('writer conflict retains the submitted request and attachment across reload
   await expect(message).toContainText('Retain my failed request');
   await expect(message).toContainText('keep-me.txt');
   await expect(message.getByRole('button', { name: '复制消息', exact: true })).toBeEnabled();
+  const retryHere = message.getByRole('button', { name: '恢复到当前草稿', exact: true });
+  await composer.fill('Another unsent draft');
+  await expect(retryHere).toBeDisabled();
+  await expect(composer).toHaveValue('Another unsent draft');
+  await composer.fill('');
+  let startDownload!: () => void, releaseDownload!: () => void;
+  const downloadStarted = new Promise<void>(resolve => { startDownload = resolve; });
+  const downloadReleased = new Promise<void>(resolve => { releaseDownload = resolve; });
+  await page.route(`**/api/conversations/${chat.id}/attachments/*?download=1`, async route => {
+    startDownload();
+    await downloadReleased;
+    await route.continue();
+  }, { times: 1 });
+  await retryHere.click();
+  try {
+    await downloadStarted;
+    await composer.fill('Draft typed during recovery');
+  } finally { releaseDownload(); }
+  await expect(composer).toHaveValue('Draft typed during recovery');
+  await expect(page.locator('.composer-attachments')).toHaveCount(0);
+  await composer.fill('');
+  await retryHere.click();
+  await expect(composer).toHaveValue('Retain my failed request');
+  await expect(page.locator('.composer-attachments')).toContainText('keep-me.txt');
+  expect(new URL(page.url()).searchParams.get('conversation')).toBe(chat.id);
+  await expect(page.getByText('Fixture reply: Retain my failed request', {exact:true})).toHaveCount(0);
+  await page.getByRole('button', { name: '移除附件 keep-me.txt', exact: true }).click();
+  await composer.fill('');
   const sourceScope=encodeURIComponent(JSON.stringify({kind:'chat',conversationId:chat.id}));const originalDraft=(await(await request.get('/api/drafts/entry?scope='+sourceScope)).json()).draft;
   await message.hover();
   await message.getByRole('button', { name: '在新对话中使用此请求', exact: true }).click();

@@ -1061,8 +1061,8 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     try { await copyText(content); setCopiedMessage(id); }
     catch { clearCopiedMessage(); setError(t("复制失败，请手动选择文本。")); }
   };
-  const reuseRequest = async (message: Pick<ChatMessage, 'text' | 'referenceItems'> & { attachments?: { id: string; name?: string; mimeType?: string }[] }) => {
-    if (pending || branchPending || navigationLocked) return;
+  const reuseRequest = async (message: Pick<ChatMessage, 'text' | 'referenceItems'> & { attachments?: { id: string; name?: string; mimeType?: string }[] }, sameChat = false) => {
+    if (pending || branchPending || navigationLocked || (sameChat && (busy || !selected || !composerDraft.loaded || existingComposerDraft))) return;
     const source = selected, view = navigationVersion.current;
     setBranchPending(true); setError("");
     try {
@@ -1073,8 +1073,17 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
         return new File([await response.blob()], name, { type: item.mimeType ?? response.headers.get('Content-Type') ?? '' });
       }));
       if (selectedChat.current !== source || view !== navigationVersion.current) return;
-      flushSync(() => { navigate(projectId, "", agentId); setWorkspaceId(chat?.workspaceId); setDirectory(chat?.cwd ?? ""); });
-      composerDraftRef.current.replaceValue({text:message.text,files:attachments,references:message.referenceItems??[],missingAttachments:[]});
+      const restored = {text:message.text,files:attachments,references:message.referenceItems??[],missingAttachments:[]};
+      if (sameChat) {
+        const draft = composerDraftRef.current;
+        if (!draft.ready || draft.pending) return;
+        // The user may have typed while saved attachments were being read.
+        draft.setValue(current => current.text || current.files.length || current.references.length ||
+          current.missingAttachments.length ? current : restored);
+      } else {
+        flushSync(() => { navigate(projectId, "", agentId); setWorkspaceId(chat?.workspaceId); setDirectory(chat?.cwd ?? ""); });
+        composerDraftRef.current.replaceValue(restored);
+      }
       requestAnimationFrame(() => composerInput.current?.focus());
     } catch (e) { if (selectedChat.current === source) setError((e as Error).message); }
     finally { setBranchPending(false); }
@@ -1624,10 +1633,17 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               </Button>
             </div>}
             <ExecutionResults items={resultGroups.get(null)??[]} config={config} tasks={operationTasks.tasks} onOpen={openWorkspacePath}/>
-            {presentedTurns.map(({ turn, run, replyText }) => {
+            {presentedTurns.map(({ turn, run, replyText }, index) => {
               const inspect = () => { followLatest.current = false; setAwayFromLatest(true); };
               const checkpoint = [...turn.events].reverse().find(event => event.kind === "status" && (event.data as {status?: string}).status === "idle");
               const answer = run.answers.at(-1);
+              const latestError = turn.events.filter(event => event.kind === 'error').at(-1)?.data as {code?: string; nativeTurnSubmitted?: boolean} | undefined;
+              const canRecoverWriterConflict = index === presentedTurns.length - 1 && chat?.status === 'error' &&
+                latestError?.code === 'native_thread_busy' && latestError.nativeTurnSubmitted === false;
+              const recoverWriterRequest = (message: ChatMessage) => canRecoverWriterConflict && !message.source
+                ? <Button type="button" title={existingComposerDraft ? localize('请先保留或清空现有草稿', 'Save or clear the existing draft first') : undefined}
+                    disabled={busy || pending || branchPending || navigationLocked || !composerDraft.loaded || existingComposerDraft}
+                    onClick={() => void reuseRequest(message, true)}>{localize('恢复到当前草稿', 'Restore draft here')}</Button> : null;
               const canFork = !!checkpoint && !run.incomplete && !busy && !branchPending;
               const showReply = turn.messages.some(m=>m.kind!=="agent_message") && turn.events.some(event=>event.kind!=="user");
               const operationCards = <><AgentMessageCards messages={turn.messages.filter(message=>message.agentMessage?.direction!=='reply')} config={config} onOpen={openWorkspacePath}/><MandalaCoordinationCards config={config} events={turn.events} allEvents={events} onOpen={openWorkspacePath}/><OperationResults taskState={operationTasks} events={turn.events} allEvents={events} onOpen={openWorkspacePath}/></>;
@@ -1657,6 +1673,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
                   <Icon name={item.kind==='project'?'project':item.kind==='chat'||item.kind==='message'?'message':item.kind === 'agent' ? 'agent' : item.kind === 'skill' ? 'book' : item.kind === 'mcp' ? 'plug' : 'plan'} size={15} /><span>{item.name}</span>{item.kind==='message'&&<q className="composer-message-excerpt">{item.detail}</q>}<span className="composer-reference-source">{item.kind==='chat'?(item.intent==='inquiry'?localize('提问目标','Inquiry target'):localize('对话引用','Conversation reference')):item.source}</span>
                 </span>)}</div>}
                 {m.attachments?.length ? <div className="message-attachments">{m.attachments.map(item => <AttachmentItem key={item.id} item={item} conversationId={selected} />)}</div> : null}
+                {recoverWriterRequest(m)}
               </div>
               {mandalaMain && <div className="message-name"><span className="message-actions">
                 {m.text.trim() && <QuoteButton kind="message" text={m.text} disabled={quoteDisabled} onQuote={addQuote} />}
