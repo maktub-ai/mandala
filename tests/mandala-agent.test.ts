@@ -1,14 +1,40 @@
 import {ensureConfiguredMandala} from './configured-mandala';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readConfig, writeConfig } from '../server/config';
+import { readConfig, updateMandalaSettings, writeConfig } from '../server/config';
 import { openStore, type Store } from '../server/store';
 import { ensureMandalaConversation } from '../server/mandala';
 let home: string, store: Store;
 beforeEach(async () => { home = await mkdtemp(join(tmpdir(), 'mandala-identity-')); store = openStore(home); });
 afterEach(async () => { store.close(); await rm(home, { recursive: true, force: true }); });
+
+it.each([true, false])('loads an existing profile with legacy execution details set to %s and preserves it when saving', async (showExecutionDetails) => {
+  const first = await ensureConfiguredMandala(home);
+  const path = join(home, 'config.json');
+  const legacyConfig = { ...first.config, mandala: { ...first.config.mandala!, showExecutionDetails } };
+  const legacyText = JSON.stringify(legacyConfig);
+  await writeFile(path, legacyText);
+
+  const { config, revision } = await readConfig(home);
+  expect(config.mandala).toEqual(legacyConfig.mandala);
+  expect(await readFile(path, 'utf8')).toBe(legacyText);
+  const updated = await updateMandalaSettings(home, { name: 'Mandala', soul: '', cli: 'codex', maxParallel: 4 }, revision);
+  await expect(writeConfig(home, { ...updated.config, mandala: { ...updated.config.mandala!, showExecutionDetails: !showExecutionDetails } }, updated.revision)).rejects.toThrow('system managed');
+  expect((await readConfig(home)).config.mandala).toEqual({ ...legacyConfig.mandala, maxParallel: 4 });
+});
+
+it.each([
+  ['execution details as a string', { showExecutionDetails: 'false' }],
+  ['execution details as null', { showExecutionDetails: null }],
+  ['an unknown key', { unknownSetting: true }],
+])('rejects a persisted Mandala config with %s', async (_label, invalidSettings) => {
+  const { config } = await ensureConfiguredMandala(home);
+  await writeFile(join(home, 'config.json'), JSON.stringify({ ...config, mandala: { ...config.mandala!, ...invalidSettings } }));
+  await expect(readConfig(home)).rejects.toThrow('invalid configuration');
+});
+
 it('creates a stable marked identity without taking over an ordinary same-name Agent', async () => {
   const initial = await readConfig(home);
   await writeConfig(home, { ...initial.config, agents: [{ id:'user', name:'Mandala', instructions:'Keep me', defaultCli:'codex', models:{}, mcp:[], skills:[] }] }, initial.revision);

@@ -172,10 +172,11 @@ export function validateConfig(value: unknown): asserts value is Config {
       managed.length > 1 || c.agents.some(a => a.managedWorkspace !== undefined && a.systemRole !== "mandala")) invalid();
   if (c.mandala !== undefined) {
     const settings = c.mandala;
-    if (!settings || Object.keys(settings).some(key => !["agentId", "soul", "maxParallel"].includes(key)) ||
+    if (!settings || Object.keys(settings).some(key => !["agentId", "soul", "maxParallel", "showExecutionDetails"].includes(key)) ||
         managed.length !== 1 || managed[0].id !== settings.agentId ||
         typeof settings.soul !== "string" || settings.soul.length > 30000 ||
-        !Number.isSafeInteger(settings.maxParallel) || settings.maxParallel < 1) invalid();
+        !Number.isSafeInteger(settings.maxParallel) || settings.maxParallel < 1 ||
+        (settings.showExecutionDetails !== undefined && typeof settings.showExecutionDetails !== "boolean")) invalid();
   } else if (managed.length) invalid();
   const agentIds = new Set(c.agents.map((a) => a.id));
   const validateCapabilities = (owner: { mcp: unknown; skills: unknown }) => {

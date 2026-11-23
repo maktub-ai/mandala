@@ -90,7 +90,13 @@ export type Agent = {
   icon?: ProjectIcon;
   emoji?: string;
 };
-export type MandalaSettings = { agentId: string; soul: string; maxParallel: number };
+export type MandalaSettings = {
+  agentId: string;
+  soul: string;
+  maxParallel: number;
+  /** Retained for compatibility with profiles written by older desktop builds. */
+  showExecutionDetails?: boolean;
+};
 export type Config = { version: 2; mandala?: MandalaSettings; responseStyle?: ResponseStyle; projects: Project[]; agents: Agent[]; executionMachines?: ExecutionMachine[]; system?: SystemConfig; runtimes?: Cli[]; runtimeDefaults?: RuntimeConfig; connections?: McpConnection[]; skillLibrary?: SkillDefinition[]; chatDefaults?: ChatDefaults; marketInstallations?: MarketInstallation[] };
 export type LegacyConfig = {
   version: 1;
