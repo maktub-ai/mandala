@@ -59,7 +59,7 @@ import { createFileMaintenance, type FileMaintenance } from './file-maintenance'
 import { createAssetFiles } from "./asset-files";
 import { DomainError, type VersionRef, type Principal } from "../shared/workspace-contracts";
 import type { Run, QueuedInput, Continuation, RunContextTrace } from "../shared/tasks";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   Approval,
   ApprovalMode,
@@ -2661,20 +2661,56 @@ export function createSessionManager(
     },
   };
   const invoke=manager.callBoundTool.bind(manager);
+  // Payload proof lives only as a digest while the invocation binding exists;
+  // do not expose it in timeline events or attempt to reconstruct it on reload.
+  const uncertainPayloads=new WeakMap<object,Map<string,string>>();
   manager.callBoundTool=async(token,name,args,commandKey)=>{
     const bound=tools.get(token),runtime=bound&&live.get(bound.conversationId);
-    if(!bound||!runtime||!hasOperationOutcome(name))return invoke(token,name,args,commandKey);
-    const id=name+':'+commandKey,sourceEventId=runtime.humanEventId??null;
-    const prior=store.listEvents(bound.conversationId,0).map(event=>(event.data as {operationResult?:OperationResult}).operationResult).reverse().find(result=>result?.id===id);
+    if(!bound||!runtime)return invoke(token,name,args,commandKey);
+    const inquiry=name==='message_ask'&&runtime.humanEventId!=null&&store.getConversation(bound.conversationId)?.purpose==='mandala-main';
+    if(!inquiry&&!hasOperationOutcome(name))return invoke(token,name,args,commandKey);
+    const sourceEventId=runtime.humanEventId??null,scopedFeedback=inquiry||name==='mandala_create'||name==='mandala_delegate';
+    const id=scopedFeedback?JSON.stringify([name,bound.invocationId,sourceEventId,commandKey]):name+':'+commandKey;
+    const payloadProof=()=>{
+      try{return createHash('sha256').update(JSON.stringify(args)).digest('hex');}
+      catch{return undefined;}
+    };
     const record=(outcome:NonNullable<ReturnType<typeof projectOperationOutcome>>,state:OperationResult['state'],errorCode?:string)=>{
-      if(prior?.state==='succeeded')return;
+      // Read and append synchronously after the awaited command settles. Another
+      // same-key invocation may have recorded a receipt while this one awaited.
+      const prior=store.listEvents(bound.conversationId,0).map(event=>(event.data as {operationResult?:OperationResult}).operationResult).reverse().find(result=>result?.id===id&&(!scopedFeedback||(result.invocationId===bound.invocationId&&result.sourceEventId===sourceEventId)));
+      if(prior?.state==='succeeded'||(inquiry&&state==='succeeded'&&!prior))return;
+      if(scopedFeedback&&prior?.state==='unknown'){
+        const original=uncertainPayloads.get(bound)?.get(id);
+        if(state!=='succeeded'||!original||original!==payloadProof())return;
+      }
       const operationResult:OperationResult={...outcome,id,command:name,state,sourceEventId,invocationId:bound.invocationId,createdAt:prior?.createdAt??new Date().toISOString(),...(errorCode?{errorCode}:{})};
       store.appendEvent(bound.conversationId,'metadata',{operationResult,runId:bound.invocationId});
+      if(scopedFeedback&&state==='unknown'){
+        const proof=payloadProof();
+        if(proof){
+          let proofs=uncertainPayloads.get(bound);
+          if(!proofs){proofs=new Map();uncertainPayloads.set(bound,proofs);}
+          proofs.set(id,proof);
+        }
+      }else if(scopedFeedback&&state==='succeeded')uncertainPayloads.get(bound)?.delete(id);
     };
-    try{const result=await invoke(token,name,args,commandKey);const outcome=projectOperationOutcome(name,args,result);if(outcome)record(outcome,'succeeded');return result;}
-    catch(error){
+    // Accepted inquiries already have their own lifecycle cards. Only record an
+    // inquiry revision on success if it clears a previously shown failure.
+    const inquiryOutcome:NonNullable<ReturnType<typeof projectOperationOutcome>>={kind:'task',name:'',facts:{}};
+    try{
+      const result=await invoke(token,name,args,commandKey),outcome=inquiry?inquiryOutcome:projectOperationOutcome(name,args,result);
+      if(outcome)record(outcome,'succeeded');return result;
+    }catch(error){
       const active=tools.get(token)===bound&&live.get(bound.conversationId)===runtime&&runtime.runId===bound.invocationId&&!!runtime.invocation&&!runtime.stopRequested&&!runtime.controller.signal.aborted;
-      if(!(error instanceof DomainError&&error.status===403)||active){const outcome=projectOperationOutcome(name,{},null);if(outcome)record(outcome,error instanceof DomainError&&[400,403,404,409,422].includes(error.status)?'failed':'unknown',error instanceof DomainError?error.code:'result_unconfirmed');}
+      if(inquiry){
+        if(!active)throw error;
+        // A retry/conflict after durable acceptance must not contradict its
+        // existing card. Inspect only presence within this origin and key.
+        const accepted=store.database.prepare('SELECT 1 FROM agent_messages WHERE source_conversation_id=? AND command_key=?').get(bound.conversationId,commandKey);
+        if(accepted)throw error;
+      }
+      if(!(error instanceof DomainError&&error.status===403)||active){const outcome=inquiry?inquiryOutcome:projectOperationOutcome(name,{},null);if(outcome)record(outcome,error instanceof DomainError&&[400,403,404,409,422].includes(error.status)?'failed':'unknown',error instanceof DomainError?error.code:'result_unconfirmed');}
       throw error;
     }
   };

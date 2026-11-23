@@ -5,7 +5,20 @@ import {ensureMandalaConfig,writeConfig} from '../../server/config';
 import {ensureMandalaConversation} from '../../server/mandala';
 import {projectOperationOutcome} from '../../server/operation-results';
 export async function operationCardsFixture(req:IncomingMessage,res:ServerResponse,home:string,store:Store,manager:SessionManager){
- if(req.method!=='POST'||!['/__test__/task-operation-cards','/__test__/operation-cards','/__test__/operation-cards-partial','/__test__/operation-card-reply','/__test__/operation-outcomes','/__test__/operation-outcomes-only'].includes(req.url??''))return false;
+ if(req.method!=='POST'||!['/__test__/delegation-failures','/__test__/task-operation-cards','/__test__/operation-cards','/__test__/operation-cards-partial','/__test__/operation-card-reply','/__test__/operation-outcomes','/__test__/operation-outcomes-only'].includes(req.url??''))return false;
+ if(req.url==='/__test__/delegation-failures'){
+  const {config}=await ensureMandalaConfig(home),chat=ensureMandalaConversation(store,config),invocationId=crypto.randomUUID();
+  const source=store.appendEvent(chat.id,'user',{text:'请分派测试工作。',invocationId});
+  const attempts=[
+   {id:'create',command:'mandala_create',state:'unknown',errorCode:'storage_failure'},
+   {id:'assign',command:'mandala_delegate',state:'failed',errorCode:'executor_unavailable'},
+   {id:'assign',command:'mandala_delegate',state:'failed',errorCode:'executor_unavailable'},
+  ];
+  for(const attempt of attempts)store.appendEvent(chat.id,'metadata',{runId:invocationId,operationResult:{kind:'task',name:'PRIVATE_OUTPUT_TEST',path:'/tasks/hidden-fixture',facts:{},...attempt,id:invocationId+'-'+attempt.id,sourceEventId:source.id,invocationId,createdAt:source.createdAt}});
+  store.appendEvent(chat.id,'text',{text:'操作已返回。',phase:'final_answer',runId:invocationId});
+  store.appendEvent(chat.id,'status',{status:'idle'});
+  res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({invocationId}));return true;
+ }
  if(req.url==='/__test__/task-operation-cards'){
   const current=await ensureMandalaConfig(home),chat=ensureMandalaConversation(store,current.config),invocationId=crypto.randomUUID();
   const source=store.appendEvent(chat.id,'user',{text:'创建测试目标并分派执行任务。',invocationId});

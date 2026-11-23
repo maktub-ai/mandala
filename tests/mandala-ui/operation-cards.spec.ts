@@ -79,3 +79,23 @@ test('a Skill outcome link selects the referenced Skill rather than the first li
  await page.goto('/settings/skills?skill='+skills[1].id);
  await expect(page.getByRole('textbox',{name:'SKILL.md 内容',exact:true})).toHaveValue(/second skill body/);
 });
+
+test('shows sanitized delegate rejection and unknown in the original turn without retry',async({page,request})=>{
+ const {invocationId}=await(await request.post('/__test__/delegation-failures')).json();
+ await page.goto('/mandala');
+ const turn=page.locator(`.chat-turn[data-run-id="${invocationId}"]`);
+ const feedback=turn.getByRole('region',{name:'委派状态',exact:true});
+ const check=async()=>{
+  await expect(feedback).toBeVisible();
+  await expect(feedback.getByRole('listitem')).toHaveCount(2);
+  await expect(feedback.getByRole('listitem').filter({hasText:'创建目标'})).toContainText('结果待确认');
+  await expect(feedback.getByRole('listitem').filter({hasText:'分派任务'})).toContainText('未接受');
+  await expect(feedback).not.toContainText('PRIVATE_OUTPUT_TEST');
+  await expect(feedback).not.toContainText('storage_failure');
+  await expect(feedback.getByRole('link')).toHaveCount(0);
+  await expect(feedback.getByRole('button')).toHaveCount(0);
+ };
+ await check();
+ await page.reload();
+ await check();
+});

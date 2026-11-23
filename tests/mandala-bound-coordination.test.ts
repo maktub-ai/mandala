@@ -4,6 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {openStore} from '../server/store';
+import {DomainError} from '../shared/workspace-contracts';
 import {readConfig,writeConfig} from '../server/config';
 import {ensureMandalaConversation} from '../server/mandala';
 import {createSessionManager} from '../server/sessions';
@@ -344,4 +345,102 @@ it('blocks answer delivery and reading when specialist Project membership is rev
  expect(JSON.stringify(store.listEvents(chat.id,0))).not.toContain(answer);
  expect(manager.listUserInputs(chat.id).some(i=>i.agentMessage?.direction==='reply')).toBe(false);
  expect(()=>manager.getAgentMessage(result.id)).toThrow(/unavailable/i);
+});
+
+it('reports scoped pre-accept inquiry failures without duplicating accepted message cards',async()=>{
+ const {manager,chat,entries,store}=await setup();
+ await manager.send(chat.id,'Investigate a synthetic request');const token=entries[0].token;
+ const read=()=>store.listEvents(chat.id,0).flatMap(event=>{
+  const result=(event.data as {operationResult?:import('../shared/operation-results').OperationResult}).operationResult;
+  return result?.command==='message_ask'?[result]:[];
+ });
+ await expect(manager.callBoundTool(token,'message_ask',{targetAgentId:'worker',text:'SENSITIVE_FIXTURE'},'known')).rejects.toMatchObject({status:422});
+ const first=read()[0];
+ expect(first).toMatchObject({state:'failed',name:'',facts:{},errorCode:'invalid_message_source'});
+ expect(first.path).toBeUndefined();expect(JSON.stringify(first)).not.toContain('SENSITIVE_FIXTURE');
+ const ask=vi.spyOn(manager,'askAgent').mockRejectedValueOnce(new DomainError('storage_failure',500,'SENSITIVE_FIXTURE'));
+ const args={targetAgentId:'worker',targetProjectId:null,text:'SENSITIVE_FIXTURE'};
+ await expect(manager.callBoundTool(token,'message_ask',args,'unknown')).rejects.toMatchObject({status:500});
+ ask.mockRestore();
+ expect(read().at(-1)).toMatchObject({state:'unknown',name:'',facts:{},errorCode:'storage_failure'});
+ expect(JSON.stringify(read())).not.toContain('SENSITIVE_FIXTURE');
+ const unknown=read().at(-1)!;
+ await manager.callBoundTool(token,'message_ask',args,'unknown');
+ expect(read().at(-1)).toMatchObject({id:unknown.id,sourceEventId:unknown.sourceEventId,invocationId:unknown.invocationId,state:'succeeded'});
+ const before=read().length;
+ await manager.callBoundTool(token,'message_ask',args,'fresh');
+ expect(read()).toHaveLength(before);
+ await expect(manager.callBoundTool(token,'message_ask',{...args,text:'conflict'},'fresh')).rejects.toMatchObject({code:'idempotency_conflict'});
+ expect(read()).toHaveLength(before);
+ expect(store.listEvents(chat.id,0).filter(event=>(event.data as {agentMessage?:{direction:string}}).agentMessage?.direction==='sent')).toHaveLength(2);
+});
+
+it.each([false,true])('reconciles overlapping same-key inquiry results; accepted first: %s',async(acceptedFirst)=>{
+ const {manager,chat,entries,store}=await setup();
+ await manager.send(chat.id,'Investigate a synthetic request');const token=entries[0].token;
+ const ask=manager.askAgent.bind(manager);
+ const deferred=()=>{let resolve!:()=>void;const ready=new Promise<void>(r=>{resolve=r;});return {ready,resolve};};
+ const failureEntered=deferred(),successEntered=deferred(),fail=deferred(),accept=deferred();
+ vi.spyOn(manager,'askAgent')
+   .mockImplementationOnce(async()=>{failureEntered.resolve();await fail.ready;throw new DomainError('storage_failure',500,'SENSITIVE_FIXTURE');})
+   .mockImplementationOnce(async(...args)=>{successEntered.resolve();await accept.ready;return ask(...args);});
+ const args={targetAgentId:'worker',targetProjectId:null,text:'SENSITIVE_FIXTURE'};
+ const rejected=expect(manager.callBoundTool(token,'message_ask',args,'shared-key')).rejects.toMatchObject({code:'storage_failure'});
+ await failureEntered.ready;
+ const accepted=manager.callBoundTool(token,'message_ask',args,'shared-key');
+ await successEntered.ready;
+ if(acceptedFirst){accept.resolve();await accepted;fail.resolve();await rejected;}
+ else{fail.resolve();await rejected;accept.resolve();await accepted;}
+ const receipts=store.listEvents(chat.id,0).flatMap(event=>{
+  const result=(event.data as {operationResult?:import('../shared/operation-results').OperationResult}).operationResult;
+  return result?.command==='message_ask'?[result]:[];
+ });
+ expect(receipts.map(r=>r.state)).toEqual(acceptedFirst?[]:['unknown','succeeded']);
+ expect(new Set(receipts.map(r=>r.id)).size).toBe(acceptedFirst?0:1);
+ expect(JSON.stringify(receipts)).not.toContain('SENSITIVE_FIXTURE');
+ expect(store.listEvents(chat.id,0).filter(event=>(event.data as {agentMessage?:{direction:string}}).agentMessage?.direction==='sent')).toHaveLength(1);
+});
+
+it('keeps same-key pre-accept outcomes on their own human invocations',async()=>{
+ const {manager,chat,entries,store,finish}=await setup();
+ const args={targetAgentId:'worker',text:'SENSITIVE_FIXTURE'};
+ await manager.send(chat.id,'First synthetic request');
+ await expect(manager.callBoundTool(entries.at(-1)!.token,'message_ask',args,'reused-key')).rejects.toMatchObject({status:422});
+ finish(entries.at(-1));
+ await manager.send(chat.id,'Second synthetic request');
+ await expect(manager.callBoundTool(entries.at(-1)!.token,'message_ask',args,'reused-key')).rejects.toMatchObject({status:422});
+ const receipts=store.listEvents(chat.id,0).flatMap(event=>{
+  const result=(event.data as {operationResult?:import('../shared/operation-results').OperationResult}).operationResult;
+  return result?.command==='message_ask'?[result]:[];
+ });
+ expect(receipts).toHaveLength(2);
+ expect(new Set(receipts.map(r=>r.sourceEventId)).size).toBe(2);
+ expect(new Set(receipts.map(r=>r.invocationId)).size).toBe(2);
+ expect(new Set(receipts.map(r=>r.id)).size).toBe(2);
+});
+
+it('keeps a prior unknown when a later same-key call with different input is rejected',async()=>{
+ const {manager,chat,entries,store}=await setup();
+ await manager.send(chat.id,'Investigate a synthetic request');const token=entries[0].token;
+ const args={targetAgentId:'worker',targetProjectId:null,text:'SENSITIVE_FIXTURE'};
+ const ask=vi.spyOn(manager,'askAgent').mockRejectedValueOnce(new DomainError('storage_failure',500,'SENSITIVE_FIXTURE'));
+ await expect(manager.callBoundTool(token,'message_ask',args,'uncertain')).rejects.toMatchObject({code:'storage_failure'});
+ expect(ask).toHaveBeenCalledTimes(1);
+ await expect(manager.callBoundTool(token,'message_ask',{...args,text:''},'uncertain')).rejects.toMatchObject({code:'invalid_message'});
+ expect(ask).toHaveBeenCalledTimes(2);
+ await expect(manager.callBoundTool(token,'message_ask',{...args,text:''},'independent')).rejects.toMatchObject({code:'invalid_message'});
+ expect(ask).toHaveBeenCalledTimes(3);
+ const receipts=store.listEvents(chat.id,0).flatMap(event=>{
+  const result=(event.data as {operationResult?:import('../shared/operation-results').OperationResult}).operationResult;
+  return result?.command==='message_ask'?[result]:[];
+ });
+ expect(receipts.map(r=>[r.state,r.errorCode])).toEqual([['unknown','storage_failure'],['failed','invalid_message']]);
+ expect(JSON.stringify(receipts)).not.toContain('SENSITIVE_FIXTURE');
+ expect(store.listEvents(chat.id,0).filter(event=>(event.data as {agentMessage?:{direction:string}}).agentMessage?.direction==='sent')).toHaveLength(0);
+ await manager.callBoundTool(token,'message_ask',{...args,text:'DIFFERENT_FIXTURE'},'uncertain');
+ await expect(manager.callBoundTool(token,'message_ask',args,'uncertain')).rejects.toMatchObject({code:'idempotency_conflict'});
+ expect(ask).toHaveBeenCalledTimes(5);
+ const settled=store.listEvents(chat.id,0).map(event=>(event.data as {operationResult?:import('../shared/operation-results').OperationResult}).operationResult).filter(result=>result?.id===receipts[0].id);
+ expect(settled.map(result=>result?.state)).toEqual(['unknown']);
+ expect(store.listEvents(chat.id,0).filter(event=>(event.data as {agentMessage?:{direction:string}}).agentMessage?.direction==='sent')).toHaveLength(1);
 });
