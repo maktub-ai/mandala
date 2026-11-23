@@ -1516,13 +1516,36 @@ it('interrupt and explicit continuation send the new draft ahead of existing que
  expect(turns).toEqual(['first','urgent']);
  expect(manager.listUserInputs(chat.id)).toEqual([expect.objectContaining({id:queued.id,state:'queued'})]);
 });
+it.each([
+ ['interrupted', 'user', 'interrupted', 'user_stopped'],
+ ['completed', 'user', 'idle', undefined],
+ ['failed', 'user', 'error', undefined],
+ ['unknown', 'user', 'interrupted', undefined],
+ ['interrupted', undefined, 'interrupted', undefined],
+] as const)('only marks affirmative native interruption from direct Stop (%s / %s)',async (native,source,status,reason)=>{
+ await manager.close();manager=createSessionManager(store,async()=>structuredClone(config),async o=>({
+  ...await factory(o), interrupt:async()=>o.onEvent({method:'turn/completed',params:{threadId:'native-1',turn:{id:'turn-1',status:native}}}),
+ }));
+ const chat=await manager.create('p','a');await manager.send(chat.id,'first');
+ options.onEvent({method:'turn/started',params:{threadId:'native-1',turn:{id:'turn-1'}}});
+ await manager.stop(chat.id,undefined,false,source);
+ const terminal=store.listEvents(chat.id,0).filter(e=>e.kind==='status').at(-1)?.data as {status:string;reason?:string};
+ expect(terminal.status).toBe(status);expect(terminal.reason).toBe(reason);
+});
+it('does not infer the user requested a spontaneous native interruption',async()=>{
+ const chat=await manager.create('p','a');await manager.send(chat.id,'first');
+ options.onEvent({method:'turn/started',params:{threadId:'native-1',turn:{id:'turn-1'}}});
+ options.onEvent({method:'turn/completed',params:{threadId:'native-1',turn:{id:'turn-1',status:'interrupted'}}});
+ expect(store.listEvents(chat.id,0).filter(e=>e.kind==='status').at(-1)?.data).not.toHaveProperty('reason','user_stopped');
+});
 it('a stop timeout does not claim native termination is confirmed', async () => {
  vi.useFakeTimers();
  manager.close();manager=createSessionManager(store,async()=>structuredClone(config),async o=>({...await factory(o),interrupt:async()=>{}}));
  const chat=await manager.create('p','a');await manager.send(chat.id,'first');
  options.onEvent({method:'turn/started',params:{threadId:'native-1',turn:{id:'turn-1'}}});
- const stop=manager.stop(chat.id);await vi.advanceTimersByTimeAsync(3000);
+ const stop=manager.stop(chat.id,undefined,false,"user");await vi.advanceTimersByTimeAsync(3000);
  expect(await stop).toBe(false);expect(turns).toEqual(['first']);
+ expect(store.listEvents(chat.id,0).filter(e=>e.kind==='status').at(-1)?.data).not.toHaveProperty('reason','user_stopped');
 });
 it('keeps running when a blocking approval resolves but an asynchronous question remains', async () => {
  const chat=await manager.create('p','a');await manager.send(chat.id,'ask');
@@ -1641,12 +1664,13 @@ it("waits for a cancelled preparation's native writer to close before confirming
   const pending = manager.send(chat.id, "next");
   await started;
   let stopped = false;
-  const stop = manager.stop(chat.id).then(() => { stopped = true; });
+  const stop = manager.stop(chat.id,undefined,false,"user").then(() => { stopped = true; });
   await new Promise(resolve => setImmediate(resolve));
   const stoppedBeforeClose = stopped;
   releaseClose(); releaseResume();
   await Promise.all([stop, pending]);
   expect(stoppedBeforeClose).toBe(false);
+  expect(store.listEvents(chat.id,0).filter(e=>e.kind==='status').at(-1)?.data).toHaveProperty('reason','user_stopped');
 });
 
 

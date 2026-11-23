@@ -945,7 +945,7 @@ export function createHttpServer({
             if (b.expectedExecutionId !== undefined && b.expectedExecutionId !== null && typeof b.expectedExecutionId !== 'string')
               throw new DomainError('invalid_execution_id',400,'Invalid execution identity');
             if(b.continueQueued!==undefined&&typeof b.continueQueued!=='boolean')throw new DomainError('invalid_stop_options',400,'Invalid stop options');
-            const stopConfirmed=await manager.stop(id,b.expectedExecutionId,b.continueQueued===true);
+            const stopConfirmed=await manager.stop(id,b.expectedExecutionId,b.continueQueued===true,"user");
             return json(res,200,{conversation:store.getConversation(id),approvals:manager.getApprovals(id),stopConfirmed});
           }
           else if (action === "questions" && approvalId) await manager.answerQuestions(id,approvalId,b.answers);

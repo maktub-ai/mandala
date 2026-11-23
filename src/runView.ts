@@ -103,7 +103,7 @@ export function presentRun(turn: ChatTurn) {
   }
   const summarized = summarizeOperations(turn.events);
   const isBackground = (op: Operation) => op.item.hook?.source === "platform" && op.item.hook.event === "systemTask";
-  const {answers,progress,output,incomplete,latestProgress}=presentTurnText(turn,status);
+  const {answers,progress,output,incomplete,userStopped,latestProgress}=presentTurnText(turn,status);
   const byId = new Map(turn.events.map(event => [event.id, event]));
   const all: RunOperation[] = summarized.map(operation => {
     const events = operation.eventIds.map(id => byId.get(id)).filter((e): e is DisplayEvent => !!e);
@@ -187,7 +187,7 @@ export function presentRun(turn: ChatTurn) {
   }
   return { answers, progress, output, latestProgress, timeline, activityTimeline:groupActivity(timeline,cli), reasoning: [...reasoning.entries()].filter(([key]) =>
     !key.endsWith(":content") || !reasoning.has(key.replace(/:content$/, ":summary"))),
-    operations, background, modelCalls, status, queueReason, incomplete, startedAt, endedAt, durationMs,
+    operations, background, modelCalls, status, queueReason, incomplete, userStopped, startedAt, endedAt, durationMs,
     nativeDuration, approvalMs, approvalStarted, maxParallel, lastActivityAt };
 }
 

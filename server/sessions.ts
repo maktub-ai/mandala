@@ -149,7 +149,7 @@ export interface SessionManager {
   send(id: string, text: string, attachments?: NativeAttachment[], references?: ComposerReferenceSelection[]): Promise<void>;
   executionId(id: string): string | null;
   presentTaskDecision(taskId:string):void;
-  stop(id: string, expectedExecutionId?: string | null, continueQueued?:boolean): Promise<boolean>;
+  stop(id: string, expectedExecutionId?: string | null, continueQueued?:boolean, source?:"user"): Promise<boolean>;
   continue(id: string, text: string, attachments?: NativeAttachment[], references?: ComposerReferenceSelection[], commandKey?: string): Promise<void>;
   answerQuestions(id:string, approvalId:string, answers:unknown):Promise<void>;
   submitAsyncQuestion(id:string,approvalId:string,answers:unknown,telegramRequestId?:string):QueuedInput;
@@ -189,6 +189,7 @@ export function createSessionManager(
       approvals: Map<string, Approval>;
       approvalScope?: ConversationApprovalScope;
       stopRequested: boolean;
+      userStopRequested?: boolean;
       preparing?: boolean;
       controller: AbortController;
       stopping?: Promise<void>;
@@ -376,9 +377,9 @@ export function createSessionManager(
     if (!c) throw new Error("conversation not found");
     return c;
   };
-  const state = (id: string, status: Conversation["status"], diagnostic?:string) => {
+  const state = (id: string, status: Conversation["status"], diagnostic?:string, reason?:"user_stopped") => {
     store.updateConversation(id, { status });
-    appendEvent(id, "status", { status });
+    appendEvent(id, "status", { status, ...(reason ? {reason} : {}) });
     const runtime=live.get(id),invocation=runtime?.invocation;
     if(['idle','interrupted','error'].includes(status)&&runtime)runtime.admitted=false;
     if(['idle','interrupted','error'].includes(status))runtime?.usage?.finish(status==='idle'?'completed':status==='error'?'failed':'interrupted',undefined,diagnostic);
@@ -685,6 +686,7 @@ export function createSessionManager(
     tools.set(current.toolToken, { conversationId: id, invocationId: current.runId, projectId:before.projectId, agentId:before.agentId });
 
     current.stopRequested = false;
+    current.userStopRequested = false;
     current.activeTurnId = undefined;
     current.invocation = undefined;
     let acceptedUserEvent:ReturnType<Store['appendEvent']>|undefined;
@@ -1045,11 +1047,10 @@ export function createSessionManager(
               current.activeTurnId = undefined;
               store.updateConversation(id, { turnId: null });
               const status =
-                current.stopRequested || p.turn.status === "interrupted"
-                  ? "interrupted"
-                  : p.turn.status === "failed"
-                    ? "error"
-                    : "idle";
+                p.turn.status === "completed" ? "idle"
+                  : p.turn.status === "failed" ? "error"
+                    : current.stopRequested || p.turn.status === "interrupted" ? "interrupted"
+                      : "idle";
               if (p.turn.error)
                 store.appendEvent(id, "error", {
                   message: p.turn.error.message,
@@ -1062,7 +1063,7 @@ export function createSessionManager(
                 current.verification = undefined;
                 client?.close();
               }
-              state(id, status);
+              state(id, status, undefined, current.userStopRequested && !p.turn.error && p.turn.status === "interrupted" ? "user_stopped" : undefined);
               current.finishStop?.();
               finishTask(id, status === "idle");
               if (status === "idle") {
@@ -1552,13 +1553,14 @@ export function createSessionManager(
       queueMicrotask(() => { void pump(id); });
     }
   };
-  const stopInvocation = async (id:string) => {
+  const stopInvocation = async (id:string, source?:"user") => {
       const c = chat(id),
         r = live.get(id);
       if (!r || (!r.preparing && c.status !== "running" && c.status !== "approval"))
         throw new Error("conversation not running");
       if (r.stopping) return r.stopping;
       r.stopRequested = true;
+    r.userStopRequested = source === "user";
       revokeBusinessCli(r);
       if(r.preparing){
         // No turn RPC has been sent. Invalidate ownership before releasing only the unsent claim.
@@ -1566,7 +1568,7 @@ export function createSessionManager(
         r.usage?.finish('interrupted');r.generation++;live.delete(id);r.controller.abort();await r.client?.close();r.approvals.clear();
         if(r.directoryOwner)resources.releaseUnsubmitted(r.directoryOwner.kind,r.directoryOwner.id);
         if(r.queuedInputId&&scheduler.listUserInputs(id).find(input=>input.id===r.queuedInputId)?.source?.kind==='coordination'&&scheduler.requeueUnsubmittedInput(r.queuedInputId))r.queuedInputId=undefined;
-        state(id,'interrupted');finishTask(id,false,r);queueMicrotask(()=>{void wakeDirectories();});return;
+        state(id,'interrupted',undefined,r.userStopRequested?'user_stopped':undefined);finishTask(id,false,r);queueMicrotask(()=>{void wakeDirectories();});return;
       }
       r.stopping = new Promise<void>(resolve => {
         const timer = setTimeout(() => {
@@ -2440,12 +2442,12 @@ export function createSessionManager(
       return run(id,text,true,false,undefined,input.id,attachments,references);
     },
     executionId(id) { return live.get(id)?.runId ?? null; },
-    async stop(id, expectedExecutionId, continueQueued=false) {
+    async stop(id, expectedExecutionId, continueQueued=false, source) {
       if (expectedExecutionId !== undefined && (live.get(id)?.runId ?? null) !== expectedExecutionId)
         throw new DomainError('execution_changed', 409, 'Execution changed; refresh before stopping');
       if(chat(id).purpose==='mandala-main'){
         coordination.pauseDelivery(id);
-        if(live.get(id)?.preparing||['running','approval'].includes(chat(id).status))await stopInvocation(id);
+        if(live.get(id)?.preparing||['running','approval'].includes(chat(id).status))await stopInvocation(id,source);
         const confirmed=!live.get(id)?.invocation&&!hasUnprovenNativeOccupancy(store,id)&&!store.database.prepare('SELECT owner_id FROM task_directory_claims WHERE conversation_id=? AND submitted=1').get(id);
         if(confirmed&&continueQueued){const next=scheduler.listUserInputs(id).find(input=>input.state==='queued'&&isHumanInput(input));if(next)await manager.sendQueuedInput(id,next.id,manager.executionId(id));}
         return confirmed;
@@ -2472,7 +2474,7 @@ export function createSessionManager(
       for(const row of store.database.prepare("SELECT DISTINCT json_extract(continuation,'$.taskId') AS id FROM task_runs WHERE json_extract(continuation,'$.conversationId')=? AND json_extract(continuation,'$.policy')='resume'").all(id)){
         if(row.id===goalId)continue;const task=tasks.getTask(root,row.id as string);if(task.futureAutoResume){revoke(task.id);stoppedGoal=true;}
       }
-      if(runtime?.preparing||['running','approval'].includes(chat(id).status))await stopInvocation(id);
+      if(runtime?.preparing||['running','approval'].includes(chat(id).status))await stopInvocation(id,source);
       else if(!stoppedMessages&&!stoppedGoal)throw new Error('conversation not running');
       const releasedExecutionId=manager.executionId(id);
       if(live.get(id)?.preparing||['running','approval'].includes(chat(id).status)||releasedExecutionId!==null&&releasedExecutionId!==stoppedExecutionId)throw new DomainError('execution_changed',409,'Execution changed; refresh before stopping');

@@ -17,6 +17,8 @@ export function presentTurnText(turn:ChatTurn,status:string){
   }
  }
  const text=messages.filter(message=>message.kind==='text'&&message.text.length>0&&items.get(message.item??'')?.phase!=='analysis'),last=text.at(-1);
+ const terminalStatus=events.filter(event=>event.kind==='status').at(-1)?.data as {status?:string;reason?:string}|undefined;
+ const userStopped=status==='interrupted'&&terminalStatus?.status==='interrupted'&&terminalStatus.reason==='user_stopped';
  const incomplete=['error','interrupted'].includes(status)||['length','aborted','error'].includes(items.get(last?.item??'')?.stopReason??'');
  const explicit=text.filter(message=>['final_answer','partial_answer'].includes(items.get(message.item??'')?.phase??''));
  const selected=incomplete?[]:explicit.length?explicit:status==='idle'&&last&&items.get(last.item??'')?.phase!=='commentary'&&items.get(last.item??'')?.stopReason!=='toolUse'?[last]:[];
@@ -43,5 +45,5 @@ export function presentTurnText(turn:ChatTurn,status:string){
   const message=event.kind==='text'?(data.itemId?byItem.get(data.itemId):byEvent.get(event.id)):event.kind==='tool'&&data.method==='item/completed'&&data.params?.item?.type==='agentMessage'?byItem.get(data.params.item.id):undefined;
   if(message)latestProgress={text:observedText.get(message.item??'')??message.text,source:output.includes(message)?'output':'commentary',runId:data.runId??runId,sourceEventId:event.id,updatedAt:event.createdAt,historical};
  }
- return {answers,progress,output,incomplete,latestProgress};
+ return {answers,progress,output,incomplete,userStopped,latestProgress};
 }

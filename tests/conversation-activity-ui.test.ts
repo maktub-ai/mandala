@@ -30,6 +30,19 @@ it('keeps received partial output discoverable after stop instead of hiding all 
  const html=render([event(2,'tool',{method:'item/started',params:{item:{id:'command',type:'commandExecution',command:'inspect',aggregatedOutput:'Reading 1/3',status:'inProgress'}}}),event(3,'status',{status:'interrupted'})]);
  expect(html).toContain('执行命令');expect(html).toContain('已中断');expect(html).not.toContain('class="operation-content"');expect(html).toContain('aria-expanded="false"');
 });
+it('labels intentional stop neutrally and keeps received partial text visible',()=>{
+ const html=render([event(2,'text',{text:'Partial text'}),event(3,'status',{status:'interrupted',reason:'user_stopped'})]);
+ expect(html).toContain('本轮已停止');
+ expect(html).toContain('Partial text');
+ expect(html).not.toContain('本轮没有完整的最终答复');
+});
+it('still surfaces an unexpected provider failure or unknown interruption',()=>{
+ for(const status of ['error','interrupted']){
+  const html=render([event(2,'text',{text:'Partial text'}),event(3,'error',{message:'Native runtime failed'}),event(4,'status',{status})]);
+  expect(html).toContain('Native runtime failed');
+  expect(html).toContain('本轮没有完整的最终答复');
+ }
+});
 it('folds successful history without mounting tool output and keeps the final answer outside the process',()=>{
  const html=render([event(2,'tool',{method:'item/completed',params:{item:{id:'command',type:'commandExecution',command:'inspect',aggregatedOutput:'Huge log',status:'completed'}}}),event(3,'text',{text:'Final answer'}),event(4,'status',{status:'idle'})]);
  expect(html).toContain('aria-expanded="false"');expect(html).not.toContain('Huge log');expect(html).not.toContain('Final answer');
