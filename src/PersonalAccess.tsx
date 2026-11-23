@@ -1,3 +1,4 @@
+import {partitionRemoteApprovals,remoteApprovalActions} from './remote-approval-presentation';
 import { AccountAvatar, AvatarEditor, accountInitial } from './AccountAvatar';
 import { CloudSignIn, DesktopSignIn, DesktopApproval, desktopAccount } from './AccountSignIn';
 import Input from './ui/Input';
@@ -65,6 +66,7 @@ export default function PersonalAccess() {
   useEffect(()=>{if(session?.mode==='desktop'&&session.partition&&desktopAccount()?.partition!==session.partition)void desktopAccount()?.restart();},[session?.partition]);
   const [busy, setBusy] = useState(false), [panel, setPanel] = useState(false), [choose, setChoose] = useState(false);
   const [connectionMode, setConnectionMode] = useState('official'), [grants, setGrants] = useState<Grant[]>([]);
+  const [grantClock,setGrantClock]=useState(()=>Date.now()),grantReads=useRef(0);
   const errorNotice = useRef<HTMLParagraphElement>(null);
   const accountReturnFocus=useRef<HTMLElement|null>(null);
   const sessionGeneration = useRef(0);
@@ -120,10 +122,11 @@ export default function PersonalAccess() {
     try { await work(); } catch (reason) { setError(`${failure}: ${errorMessage(reason)}`); } finally { setBusy(false); }
   };
   const readGrants = async (signal?: AbortSignal) => {
+    const generation=++grantReads.current;
     const response = await fetch('/auth/access', { signal });
     if (!response.ok) throw new Error(l('无法读取电脑授权，请刷新重试。', 'Cannot read computer access. Refresh to retry.'));
     const value = await response.json();
-    if (!signal?.aborted) setGrants(value.grants);
+    if (!signal?.aborted&&generation===grantReads.current) {setGrants(value.grants);setGrantClock(Date.now());}
   };
   useEffect(() => {
     const controller = new AbortController();
@@ -136,10 +139,11 @@ export default function PersonalAccess() {
     return startPolling(signal => refresh(signal).catch(() => {}), 5000, { immediate: false });
   }, [session?.user?.id, session?.mode]);
   useEffect(() => {
-    if (!panel || !['local','desktop'].includes(session?.mode??'') || !session?.connection) return;
-    return startPolling(signal => readGrants(signal), 3000, { onError: reason => setError(errorMessage(reason)) });
+    if (!['local','desktop'].includes(session?.mode??'') || !session?.connection || !session.user) return;
+    return startPolling(signal => readGrants(signal), panel?3000:8000, { onError: reason => {if(panel)setError(errorMessage(reason));} });
   }, [panel, session?.mode, session?.connection?.device.id]);
   useEffect(() => { if (error) errorNotice.current?.focus(); }, [error]);
+  useEffect(()=>{if(!grants.some(grant=>grant.status==='pending'))return;const timer=setInterval(()=>setGrantClock(Date.now()),1000);return()=>clearInterval(timer);},[grants]);
   const fields = (form: HTMLFormElement) => Object.fromEntries(new FormData(form));
   const accountFields = (service = false, creating = false) => <>
     <label>{service ? l('服务账号', 'Service account') : l('账号', 'Account')}<Input name="username" autoComplete={service ? 'section-service username' : 'username'} required maxLength={128} autoCapitalize="none" spellCheck={false} pattern={creating ? '[a-zA-Z0-9_.@\\-]+' : undefined} aria-describedby={creating ? 'personal-setup-help' : undefined} /></label>
@@ -203,8 +207,28 @@ export default function PersonalAccess() {
     if (!/^[A-Za-z0-9+/]{43}=$/.test(code) || atob(code).length !== 32 || !session.selectedDeviceId) throw new Error(l('配对码无效，请从电脑重新复制。', 'Invalid pairing code. Copy it again from the computer.'));
     localStorage.setItem(pinName(session.selectedDeviceId), code); setPinnedHost(code);
   }, l('配对失败', 'Pairing failed')); }}><label>{l('电脑配对码', 'Computer pairing code')}<Input value={pairingCode} onChange={event => setPairingCode(event.target.value)} autoComplete="off" spellCheck={false} autoCapitalize="none" required /></label>{notice}<Button type="submit" className="primary" disabled={busy || !browserKey}>{l('确认配对', 'Confirm pairing')}</Button></form><Button onClick={() => setChoose(true)}>{l('选择其他电脑', 'Choose another computer')}</Button></section></main>;
+  const {pending:pendingGrants,olderPending:olderPendingGrants,history:grantHistory}=partitionRemoteApprovals(grants,grantClock);
+  const decideGrant=(grant:Grant,state:'approved'|'denied'|'revoked')=>{
+    if(!remoteApprovalActions(grant).includes(state))return;
+    const failure=state==='approved'?l('批准失败','Approval failed'):state==='denied'?l('拒绝失败','Denial failed'):l('撤销失败','Revocation failed');
+    void perform(async()=>{
+      await action('/auth/access',{clientId:grant.clientId,state,...state==='approved'?{publicKey:grant.publicKey}:{}});
+      grantReads.current++;
+      setGrants(items=>items.map(value=>value.clientId===grant.clientId&&value.requestedAt===grant.requestedAt?{...value,status:state}:value));
+      await readGrants();
+    },failure);
+  };
+  const grantRows=(items:Grant[])=>items.map(grant=><div className="personal-device" key={grant.clientId}>
+    <div><strong>{l('浏览器','Browser')} {grant.clientId.slice(0,12)}</strong>
+      <p>{grantLabel(grant.status)} · {new Date(grant.requestedAt).toLocaleString(en?'en':'zh-CN')}</p>
+      {grant.publicKey&&<p><code>{remoteKeyFingerprint(grant.publicKey)}</code></p>}
+    </div>
+    <div className="personal-actions">{remoteApprovalActions(grant).map(state=><Button key={state} disabled={busy} onClick={()=>decideGrant(grant,state)}>{state==='approved'?l('批准','Approve'):state==='denied'?l('拒绝','Deny'):l('撤销','Revoke')}</Button>)}</div>
+  </div>);
   const userInitial = accountInitial(session.user.username);
   return <div className="personal-shell">{session.mode === 'control' && browserKey ? <RemoteWorkspace userId={session.user.id} deviceId={session.selectedDeviceId!} key={session.selectedDeviceId} hostOnline={session.devices?.find(device=>device.id===session.selectedDeviceId)?.online} hostPublicKey={pinnedHost} keyPair={browserKey} computerName={(session.devices?.find(device => device.id === session.selectedDeviceId)?.name ?? 'Mandala') + (session.preview ? l(' · 隔离验收', ' · Acceptance preview') : '')} onAccount={() => { setError(''); setPanel(true); }} /> : <App draftIdentity={session.user.id} key={session.mode === 'control' ? session.selectedDeviceId : session.user.id} userInitial={userInitial} account={{username:session.user.username,status:session.preview ? l('隔离验收 · 合成数据', 'Acceptance preview · Synthetic data') : session.mode === 'control' ? session.devices?.find(device => device.id === session.selectedDeviceId)?.name ?? l('离线','Offline') : l('本机','This computer'),avatar:customAvatar || session.user.avatarUrl,onOpen:()=>{setError('');setPanel(true);}}} />}
+    {!panel&&['local','desktop'].includes(session.mode)&&session.connection&&pendingGrants.length>0&&
+      <div role="status" className="personal-pending-banner"><span>{l('有新的远程连接申请','New remote access request')}</span><Button onClick={()=>setPanel(true)}>{l('查看申请','Review request')}</Button></div>}
     {panel && <Dialog label={l('账号与连接', 'Account and connection')} className="personal-account-panel" returnFocusRef={accountReturnFocus} onClose={closePanel} locked={busy}>
       <div className="personal-heading"><h1>{l('账号与连接', 'Account and connection')}</h1><Button type="button" className="icon-button" aria-label={l('关闭', 'Close')} onClick={closePanel} disabled={busy}><Icon name="close" size={18} /></Button></div>
       {previewNotice}<p className="personal-identity"><AccountAvatar name={session.user.username} source={customAvatar || session.user.avatarUrl} className="sidebar-account-avatar" />{session.user.username}<span>{session.mode === 'desktop' ? l('Mandala 账号','Mandala account') : session.mode === 'local' ? l('本地身份', 'Local identity') : l('服务账号', 'Service account')}</span></p>
@@ -219,8 +243,10 @@ export default function PersonalAccess() {
           <Button type="submit" disabled={busy}>{l('保存名称', 'Save name')}</Button>
         </form></Disclosure>
         {session.connection.pairingCode && <section><h2>{l('电脑配对码', 'Computer pairing code')}</h2><p>{l('批准手机浏览器后，将此配对码直接复制到手机；连接服务不能替你确认电脑身份。', 'After approving the phone browser, copy this code directly to it to verify this computer.')}</p><pre aria-label={l('电脑配对码', 'Computer pairing code')}>{session.connection.pairingCode}</pre></section>}
-        <DetailSection title={l('设备授权', 'Device access')} icon="users"><section className="personal-grants"><p>{l('只批准你刚发起的浏览器请求。撤销后，该浏览器将无法继续访问这台电脑。', 'Approve only a browser request you just made. Revoking access blocks that browser from this computer.')}</p>
-          {grants.length ? grants.map(grant => <div className="personal-device" key={grant.clientId}><div><strong>{l('浏览器', 'Browser')} {grant.clientId.slice(0, 12)}</strong><p>{grantLabel(grant.status)} · {new Date(grant.requestedAt).toLocaleString(en ? 'en' : 'zh-CN')}</p>{grant.publicKey && <p><code>{remoteKeyFingerprint(grant.publicKey)}</code></p>}</div><div className="personal-actions">{grant.status !== 'approved' ? <><Button disabled={busy} onClick={() => void perform(async () => { await action('/auth/access', { clientId: grant.clientId, state: 'approved', publicKey: grant.publicKey }); await readGrants(); }, l('批准失败', 'Approval failed'))}>{l('批准', 'Approve')}</Button><Button disabled={busy} onClick={() => void perform(async () => { await action('/auth/access', { clientId: grant.clientId, state: 'denied' }); await readGrants(); }, l('拒绝失败', 'Denial failed'))}>{l('拒绝', 'Deny')}</Button></> : <Button disabled={busy} onClick={() => void perform(async () => { await action('/auth/access', { clientId: grant.clientId, state: 'revoked' }); await readGrants(); }, l('撤销失败', 'Revocation failed'))}>{l('撤销', 'Revoke')}</Button>}</div></div>) : <p>{l('暂无设备连接请求', 'No device access requests')}</p>}
+        <DetailSection title={l('设备授权', 'Device access')} icon="users"><section className="personal-grants"><p>{l('只批准你认得的浏览器请求。撤销后，该浏览器将无法继续访问这台电脑。', 'Approve only a browser request you recognize. Revoking access blocks that browser from this computer.')}</p>
+          {pendingGrants.length>0?<section aria-label={l('待批准的新请求','New requests to approve')} aria-live="polite">{grantRows(pendingGrants)}</section>:<p>{l('没有最近五分钟内的待批准请求。','No pending requests from the last five minutes.')}</p>}
+          {olderPendingGrants.length>0&&<Disclosure title={l('较早的待处理请求','Older pending requests')}><p>{l('这些申请仍待处理。请先核对浏览器指纹，再批准或拒绝。','These requests are still pending. Verify the browser fingerprint before approving or denying.')}</p>{grantRows(olderPendingGrants)}</Disclosure>}
+          {grantHistory.length>0&&<Disclosure title={l('授权历史','Access history')}>{grantRows(grantHistory)}</Disclosure>}
         </section></DetailSection>
         <Button disabled={busy} onClick={() => void perform(async () => { await action('/auth/disconnect'); setConnectionMode('local'); }, l('断开服务失败', 'Disconnect failed'))}>{l('断开服务，回到仅本机', 'Disconnect and use locally')}</Button>
       </> : session.mode==='desktop' ? <><p>{l('关联此账号与电脑后，可从其他设备请求远程访问。对话和任务仍保留在本机。','Link this computer to your account to request remote access from other devices. Conversations and tasks stay here.')}</p><form onSubmit={event=>{event.preventDefault();void perform(()=>action('/auth/connect',fields(event.currentTarget)));}}><label>{l('电脑名称','Computer name')}<Input name="name" defaultValue={session.computerName} required maxLength={128} autoComplete="off"/></label><Button type="submit" disabled={busy}>{l('关联这台电脑','Link this computer')}</Button></form></> : <>
