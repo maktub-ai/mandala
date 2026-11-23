@@ -140,10 +140,34 @@ it("previews only a file linked in the authorized chat and rechecks access after
     await writeFile(secret, "synthetic secret");
     store.appendEvent(chat.id, "text", { itemId: "secret", text: `[环境](${secret})` });
     expect((await call(chat.id, secret)).status).toBe(403);
+    const trustedTempAlias = join(process.platform === "darwin" ? "/tmp" : tmpdir(), "mana-verified-temp-");
+    const aliasHome = await mkdtemp(trustedTempAlias);
+    try {
+      const direct = join(aliasHome, "deliverable.txt");
+      await writeFile(direct, "Synthetic deliverable through system temp alias");
+      store.appendEvent(chat.id, "text", {itemId:"verified-temp", text:`[Delivered](${direct})`});
+      expect(await call(chat.id, direct)).toMatchObject({status:200,data:{text:"Synthetic deliverable through system temp alias"}});
+      if (process.platform === "win32") {
+        const differentCase = join(aliasHome, "DELIVERABLE.txt");
+        store.appendEvent(chat.id, "text", {itemId:"verified-case", text:`[Delivered](${differentCase})`});
+        expect(await call(chat.id, differentCase)).toMatchObject({status:200,data:{text:"Synthetic deliverable through system temp alias"}});
+      }
+    } finally { await rm(aliasHome,{recursive:true,force:true}); }
+
     const shortcut = join(artifacts, "shortcut.txt");
     await symlink(unrelated, shortcut);
     store.appendEvent(chat.id, "text", { itemId: "shortcut", text: `[快捷方式](${shortcut})` });
     expect((await call(chat.id, shortcut)).status).toBe(403);
+    const inScopeShortcut = join(home, "linked-shortcut.md");
+    await symlink(path, inScopeShortcut);
+    store.appendEvent(chat.id, "text", { itemId: "within-home-shortcut", text: `[Shortcut](${inScopeShortcut})` });
+    const alias = join(home, "redirected-output");
+    await symlink(join(home, "outputs"), alias, process.platform === "win32" ? "junction" : "dir");
+    const aliasFile = join(alias, "delivered one.md");
+    store.appendEvent(chat.id, "text", { itemId: "directory-shortcut", text: `[Directory alias](<${aliasFile}>)` });
+    expect((await call(chat.id, inScopeShortcut)).status).toBe(403);
+    expect((await call(chat.id, aliasFile)).status).toBe(403);
+    expect(await call(chat.id, [path, inScopeShortcut, aliasFile])).toMatchObject({status:200,data:{hrefs:[path]}});
     let checked = 0;
     const original = manager.authorizeConversationRead.bind(manager);
     const check = vi.spyOn(manager, "authorizeConversationRead").mockImplementation(id => {

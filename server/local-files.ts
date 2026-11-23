@@ -1,11 +1,13 @@
 import { MAX_FILE_REFERENCE_BATCH, MAX_FILE_REFERENCE_BODY_BYTES, isConcreteLocalFileReference, isRelativeLocalFileReference, messageFileLinks, withoutFileLine } from "../shared/local-file-links";
-import { constants } from "node:fs";
-import { open, realpath, stat } from "node:fs/promises";
-import { basename, isAbsolute, resolve, sep } from "node:path";
+import { constants, realpath as fsRealpath } from "node:fs";
+import { lstat, open, realpath as ordinaryRealpath, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { DomainError } from "../shared/workspace-contracts";
 
 const LIMIT = 1024 * 1024;
+const realpath = process.platform === "win32" ? promisify(fsRealpath.native) : ordinaryRealpath;
 export function localFilePath(href: string, cwd?: string) {
   try {
     const value = withoutFileLine(href);
@@ -28,23 +30,64 @@ export function linkedLocalFiles(text: string, cwd?: string) {
 
 async function openScopedLocalFile(href: string, roots: string[], linked = false, cwd?: string) {
   const requested = localFilePath(href, cwd);
-  const canonicalRoots = (await Promise.all(roots.map(root => realpath(root).catch(() => null))))
-    .filter((root): root is string => !!root);
-  const inside = (path: string) => canonicalRoots.some(root => path.startsWith(root + sep));
+  const scopedRoots = (await Promise.all(roots.map(async root => ({
+    root: resolve(root), canonical: await realpath(root).catch(() => null),
+  })))).filter((scope): scope is {root: string; canonical: string} => scope.canonical !== null);
+  const canonicalRoots = scopedRoots.map(scope => scope.canonical);
+  const inside = (value: string) => canonicalRoots.some(root => value.startsWith(root + sep));
+  // A case-folded Windows prefix represents a configured root only if its
+  // actual spelling canonicalizes to that root, including on case-sensitive volumes.
+  const rootedRequest = (await Promise.all(scopedRoots.flatMap(({root, canonical}) =>
+    [...new Set([root, canonical])].map(async (spelling) => {
+      const prefix = requested.slice(0, spelling.length);
+      if (requested[spelling.length] !== sep || !(prefix === spelling ||
+          process.platform === "win32" && prefix.toLowerCase() === spelling.toLowerCase())) return null;
+      if (prefix !== spelling && await realpath(prefix).catch(() => null) !== canonical) return null;
+      return { root: prefix, spelling: canonical + requested.slice(spelling.length) };
+    })))).filter((scope): scope is {root: string; spelling: string} => scope !== null)
+    .sort((a, b) => b.root.length - a.root.length);
   // Check the requested location first so an outside path does not disclose existence.
-  const requestedRoots = [...roots.map(root => resolve(root)), ...canonicalRoots];
-  if (!linked && !requestedRoots.some(root => requested.startsWith(root + sep))) throw new DomainError("file_scope", 403, "File is outside this chat's preview scope");
+  if (!linked && !rootedRequest.length) throw new DomainError("file_scope", 403, "File is outside this chat's preview scope");
   let path: string;
   try { path = await realpath(requested); } catch { throw new DomainError("file_missing", 404, "Local file is unavailable"); }
-  // A stored chat link grants access to this exact file, never a symlink's outside target.
-  if (!inside(path) && !(linked && path === requested)) throw new DomainError("file_scope", 403, "File is outside this chat's preview scope");
+  // Only a configured root itself may be an alias (for example /tmp on macOS).
+  // A transcript link names a file, not a symlink target below such a root.
+  const deny = () => new DomainError("file_scope", 403, "File is outside this chat's preview scope");
+  const expectedPaths = [...rootedRequest, { spelling: requested, root: null as string | null }];
+  let sameLocation = expectedPaths.some(({spelling}) => spelling === path);
+  if (process.platform === "win32") {
+    // Windows may return the on-disk casing. A folded match is valid only
+    // when each component below the chosen root is an ordinary entry.
+    const expected = expectedPaths.find(({spelling, root}) => root !== null && spelling.toLowerCase() === path.toLowerCase()) ??
+      expectedPaths.find(({spelling}) => spelling.toLowerCase() === path.toLowerCase());
+    if (expected) {
+      sameLocation = true;
+      for (let entry = requested; dirname(entry) !== entry && entry !== expected.root; entry = dirname(entry)) {
+        if (entry.toLowerCase() === expected.root?.toLowerCase()) break;
+        const detail = await lstat(entry).catch(() => null);
+        if (!detail || detail.isSymbolicLink()) { sameLocation = false; break; }
+      }
+    }
+  }
+  if (!sameLocation || !inside(path) && !linked) throw deny();
   const parts = path.toLowerCase().split(sep);
   if (parts.some((part, index) => [".ssh", ".aws", ".git", ".config"].includes(part) || part === ".codex" && parts[index + 1] !== "worktrees") || /^(?:\.env(?:\..*)?|auth\.json|credentials|id_rsa|id_ed25519)$/i.test(basename(path)))
     throw new DomainError("file_scope", 403, "File is outside this chat's preview scope");
+  const requestedEntry = await lstat(requested).catch(() => null);
+  if (requestedEntry?.isSymbolicLink()) throw deny();
+  if (!requestedEntry) throw new DomainError("file_missing", 404, "Local file is unavailable");
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(() => {
     throw new DomainError("file_missing", 404, "Local file is unavailable");
   });
-  return { handle, path, requested };
+  try {
+    const opened = await handle.stat();
+    if (opened.dev !== requestedEntry.dev || opened.ino !== requestedEntry.ino)
+      throw new DomainError("file_changed", 409, "File changed while loading; open it again");
+    return { handle, path, requested };
+  } catch (error) {
+    await handle.close();
+    throw error;
+  }
 }
 
 export async function readLocalFilePreview(href: string, roots: string[], linked = false, cwd?: string) {
