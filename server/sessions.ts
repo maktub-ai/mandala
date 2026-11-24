@@ -12,7 +12,7 @@ import {mandalaPlanningSkill} from './mandala-planning-skill';
 import {createMandalaContinuity} from './mandala-continuity';
 import {isHumanInput} from '../shared/tasks';
 import {createMandalaCoordination} from './mandala-coordination';
-import { mandalaInstructions, mandalaContinuity, mandalaContextBoundary } from "./mandala";
+import { mandalaInstructions, mandalaContinuity, mandalaContextBoundary, mandalaWriterBoundary, parkPriorWriterReceipts } from "./mandala";
 import { effectiveResponseStyle } from "../shared/response-style";
 import { responseStyleInstructions } from "./response-style";
 import { createCodeGraph, type CodeGraphService } from './code-graph';
@@ -1408,6 +1408,7 @@ export function createSessionManager(
     if(closed||queuedSendPending(id)||continuity.blocked(id)||branching.has(id)||chat(id).status!=='idle')return;
       admissionConfig.set(id,config);
     messages.queueReplies(id);
+    parkPriorWriterReceipts(store,id);
     // Recovery also presents notify-only reports, which do not create an automatic input.
     for(const row of store.database.prepare("SELECT id,task_id,source_run_id FROM task_receipts WHERE destination_conversation_id=? AND delivery_state='pending' ORDER BY rowid").all(id)){
       const sourceRun=row.source_run_id?tasks.getRunControl(root,row.source_run_id as string):null;
@@ -2361,14 +2362,19 @@ export function createSessionManager(
         if(Object.hasOwn(args,'criteria'))args={...args,criteria:boundTaskCriteria(args.criteria)};
         const config=await loadConfig();
         if(tools.get(token)!==bound||runtime.invocation===undefined||runtime.stopRequested||runtime.controller.signal.aborted)throw new DomainError('forbidden',403,'Expired tool binding');
-        const canRead=(id:string)=>{const c=chat(id);if(source.agentId!==c.agentId)throw new DomainError('forbidden',403,'Conversation unavailable to this Agent');authorizeConversationRead(id,true);if(memoryRuntime)memoryRuntime.memory.history(p,{projectId:c.projectId||null,items:memoryHistoryReferences(store,id)});return c;};
+        const canRead=(id:string)=>{
+          const c=chat(id);
+          if(source.agentId!==c.agentId)throw new DomainError('forbidden',403,'Conversation unavailable to this Agent');
+          authorizeConversationRead(id,true,mandalaWriterBoundary(store,id)?.id??0);
+          return c;
+        };
         const listConversations=()=>store.listConversations().filter(c=>{try{canRead(c.id);return (!args.projectId||c.projectId===args.projectId)&&(!args.agentId||c.agentId===args.agentId)&&(!args.query||(c.title??'').toLowerCase().includes(String(args.query).toLowerCase()));}catch(error){if(error instanceof DomainError&&error.status===403)return false;throw error;}}).slice(0,100).map(({id,title,projectId,agentId,status})=>({id,title,projectId,agentId,status}));
         if(name==='task_context')return {conversationId:source.id,project:config.projects.find(v=>v.id===source.projectId)?{id:source.projectId,name:config.projects.find(v=>v.id===source.projectId)!.name}:null,agent:config.agents.find(v=>v.id===source.agentId)?{id:source.agentId,name:config.agents.find(v=>v.id===source.agentId)!.name}:null};
         if(name==='conversation_list')return listConversations();
         if(name==='conversation_read'||name==='conversation_history'){
           if(typeof args.conversationId!=='string')throw new DomainError('invalid_tool_arguments',422,'Conversation ID required');
           const c=canRead(args.conversationId),after=args.after??0;if(!Number.isSafeInteger(after)||Number(after)<0)throw new DomainError('invalid_tool_arguments',422,'Invalid event cursor');
-          const events=store.listAgentHistory(c.id,Number(after),name==='conversation_read');
+          const events=store.listAgentHistory(c.id,Math.max(Number(after),mandalaWriterBoundary(store,c.id)?.id??0),name==='conversation_read');
           return name==='conversation_read'?{conversation:{id:c.id,title:c.title,projectId:c.projectId,agentId:c.agentId,status:c.status},events}:events;
         }
         if(name==='task_list'&&isSystemAgent(config,source.agentId)){const observed=await tasks.observeTasks(p);return observed.filter(t=>(!args.projectId||t.projectId===args.projectId)&&(!args.query||t.goal.toLowerCase().includes(String(args.query).toLowerCase()))&&(!args.conversationId||tasks.listTasks(p).some(own=>own.id===t.id&&own.conversationIds.includes(String(args.conversationId))))).slice(0,100);}

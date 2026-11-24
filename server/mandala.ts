@@ -41,11 +41,31 @@ export function mandalaInstructions(config: Config, conversation: Conversation):
 export function mandalaContextBoundary(store: Store, id: string): number {
   if (store.getConversation(id)?.purpose !== 'mandala-main') return 0;
   const revoked=store.database.prepare("SELECT id FROM events WHERE conversationId=? AND kind='metadata' AND json_extract(data,'$.nativeContextReset.reason')='receipt_access_revoked' ORDER BY id DESC LIMIT 1").get(id);
-  // Read compatibility only: no operation writes this marker until rollback readers honor it.
   const reset=store.database.prepare(`SELECT id FROM events WHERE conversationId=? AND kind='metadata'
     AND superseded=0 AND json_type(data,'$.nativeExecutionBoundary.version')='integer'
     AND json_extract(data,'$.nativeExecutionBoundary.version')=1 ORDER BY id DESC LIMIT 1`).get(id);
   return Math.max(Number(revoked?.id??0),Number(reset?.id??0));
+}
+
+// Read the writer cutoff separately from other continuity resets. The owner
+// keeps the whole transcript and can explicitly select older content.
+export function mandalaWriterBoundary(store: Store, id: string): { id: number; createdAt: string } | undefined {
+  if (store.getConversation(id)?.purpose !== 'mandala-main') return;
+  const row = store.database.prepare(`SELECT id,createdAt FROM events WHERE conversationId=? AND kind='metadata'
+    AND superseded=0 AND json_extract(data,'$.nativeContextReset.trigger')='codex_writer_isolation'
+    ORDER BY id DESC LIMIT 1`).get(id);
+  if (row) return { id: Number(row.id), createdAt: row.createdAt as string };
+}
+
+export function parkPriorWriterReceipts(store: Store, id: string) {
+  const boundary = mandalaWriterBoundary(store, id);
+  if (!boundary) return;
+  // Late results from prior work stay visible in Tasks and Results. They
+  // cannot become automatic input to the new native session.
+  store.database.prepare(`UPDATE task_receipts SET delivery_state='parked',claim_error='native_execution_boundary'
+    WHERE destination_conversation_id=? AND delivery_state IN ('pending','presented') AND claimed_by_run_id IS NULL
+    AND COALESCE((SELECT created_at FROM task_runs WHERE id=task_receipts.source_run_id),created_at)<=?`)
+    .run(id, boundary.createdAt);
 }
 
 export function mandalaContinuity(store: Store, id: string, reason: 'runtime'|'maintenance' = 'runtime', after = 0, before = Infinity): string {
