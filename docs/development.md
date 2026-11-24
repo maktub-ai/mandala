@@ -235,6 +235,8 @@ The root `.gitignore` allowlists source directories and maintained documentation
 
 ### macOS packaged launch conformance (opt-in)
 
+See the [runtime release acceptance matrix](runtime-release-acceptance.md) for per-platform prerequisites and the separate live-provider evidence gate.
+
 Run against a **trusted, already staged** and signed `Mandala.app` under
 `/private/tmp`, not the installed app or a downloaded file of unknown origin.
 Use the source SHA the package was built from; the test refuses an unexpected SHA,
