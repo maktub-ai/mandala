@@ -2,6 +2,7 @@ const {DatabaseSync}=require('node:sqlite');
 const {randomBytes}=require('node:crypto');
 const {lstatSync,realpathSync}=require('node:fs');
 const {isAbsolute,normalize,join}=require('node:path');
+const {pathToFileURL}=require('node:url');
 
 const applicationId=1296321621;
 const schema="CREATE TABLE windows_handoff (id INTEGER PRIMARY KEY CHECK(id=1), owner TEXT NOT NULL, phase TEXT NOT NULL CHECK(phase IN ('clear','pending','started','unknown'))) STRICT";
@@ -36,7 +37,11 @@ function createSqliteHandoffJournal({home,isPrivateLocal}) {
   }
   function open(run,write=false){
     scope();
-    const db=new DatabaseSync(path,{allowExtension:false});
+    // Pass the encoded URI string, not a filesystem path. SQLite mode=rw
+    // guarantees an existing-only read/write open even if the file vanishes.
+    const uri=pathToFileURL(path);
+    uri.searchParams.set('mode','rw');
+    const db=new DatabaseSync(uri.href,{allowExtension:false});
     try{
       scope();
       db.exec('PRAGMA busy_timeout=0; PRAGMA trusted_schema=OFF;');

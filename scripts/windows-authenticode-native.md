@@ -96,3 +96,22 @@ abrupt exit, not physical power loss. They provide a scratch-only path
 predicate rather than evidence of packaged Windows directory ACL validation.
 This optional module is not bundled, has no production caller, and cannot
 enable update download, execution or recovery on its own.
+
+Both journal candidates depend on an already protected, local, non-reparse
+home and a trusted owner controlling the entire namespace and sidecars.
+They coordinate cooperative main processes under that owner; the owner
+token is not an OS boundary against another process running as the same
+user. Neither portable Node file identity checks nor the scratch-only
+test predicate stand in for Windows ACL and directory identity validation.
+Do not initialize a missing or corrupt journal in the runtime updater.
+
+The SQLite adapter passes an encoded local file URI with `mode=rw`, so
+even if the database disappears after the check the underlying open
+cannot create it. This was tested with the staged Windows Node v22.23.2
+and standalone v24.22.3, using Unicode, literal percent and hash
+characters, and a disposable database removed exactly at open.
+
+Use a verified URI-capable Node runtime for this optional adapter; older
+generic Node builds may not interpret SQLite file URI options and are not
+supported. Keep the adapter out of production until the exact shipped
+main-process binary and its protected-directory authorizer are verified.
