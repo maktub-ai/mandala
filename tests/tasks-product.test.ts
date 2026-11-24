@@ -1,5 +1,5 @@
 import { afterEach,expect,test,vi } from 'vitest';
-import { mkdtempSync,rmSync,writeFileSync } from 'node:fs';
+import { mkdirSync,mkdtempSync,realpathSync,rmSync,writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTasks } from '../server/tasks';
@@ -10,8 +10,8 @@ import { createSessionManager } from '../server/sessions';
 import type { CodexClient,CodexOptions } from '../server/codex';
 import type { Config } from '../shared/types';
 const p={userId:'local'};const clean:(()=>void)[]=[];afterEach(()=>clean.splice(0).forEach(f=>f()));
-const config:Config={version:2,projects:[{id:'p',name:'P',cwd:'/tmp',agentIds:['a'],mcp:[],skills:[],resources:[]}],agents:[{id:'a',name:'A',defaultCli:'codex',models:{},instructions:'',mcp:[],skills:[]}]};
-function setup(){const home=mkdtempSync(join(tmpdir(),'task-product-')),store=openStore(home),files=createAssetFiles(home),assets=createAssets(store,files);const tasks=createTasks(store,{assets,resolve:(_p,task)=>({agentId:task.assigneeAgentId!,projectId:task.projectId,hostId:'local',input:task.goal,sourceVersions:[],requiredOutputAssetIds:[],effectiveCapabilities:[],nativeVisibility:'partial'})});clean.push(()=>{store.close();rmSync(home,{recursive:true,force:true});});return {home,store,files,assets,tasks};}
+function projectConfig(cwd:string):Config{return {version:2,projects:[{id:'p',name:'P',cwd,agentIds:['a'],mcp:[],skills:[],resources:[]}],agents:[{id:'a',name:'A',defaultCli:'codex',models:{},instructions:'',mcp:[],skills:[]}]};}
+function setup(){const home=mkdtempSync(join(tmpdir(),'task-product-')),store=openStore(home),files=createAssetFiles(home),assets=createAssets(store,files);const tasks=createTasks(store,{assets,resolve:(_p,task)=>({agentId:task.assigneeAgentId!,projectId:task.projectId,hostId:'local',input:task.goal,sourceVersions:[],requiredOutputAssetIds:[],effectiveCapabilities:[],nativeVisibility:'partial'})});clean.push(()=>{store.close();rmSync(home,{recursive:true,force:true});});const workspace=join(home,'workspace');mkdirSync(workspace);return {home,store,files,assets,tasks,config:projectConfig(realpathSync(workspace))};}
 const input={goal:'Manual goal',criteria:[],acceptance:'delivery' as const,projectId:null,assigneeAgentId:null};
 async function plan(f:ReturnType<typeof setup>){writeFileSync(join(f.home,'plan.md'),'Collect then summarize');const stage=await f.files.stageFiles(p,null,[{allowedRoot:f.home,relativePath:'plan.md',manifestPath:'plan.md'}]);const {asset,version}=f.assets.importAsset(p,{kind:'document',title:'Plan',submissionId:stage.submissionId},'plan');return {asset,ref:{assetId:asset.id,versionId:version.id}};}
 test('fixed plan tasks start independently and sources are authorized as executor, not root',async()=>{
@@ -43,14 +43,14 @@ test('Run success never accepts legacy checks or human tasks; user review then a
  }
 });
 test('start retains caller revision across async preparation and never queues after unrelated edit',async()=>{
- const f=setup();let resume!:()=>void,entered!:()=>void;const ready=new Promise<void>(r=>entered=r),wait=new Promise<void>(r=>resume=r);const manager=createSessionManager(f.store,async()=>{entered();await wait;return config;},undefined,undefined,f.home);clean.unshift(()=>manager.close());
+ const f=setup();let resume!:()=>void,entered!:()=>void;const ready=new Promise<void>(r=>entered=r),wait=new Promise<void>(r=>resume=r);const unexpectedNative=vi.fn(async()=>{throw Error('Unexpected native execution for stale Task revision');});const manager=createSessionManager(f.store,async()=>{entered();await wait;return f.config;},unexpectedNative,undefined,f.home);clean.unshift(()=>manager.close());
  const task=manager.taskService.createTask(p,{...input,projectId:'p',assigneeAgentId:'a'},'create');const starting=manager.startDurableTask(task.id,1,'start');await ready;
- manager.taskService.userCommand(p,task.id,1,'assign','a');resume();await expect(starting).rejects.toMatchObject({code:'revision_conflict'});expect(manager.taskService.listRuns(p,task.id)).toEqual([]);expect(f.store.listConversations()).toEqual([]);
+ manager.taskService.userCommand(p,task.id,1,'assign','a');resume();await expect(starting).rejects.toMatchObject({code:'revision_conflict'});expect(manager.taskService.listRuns(p,task.id)).toEqual([]);expect(f.store.listConversations()).toEqual([]);expect(unexpectedNative).not.toHaveBeenCalled();
 });
 test('public stop rejects stale caller revision and applies one epoch/receipt before native interrupt',async()=>{
  const f=setup();let options:CodexOptions;let interrupted=0;
  const factory=async(o:CodexOptions):Promise<CodexClient>=>{options=o;return {getStatus:async()=>({status:'ready',version:'fake'}),listModels:async()=>[],startThread:async()=> 'native',resumeThread:async()=>{},startTurn:async()=>{options.onEvent({method:'turn/started',params:{threadId:'native',turn:{id:'turn'}}});return 'turn';},interrupt:async()=>{interrupted++;options.onEvent({method:'turn/completed',params:{threadId:'native',turn:{id:'turn',status:'interrupted'}}});},replyApproval(){},close(){}};};
- const manager=createSessionManager(f.store,async()=>config,factory,undefined,f.home);clean.unshift(()=>manager.close());
+ const manager=createSessionManager(f.store,async()=>f.config,factory,undefined,f.home);clean.unshift(()=>manager.close());
  const source=await manager.create('p','a'),accepted=await manager.createTask(source.id,'a','hold',undefined,{policy:'notify'});await vi.waitFor(()=>expect(manager.taskService.listRuns(p,accepted.id)[0]?.nativeTurnId).toBe('turn'));
  const before=manager.taskService.getTask(p,accepted.id);await expect(manager.stopDurableTask(accepted.id,before.revision+7)).rejects.toMatchObject({code:'revision_conflict'});expect(interrupted).toBe(0);
  const result=await manager.stopDurableTask(accepted.id,before.revision);expect(result).toMatchObject({taskId:accepted.id,status:'stopped'});expect(Object.keys(result).sort()).toEqual(['runId','status','taskId']);expect(interrupted).toBe(1);
@@ -58,7 +58,7 @@ test('public stop rejects stale caller revision and applies one epoch/receipt be
 });
 test('reassigning a stopped task starts a fresh transcript for the new assignee and retains fixed sources',async()=>{
  const f=setup(),{asset,ref}=await plan(f);f.assets.setAccess(p,asset.id,{mode:'all'},asset.revision);
- const expanded={...config,agents:[...config.agents,{...config.agents[0],id:'b',name:'B'}],projects:[{...config.projects[0],agentIds:['a','b']}]};
+ const {config}=f;const expanded={...config,agents:[...config.agents,{...config.agents[0],id:'b',name:'B'}],projects:[{...config.projects[0],agentIds:['a','b']}]};
  const source=f.store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null});
  const service=createTasks(f.store,{assets:f.assets,resolve:()=>({agentId:'a',projectId:'p',hostId:'local',input:'original',sourceVersions:[ref],requiredOutputAssetIds:[],effectiveCapabilities:[],nativeVisibility:'partial'})});
  const task=service.createTask(p,{...input,projectId:'p',assigneeAgentId:'a'},'source-task'),prepared=service.prepareStart(p,task.id,1,'source-start');
