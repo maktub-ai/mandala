@@ -1,6 +1,7 @@
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 
-type Probe = { status: 'ready' | 'login-required' | 'unavailable'; version: string | null };
+import type { CliStatus } from '../../shared/types';
+type Probe = CliStatus;
 async function emptyWorkspace(page: Page, request: APIRequestContext) {
   await page.route(url => url.pathname === '/api/conversations', route => route.request().method() === 'GET' ? route.fulfill({ json: [] }) : route.continue());
   const { config, revision } = await (await request.get('/api/config')).json();
@@ -21,7 +22,7 @@ test('first use finds ready CLIs, adopts the choice for Mandala and opens Mandal
   await page.goto('/');
   const guide = page.getByRole('region', { name: '开始使用 Mandala', exact: true });
   await expect(guide).toBeVisible();
-  await expect(guide.getByRole('status')).toContainText('找到 1 个可用的 CLI');
+  await expect(guide.getByRole('status')).toContainText('检测结束，未运行任务');
   expect(new Set(seen).size).toBeGreaterThanOrEqual(14);
   // The ready CLI is suggested even though it is not enabled yet; the signed-out one explains how to sign in.
   await expect(guide.getByRole('radio', { name: /^Claude Code/ })).toHaveAttribute('aria-checked', 'true');
@@ -49,8 +50,8 @@ test('a CLI that finishes signing in becomes selectable after checking again', a
   await probes(page, () => ({ codex: { status: signedIn ? 'ready' : 'login-required', version: 'codex 1' } }));
   await page.goto('/');
   const guide = page.getByRole('region', { name: '开始使用 Mandala', exact: true });
-  await expect(guide.getByRole('status')).toContainText('还没有可直接使用的 CLI');
-  await expect(guide.getByRole('button', { name: '先选择一个可用的 CLI', exact: true })).toBeDisabled();
+  await expect(guide.getByRole('status')).toContainText('暂时没有可选的 CLI');
+  await expect(guide.getByRole('button', { name: '请先选择 CLI', exact: true })).toBeDisabled();
   signedIn = true;
   await guide.getByRole('button', { name: '重新检测', exact: true }).click();
   await expect(guide.getByRole('radio', { name: /^Codex/ })).toHaveAttribute('aria-checked', 'true');
@@ -144,9 +145,9 @@ test('multiple ready runtimes require a user choice without preferring Codex or 
  await probes(page,()=>Object.fromEntries(['codex','omp','gemini'].map(cli=>[cli,{status:'ready',version:'fixture'}])));
  await page.goto('/?welcome=1');
  const guide=page.getByRole('region',{name:'开始使用 Mandala',exact:true});
- await expect(guide.getByRole('status')).toContainText('找到 3 个可用的 CLI');
+ await expect(guide.getByRole('status')).toContainText('检测结束，未运行任务');
  await expect(guide.getByRole('radio',{checked:true})).toHaveCount(0);
- await expect(guide.getByRole('button',{name:'先选择一个可用的 CLI',exact:true})).toBeDisabled();
+ await expect(guide.getByRole('button',{name:'请先选择 CLI',exact:true})).toBeDisabled();
  await guide.getByRole('radio',{name:/^Gemini CLI/}).click();
  await expect(guide.getByRole('button',{name:'用 Gemini CLI 开始',exact:true})).toBeEnabled();
 });
@@ -176,4 +177,29 @@ test('system preferences can be saved unselected and preserve a later explicit r
  await page.reload();
  await page.getByRole('switch',{name:'自动生成对话标题',exact:true}).uncheck();
  await expect.poll(async()=>{const {config}=await(await request.get('/api/config')).json();return config.system;}).toEqual({cli:'omp',automaticTitles:false});
+});
+
+
+test('onboarding distinguishes runtime evidence without claiming first-task readiness', async({page,request})=>{
+ await emptyWorkspace(page,request);
+ const detail={host:'local',executable:'executable',auth:'not-verified'} as const;
+ await probes(page,()=>({
+   codex:{status:'ready',version:'c',diagnostics:{...detail,probe:'account',auth:'native-account-ready'}},
+   gemini:{status:'ready',version:'g',diagnostics:{...detail,probe:'acp'}},
+   cursor:{status:'ready',version:'v',diagnostics:{...detail,probe:'version-only'}},
+   omp:{status:'ready',version:'o'},
+   hermes:{status:'login-required',version:null,diagnostics:{...detail,probe:'gateway-session',auth:'configuration-required'}},
+ }));
+ const posts=submissions(page);
+ await page.goto('/?welcome=1');
+ const guide=page.getByRole('region',{name:'开始使用 Mandala',exact:true});
+ await expect(guide.getByRole('status')).toContainText('检测结束，未运行任务');
+ for(const [runtime,evidence] of [
+   ['Codex','账户检查通过'], ['Gemini CLI','连接检查通过'], ['Cursor','仅检查了版本'],
+   ['OMP','检测详情不可用'], ['Hermes','需要配置'],
+ ]) await expect(guide.getByRole('radio',{name:new RegExp('^'+runtime)}).locator('.workspace-status')).toHaveText(evidence);
+ await expect(guide.getByRole('radio',{checked:true})).toHaveCount(0);
+ await guide.getByRole('radio',{name:/^Gemini CLI/}).click();
+ await expect(guide.getByRole('button',{name:'用 Gemini CLI 开始',exact:true})).toBeEnabled();
+ expect(posts).toEqual([]);
 });

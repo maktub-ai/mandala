@@ -1,4 +1,5 @@
-import RuntimeSetup,{RuntimeProbeSummary} from './RuntimeSetup';
+import RuntimeSetup from './RuntimeSetup';
+import RuntimeEvidenceBadge from './RuntimeEvidenceBadge';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { Cli, Config } from '../shared/types';
 import { enabledRuntimes, runtimeIds, runtimeLabel } from '../shared/runtimes';
@@ -17,7 +18,7 @@ type RuntimeInfo = { nodeVersion: string; nodeSupported: boolean; minimumNodeVer
 type Action = 'mandala' | 'chat' | 'agent';
 
 /**
- * First use: find the CLIs this computer can already run, adopt one for Mandala,
+ * First use: find candidate CLIs on this computer, adopt one for Mandala,
  * then hand off to the Mandala main chat. Nothing runs until the user sends.
  */
 export default function GettingStarted({ config, onOpenPath, onStart }: {
@@ -89,11 +90,11 @@ export default function GettingStarted({ config, onOpenPath, onStart }: {
       <div className="getting-started-step-heading">
         <span className="getting-started-index" aria-hidden="true">1</span>
         <div><h2 id="getting-started-connect">{l('选一个本机 CLI 来执行工作', 'Pick a CLI on this computer to do the work')}</h2>
-          <p>{l('Mandala 负责分派和跟进，实际执行交给你电脑上的 AI 编程工具。账号与额度由各 CLI 自己管理。', 'Mandala plans and follows up; the AI coding tools on your computer do the work. Each CLI keeps its own account and quota.')}</p></div>
+          <p>{l('Mandala 负责分派和跟进，实际执行交给你电脑上的 AI 编程工具。检测结果只反映账户、连接或版本，不代表任务可以运行。', 'Mandala plans and follows up; the AI coding tools on your computer do the work. Checks report account, connection or version evidence, not whether a task will run.')}</p></div>
       </div>
       <div className="getting-started-scan"><span role="status">{scanning
           ? <StatusLabel icon="clock">{l(`正在检测本机 CLI… ${checked}/${runtimeIds.length}`, `Checking CLIs on this computer… ${checked}/${runtimeIds.length}`)}</StatusLabel>
-          : <StatusLabel icon={ready.length ? 'circleCheck' : 'clock'} tone={ready.length ? 'success' : 'warning'}>{ready.length ? l(`找到 ${ready.length} 个可用的 CLI`, `${ready.length} CLI${ready.length > 1 ? 's' : ''} ready`) : l('还没有可直接使用的 CLI', 'No CLI is ready yet')}</StatusLabel>}</span>
+          : <StatusLabel icon={ready.length ? 'circleCheck' : 'clock'} tone={ready.length ? 'success' : 'warning'}>{allFailed ? l('检测未完成','Checks did not finish') : ready.length ? l('检测结束，未运行任务', 'Checks finished; no task was run') : l('暂时没有可选的 CLI', 'No CLI is selectable yet')}</StatusLabel>}</span>
         <Button size="sm" variant="ghost" disabled={scanning} onClick={rescan}><Icon name="refresh" size={14}/>{l('重新检测', 'Check again')}</Button>
       </div>
       {found.length > 0 && <div className="getting-started-choices" role="radiogroup" aria-label={l('选择 CLI', 'Choose a CLI')} onKeyDown={moveFocus}>
@@ -107,20 +108,22 @@ export default function GettingStarted({ config, onOpenPath, onStart }: {
               <strong>{runtimeLabel(cli)}</strong>
               {canStart
                 ? <span>{probe.version ?? l('版本未知', 'Unknown version')}</span>
-                : <span>{l('在终端运行 ', 'Run ')}<code>{loginCommand(cli)}</code>{l(' 完成登录，然后重新检测', ' in a terminal to sign in, then check again')}</span>}
+                : probe.diagnostics?.auth==='configuration-required'
+                  ? <span>{l('在原生工具中完成配置后重新检测', 'Complete setup in the native tool, then check again')}</span>
+                  : <span>{l('在终端运行 ', 'Run ')}<code>{loginCommand(cli)}</code>{l(' 完成登录，然后重新检测', ' in a terminal to sign in, then check again')}</span>}
             </span>
-            {probe.diagnostics&&<RuntimeProbeSummary status={probe}/>}{canStart ? <StatusLabel icon="circleCheck" tone="success">{probe.diagnostics?l('可启动','Can launch'):l('可用', 'Ready')}</StatusLabel> : <StatusLabel icon="user" tone="warning">{l('需要登录', 'Sign-in needed')}</StatusLabel>}
+            <RuntimeEvidenceBadge status={probe}/>
           </button>;
         })}
       </div>}
       {!scanning && found.length === 0 && <div className="getting-started-empty">
-        <p>{allFailed ? l('检测没有完成，请重新检测。', 'The check did not finish. Try again.') : l('这台电脑上没有找到受支持的 CLI。安装其中一个后点「重新检测」；装在非默认位置时可手动配置路径。', 'No supported CLI was found on this computer. Install one, then check again. If it lives in a custom location, configure its path.')}</p>
+        <p>{allFailed ? l('检测没有完成，请重新检测。', 'The check did not finish. Try again.') : l('这台电脑上的 CLI 未通过检测。检查安装或配置后点「重新检测」；装在非默认位置时可手动配置路径。', 'No CLI passed the checks on this computer. Review installation or configuration, then check again. If a CLI lives in a custom location, configure its path.')}</p>
         <div className="getting-started-actions">
           <Button variant="ghost" onClick={() => onOpenPath('/settings/runtimes')}><Icon name="settings" size={14}/>{l('手动配置', 'Configure manually')}</Button>
         </div>
       </div>}
       {errors.length > 0 && (allFailed || found.length === 0) && <p role="alert">{errors[0]}</p>}
-      {!scanning && missing.length > 0 && <Disclosure open={found.length===0||undefined} className="getting-started-missing" title={l(`未检测到的 CLI（${missing.length}）`, `Not found (${missing.length})`)}>
+      {!scanning && missing.length > 0 && <Disclosure open={found.length===0||undefined} className="getting-started-missing" title={l(`需配置或重新检测的 CLI（${missing.length}）`, `Setup or recheck needed (${missing.length})`)}>
         <ul>{missing.map(cli => <li key={cli}><RuntimeIcon cli={cli} size={16}/><span>{runtimeLabel(cli)}</span>
           <RuntimeSetup cli={cli} status={probes[cli]}/>
           <a href={'/settings/runtimes/new?runtime=' + cli} onClick={event => { event.preventDefault(); onOpenPath('/settings/runtimes/new?runtime=' + cli); }}>{l('手动配置', 'Configure')}</a></li>)}</ul>
@@ -135,7 +138,7 @@ export default function GettingStarted({ config, onOpenPath, onStart }: {
       </div>
       <div className="getting-started-actions">
         <Button variant="primary" disabled={!chosen || !!busy} busy={busy === 'mandala'} onClick={() => void run('mandala')}>
-          {chosen ? l(`用 ${name} 开始`, `Start with ${name}`) : l('先选择一个可用的 CLI', 'Pick a ready CLI first')}<Icon name="arrowRight" size={14}/>
+          {chosen ? l(`用 ${name} 开始`, `Start with ${name}`) : l('请先选择 CLI', 'Pick a CLI first')}<Icon name="arrowRight" size={14}/>
         </Button>
         <Button disabled={!chosen || !!busy} busy={busy === 'chat'} onClick={() => void run('chat')}>{unverified?l('试用直接对话','Try direct chat'):l('直接对话', 'Just chat')}</Button>
       </div>

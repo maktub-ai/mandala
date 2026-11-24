@@ -149,3 +149,33 @@ test('appearance does not load models and Runtime configuration only loads its o
  await expect(page.getByRole('combobox',{name:'Codex 模型',exact:true})).toContainText('Enabled model');
  expect([...new Set(requested)]).toEqual(['codex']);
 });
+
+
+test('adapter settings request evidence and distinguish check types in English',async({page,request})=>{
+ const runtimes=['codex','omp','cursor','hermes','gemini','pi'] as const;
+ expect((await putRuntimeConfig(request,{version:2,projects:[],agents:[],runtimes:[...runtimes]})).ok()).toBe(true);
+ await page.addInitScript(()=>localStorage.setItem('mana-language','en'));
+ const detail={host:'local',executable:'executable',auth:'not-verified'};
+ const probes:Record<string,unknown>={
+  codex:{status:'ready',version:'c',diagnostics:{...detail,probe:'account',auth:'native-account-ready'}},
+  omp:{status:'ready',version:'o',diagnostics:{...detail,probe:'rpc'}},
+  cursor:{status:'ready',version:'v',diagnostics:{...detail,probe:'version-only'}},
+  hermes:{status:'login-required',version:null,diagnostics:{...detail,probe:'gateway-session',auth:'configuration-required'}},
+  gemini:{status:'ready',version:'g'},
+  pi:{status:'unavailable',version:null,diagnostics:{...detail,probe:'failed',failureStage:'probe'}},
+ };
+ const checked=new Set<string>();
+ await page.route('**/api/cli/status?**',route=>{
+  const query=new URL(route.request().url()).searchParams, cli=query.get('cli')!;
+  if(query.get('explain')==='1')checked.add(cli);
+  return route.fulfill({json:probes[cli]??{status:'unavailable',version:null}});
+ });
+ await page.goto('/settings/runtimes');
+ for(const [runtime,evidence] of [
+   ['Codex','Account check passed'], ['OMP','Connection check passed'], ['Cursor Agent','Version check only'],
+   ['Hermes Agent','Setup needed'], ['Gemini CLI','Check details unavailable'], ['Pi','Check failed'],
+ ]) await expect(page.getByRole('region',{name:runtime,exact:true}).getByRole('status').locator('.workspace-status')).toHaveText(evidence);
+ expect([...checked].sort()).toEqual([...runtimes].sort());
+ await expect(page.getByText(/Checks do not run a task/)).toBeVisible();
+ await expect(page.getByText('CLI can launch',{exact:true})).toHaveCount(0);
+});
