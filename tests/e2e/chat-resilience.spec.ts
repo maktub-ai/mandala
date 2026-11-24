@@ -150,7 +150,10 @@ test('writer conflict retains the submitted request and attachment across reload
   await expect(page.getByText('Fixture reply: Retain my failed request', {exact:true})).toHaveCount(0);
   await expect(page.locator('.message.user').last()).toContainText('Retain my failed request');
   await expect(composer).toHaveValue('');
+  const lateReply=await request.post('/__test__/writer-conflict-reply/'+chat.id);
+  expect(lateReply.status()).toBe(204);
   await page.reload();
+  await expect(page.getByText('Passive reply arrived after writer conflict',{exact:true})).toBeVisible();
   const message = page.locator('.message.user').last();
   await expect(message).toContainText('Retain my failed request');
   await expect(message).toContainText('keep-me.txt');

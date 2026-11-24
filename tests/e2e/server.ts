@@ -162,6 +162,13 @@ const server = createServer(async(req,res)=>{
   }
   if(await wikiFixture(req,res,home,store,manager.knowledgeBase))return;
   if(await skillFixture(req,res,home,store))return;
+  const conflictReply=/^\/__test__\/writer-conflict-reply\/([a-zA-Z0-9_-]+)$/.exec(req.url??'');
+  if(req.method==='POST'&&conflictReply){
+    const chat=store.getConversation(conflictReply[1]);
+    if(chat?.status!=='error'){res.writeHead(409);res.end();return;}
+    store.appendEvent(chat.id,'metadata',{agentMessage:{id:'fixture-conflict-helper',direction:'reply',reply:'Passive reply arrived after writer conflict',replyState:'parked'}});
+    res.writeHead(204);res.end();return;
+  }
   if(req.method==='POST'&&req.url==='/__test__/message-finish'){
     let body='';for await(const chunk of req)body+=chunk;const {messageId,text}=JSON.parse(body);
     const message=manager.getAgentMessage(messageId),chat=store.getConversation(message.targetConversationId)!,options=native.get(chat.nativeId!)!;

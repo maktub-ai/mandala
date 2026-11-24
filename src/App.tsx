@@ -100,7 +100,7 @@ import {WorkspacePage,PageHeader} from "./ui/WorkspacePage";
 import CommandPalette, { type PaletteAction } from "./CommandPalette";
 import KeyboardShortcuts from './KeyboardShortcuts';
 import { composingKey, useShortcuts, shortcutLabel, shortcutAria } from './shortcuts';
-import { CHAT_HISTORY_PAGE_TURNS, groupChatTurns, mergeChatEvents, type ChatHistoryPage, type ChatMessage } from "./chatTurns";
+import { CHAT_HISTORY_PAGE_TURNS, groupChatTurns, mergeChatEvents, recoverableWriterConflictDraft, type ChatHistoryPage, type ChatMessage } from "./chatTurns";
 import "./journeys.css";
 import "./ui/design-system.css";
 import "./workspace.css";
@@ -1131,6 +1131,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     const run = presentRun(turn);
     return { turn, run, replyText: run.answers.map(message => message.text).join("\n\n") };
   }), [turns]);
+  const writerConflictDraft=useMemo(()=>recoverableWriterConflictDraft(turns,chat?.id===selected?chat.status:undefined),[turns,chat?.id,chat?.status,selected]);
   const executionResults=useExecutionResults(chatActive&&auxiliaryReady&&chat?.id===selected&&agent?.systemRole==='mandala'?selected:'');
   const resultGroups=useMemo(()=>{
     const presented=new Set(turns.flatMap(turn=>turn.messages.flatMap(message=>message.source?.kind==='coordination'?message.source.receiptIds:[])));
@@ -1633,14 +1634,11 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               </Button>
             </div>}
             <ExecutionResults items={resultGroups.get(null)??[]} config={config} tasks={operationTasks.tasks} onOpen={openWorkspacePath}/>
-            {presentedTurns.map(({ turn, run, replyText }, index) => {
+            {presentedTurns.map(({ turn, run, replyText }) => {
               const inspect = () => { followLatest.current = false; setAwayFromLatest(true); };
               const checkpoint = [...turn.events].reverse().find(event => event.kind === "status" && (event.data as {status?: string}).status === "idle");
               const answer = run.answers.at(-1);
-              const latestError = turn.events.filter(event => event.kind === 'error').at(-1)?.data as {code?: string; nativeTurnSubmitted?: boolean} | undefined;
-              const canRecoverWriterConflict = index === presentedTurns.length - 1 && chat?.status === 'error' &&
-                latestError?.code === 'native_thread_busy' && latestError.nativeTurnSubmitted === false;
-              const recoverWriterRequest = (message: ChatMessage) => canRecoverWriterConflict && !message.source
+              const recoverWriterRequest = (message: ChatMessage) => message.key === writerConflictDraft
                 ? <Button type="button" title={existingComposerDraft ? localize('请先保留或清空现有草稿', 'Save or clear the existing draft first') : undefined}
                     disabled={busy || pending || branchPending || navigationLocked || !composerDraft.loaded || existingComposerDraft}
                     onClick={() => void reuseRequest(message, true)}>{localize('恢复到当前草稿', 'Restore draft here')}</Button> : null;

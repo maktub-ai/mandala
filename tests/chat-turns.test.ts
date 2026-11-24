@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { groupChatTurns, mergeChatEvents } from "../src/chatTurns";
+import { groupChatTurns, mergeChatEvents, recoverableWriterConflictDraft } from "../src/chatTurns";
 import { summarizeOperations } from "../src/execution";
 import type { DisplayEvent } from "../shared/types";
 
@@ -269,4 +269,29 @@ it('preserves nonhuman queued input provenance for distinct message presentation
  const source={kind:'coordination' as const,receiptIds:['receipt']};
  const turns=groupChatTurns([event(1,'user',{text:'Child report',source})]);
  expect(turns[0].messages[0]).toMatchObject({source});
+});
+
+it('restores the exact unsubmitted Codex request past passive Agent replies',()=>{
+ const events=[
+  event(1,'user',{text:'Draft recorded',runId:'writer-conflict'}),
+  event(2,'error',{runId:'writer-conflict',code:'native_thread_busy',nativeTurnSubmitted:false}),
+  event(3,'status',{status:'error'}),
+  event(4,'metadata',{agentMessage:{id:'one',direction:'reply',reply:'Late reply',replyState:'parked'}}),
+  event(5,'metadata',{agentMessage:{id:'two',direction:'reply',reply:'Other late reply',replyState:'parked'}}),
+ ];
+ expect(groupChatTurns(events)).toHaveLength(3);
+ expect(recoverableWriterConflictDraft(groupChatTurns(events),'error')).toBe(1);
+ expect(recoverableWriterConflictDraft(groupChatTurns(events),'running')).toBeUndefined();
+ expect(recoverableWriterConflictDraft(groupChatTurns([...events,event(6,'user',{text:'New native input',runId:'next'})]),'error')).toBeUndefined();
+ expect(recoverableWriterConflictDraft(groupChatTurns([...events,event(6,'metadata',{execution:'started',runId:'next'})]),'error')).toBeUndefined();
+ expect(recoverableWriterConflictDraft(groupChatTurns([...events,event(6,'status',{status:'running'})]),'error')).toBeUndefined();
+ expect(recoverableWriterConflictDraft(groupChatTurns([...events,event(6,'metadata',{agentMessage:{id:'scheduled',direction:'reply',reply:'Pending continuation',replyState:'queued'}})]),'error')).toBeUndefined();
+});
+it('does not offer writer recovery without exact per-request proof',()=>{
+ const request=event(1,'user',{text:'Only this request',runId:'owner'});
+ const fail=(data:Record<string,unknown>)=>event(2,'error',{code:'native_thread_busy',runId:'owner',nativeTurnSubmitted:false,...data});
+ for(const error of [fail({runId:'different'}),fail({runId:undefined}),fail({nativeTurnSubmitted:undefined}),fail({nativeTurnSubmitted:true}),fail({code:'unexpected'})])
+  expect(recoverableWriterConflictDraft(groupChatTurns([request,error]),'error')).toBeUndefined();
+ expect(recoverableWriterConflictDraft(groupChatTurns([event(1,'user',{text:'Internal task',task:{id:'t',kind:'return'},runId:'owner'}),fail({})]),'error')).toBeUndefined();
+ expect(recoverableWriterConflictDraft(groupChatTurns([request,fail({}),event(3,'error',{code:'another_failure',runId:'owner'})]),'error')).toBeUndefined();
 });
