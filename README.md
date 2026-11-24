@@ -58,7 +58,7 @@ An Agent is a long-lived owner of one part of your business, like payments, rele
 
 ### 3. Watch it all move
 
-Every task shows what its Agent is doing right now. Work that needs you, like an approval or an open question, rises to the top. Approvals work the same way on every runtime: on demand, strict or automatic.
+Every task shows what its Agent is doing right now. Work that needs you, like an approval or an open question, rises to the top. Mandala shows the same approval modes across runtimes: on demand, strict or automatic. What you can approve depends on the runtime: some ask about individual tool calls, while others ask before starting the whole turn. Strict mode cannot add prompts the runtime does not provide or change its sandbox. See the [approval policy](docs/approval-policy.md) and [CLI adapter capabilities](docs/cli-adapters.md).
 
 <img src="docs/assets/readme/ch3-move.gif" alt="Task progress updating live while one task waits for approval" width="100%">
 
