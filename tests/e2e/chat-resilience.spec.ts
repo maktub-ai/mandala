@@ -382,6 +382,41 @@ writerConflictTest('recover a proven unsubmitted direct mailbox request without 
   expect(submissions).toEqual([]);
 });
 
+writerConflictTest('a composer request with a pre-start Codex mailbox failure stays visibly unsent after reload', async ({page,request})=>{
+  const {config,revision}=await(await request.get('/api/config')).json();
+  const first=config.agents.find((agent:{id:string})=>agent.id==='first');
+  first.runtime={codex:{args:['--fixture-mailbox-setup-failed']}};
+  expect((await request.put('/api/config',{data:{config,revision}})).ok()).toBe(true);
+  const chat=await(await request.post('/api/conversations',{data:{projectId:'resilience',agentId:'first'}})).json();
+  const text='Keep this queued mailbox request without replay';
+  const submissions:string[]=[];
+  page.on('request',entry=>{
+    if(entry.method()!=='POST')return;
+    const path=new URL(entry.url()).pathname;
+    if(path.startsWith('/api/conversations/'+chat.id+'/')&&/\/(queue|messages|continue)$/.test(path))submissions.push(path);
+  });
+  await page.goto('/?project=resilience&conversation='+chat.id);
+  await page.getByRole('textbox',{name:'消息',exact:true}).fill(text);
+  await page.getByRole('button',{name:'发送消息',exact:true}).click();
+  const receipt=async()=>await(await request.get('/api/conversations/'+chat.id+'/queue')).json();
+  await expect.poll(receipt).toMatchObject([{text,state:'cancelled',prestartFailure:{code:'codex_mailbox_setup_failed'}}]);
+  const [accepted]=await receipt();
+  const checkVisible=async()=>{
+    const unsent=page.getByRole('region',{name:'未发送',exact:true});
+    await expect(unsent.getByText(text,{exact:true})).toBeVisible();
+    await expect(unsent.getByText('原请求已保存，但未发送到 Codex。')).toBeVisible();
+    await expect(unsent.getByRole('button')).toHaveCount(0);
+    await expect(page.getByRole('region',{name:'等待发送',exact:true})).toHaveCount(0);
+    await expect(page.getByText('Fixture reply: '+text,{exact:true})).toHaveCount(0);
+  };
+  await checkVisible();
+  await page.reload();
+  await checkVisible();
+  expect(new URL(page.url()).searchParams.get('conversation')).toBe(chat.id);
+  expect(await receipt()).toEqual([accepted]);
+  expect(submissions).toEqual(['/api/conversations/'+chat.id+'/queue']);
+});
+
 writerConflictTest('queued writer conflict restores a draft in the same chat and sends once only after release', async ({page,request})=>{
  const initial=await (await request.get('/api/config')).json();
  const agent=initial.config.agents.find((a:{id:string})=>a.id==='first');
