@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { openStore } from '../server/store';
 import { createTaskResources } from '../server/task-resources';
 const cleanup:(()=>void)[]=[];afterEach(()=>cleanup.splice(0).forEach(f=>f()));
-function setup(){const home=mkdtempSync(join(tmpdir(),'mana-resources-')),store=openStore(home);mkdirSync(join(home,'parent','child'),{recursive:true});mkdirSync(join(home,'other'));symlinkSync(join(home,'parent'),join(home,'alias'));cleanup.push(()=>{store.close();rmSync(home,{recursive:true,force:true});});return{home,store,resources:createTaskResources(store)};}
+const remoteAlias=(path:string)=>process.platform==='win32'?path.replace(/^[A-Za-z]:/,'').replace(/\\/g,'/'):path;
+function setup(){const home=mkdtempSync(join(tmpdir(),'mana-resources-')),store=openStore(home);mkdirSync(join(home,'parent','child'),{recursive:true});mkdirSync(join(home,'other'));cleanup.push(()=>{store.close();rmSync(home,{recursive:true,force:true});});symlinkSync(join(home,'parent'),join(home,'alias'),process.platform==='win32'?'junction':'dir');return{home,store,resources:createTaskResources(store)};}
 test('realpath aliases and ancestors conflict for writes while separate roots remain independent',()=>{
  const {home,resources}=setup();expect(resources.claimDirectory('one',join(home,'parent'),'write')).toBe('granted');
  for(const path of ['parent','parent/child','alias'])expect(resources.claimDirectory(path,join(home,path),'write')).toBe('queued');
@@ -49,10 +50,10 @@ test('remote claims normalize absent POSIX directories and isolate the same path
  const {home,store}=setup(),path=realpathSync(home);
  const hostForConversation=(id:string)=>id==='local'?undefined:id==='other'?'other-host':'build-host';
  const resources=createTaskResources(store,hostForConversation);
- expect(resources.claim({kind:'run',id:'remote',conversationId:'remote'},[path],'write')).toBe('granted');
+ expect(resources.claim({kind:'run',id:'remote',conversationId:'remote'},[remoteAlias(path)],'write')).toBe('granted');
  expect(resources.claim({kind:'run',id:'local',conversationId:'local'},[path],'write')).toBe('granted');
- expect(resources.claim({kind:'run',id:'other',conversationId:'other'},[path],'write')).toBe('granted');
- expect(resources.claim({kind:'run',id:'same-host',conversationId:'same'},[path+'/child'],'write')).toBe('queued');
+ expect(resources.claim({kind:'run',id:'other',conversationId:'other'},[remoteAlias(path)],'write')).toBe('granted');
+ expect(resources.claim({kind:'run',id:'same-host',conversationId:'same'},[remoteAlias(path)+'/child'],'write')).toBe('queued');
  expect(resources.claim({kind:'run',id:'absent',conversationId:'remote'},['/srv/work/../project'],'write')).toBe('granted');
  expect(resources.claim({kind:'run',id:'normalized',conversationId:'remote'},['/srv/project/child'],'write')).toBe('queued');
  expect(()=>resources.claim({kind:'run',id:'relative',conversationId:'remote'},['relative/work'],'write')).toThrow('invalid_directory_claim');
@@ -61,7 +62,7 @@ test('remote claims normalize absent POSIX directories and isolate the same path
 test('an SSH alias named local stays distinct from local directory claims',()=>{
  const {home,store}=setup(),path=realpathSync(home);
  const resources=createTaskResources(store,id=>id==='remote'?'local':undefined);
- expect(resources.claim({kind:'run',id:'remote',conversationId:'remote'},[path],'write')).toBe('granted');
+ expect(resources.claim({kind:'run',id:'remote',conversationId:'remote'},[remoteAlias(path)],'write')).toBe('granted');
  expect(resources.claim({kind:'run',id:'local',conversationId:'chat'},[path],'write')).toBe('granted');
 });
 
@@ -86,5 +87,5 @@ test('existing directory claims migrate as local while the same remote path stay
  store.database.prepare('INSERT INTO task_directory_claims(kind,owner_id,paths,mode) VALUES (?,?,?,?)').run('run','existing',JSON.stringify([path]),'write');
  const resources=createTaskResources(store,()=> 'build-host');
  expect(resources.claimDirectory('local',path,'write')).toBe('queued');
- expect(resources.claim({kind:'run',id:'remote',conversationId:'remote'},[path],'write')).toBe('granted');
+ expect(resources.claim({kind:'run',id:'remote',conversationId:'remote'},[remoteAlias(path)],'write')).toBe('granted');
 });

@@ -231,6 +231,10 @@ export function createSessionManager(
   };
   const goalByInvocation = new Map<string, string>();
   const resources = createTaskResources(store,id=>store.getConversation(id)?.executionLocation?.host);
+  // An SSH lease is in the remote POSIX namespace; Windows staging paths belong only to the host.
+  // Keep prior POSIX-host lease fingerprints stable across upgrades and active-turn recovery.
+  const directoryClaimPaths=(id:string, roots:string[], localOutput?:string) =>
+    localOutput && !(process.platform==='win32' && store.getConversation(id)?.executionLocation) ? [...roots,localOutput] : roots;
   const conversationApprovals = createConversationApprovals(store);
   initializeAsyncQuestions(store);
   const queuePumps = new Set<Promise<void>>();
@@ -465,7 +469,7 @@ export function createSessionManager(
       const outputRoot=work.kind==='run'&&home?join(home,'outputs',work.run.id):directory.conversationOutputRoot;
       // A Run may have been queued while the pump awaited directory preparation.
       if(outputRoot)mkdirSync(outputRoot,{recursive:true});
-      const granted=resources.claim(owner,[...directory.roots,...(outputRoot?[outputRoot]:[])],'write')==='granted';
+      const granted=resources.claim(owner,directoryClaimPaths(id,directory.roots,outputRoot),'write')==='granted';
       if(!granted)store.appendEvent(id,'metadata',{execution:'queued',reason:'directory',...(work.kind==='run'?{taskId:work.run.taskId,runId:work.run.id}:{queuedInputId:work.input.id})});
       return granted;
     },
@@ -490,7 +494,7 @@ export function createSessionManager(
                 const outputRoot=home?join(home,'outputs',queued.id):undefined;
                 if(outputRoot)mkdirSync(outputRoot,{recursive:true});
                 resources.releaseUnsubmitted('input',work.input.id);
-                if(resources.claim({kind:'run',id:queued.id,conversationId:work.input.conversationId},[...directory.roots,...(outputRoot?[outputRoot]:[])],'write')!=='granted')throw new DomainError('inquiry_directory_changed',409,'Inquiry directory changed');
+                if(resources.claim({kind:'run',id:queued.id,conversationId:work.input.conversationId},directoryClaimPaths(work.input.conversationId,directory.roots,outputRoot),'write')!=='granted')throw new DomainError('inquiry_directory_changed',409,'Inquiry directory changed');
                 store.database.prepare("UPDATE task_runs SET state='starting' WHERE id=? AND state='queued'").run(queued.id);
                 store.enqueueOutbox({type:'task.run_starting',aggregateId:queued.id,aggregateRevision:1,causationId:queued.id,payload:{runId:queued.id,conversationId:work.input.conversationId}});
                 return tasks.getRun(root,queued.id);
@@ -825,7 +829,7 @@ export function createSessionManager(
       if(outputDirectory)await mkdir(outputDirectory,{recursive:true});
       // Queued inputs and actual invocations claim the same stable conversation output root.
       const claimedOutputRoot=outputDirectory?task?outputDirectory:join(home,'outputs','conversations',id):undefined;
-      const roots=[executionContext.project.cwd,...extras,...(claimedOutputRoot?[claimedOutputRoot]:[])];
+      const roots=directoryClaimPaths(id,[executionContext.project.cwd,...extras],claimedOutputRoot);
       const executionRoots=[executionContext.project.cwd,...extras,...(outputDirectory?[outputDirectory]:[])];
       if(!ownsPreparation())return;
       if(resources.claim(owner,roots,'write')==='queued'){queueCurrent('directory');return;}

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { openStore, type Store } from '../server/store';
@@ -257,4 +257,18 @@ test('an explicitly selected continuation is starting after confirmed Stop, not 
   }finally{
     verify?.();await continuation;
   }
+});
+
+
+for(const via of ['send','queue'] as const)test.runIf(process.platform==='win32')(`Windows ${via} leases remote POSIX roots without claiming local staging paths`, async()=>{
+  const chat=await manager.create('p','a',undefined,'codex',{workspaceId:'remote'});
+  config.projects[0].workspaces![0].resources=[{id:'synthetic-extra',kind:'local',label:'Authorized extra',location:'/srv/mandala-extra-fixture'}];
+  if(via==='send')await manager.send(chat.id,'Windows remote direct');
+  else manager.enqueueUserInput(chat.id,'Windows remote queue','windows-remote-queue');
+  await vi.waitFor(()=>expect(native.startTurn).toHaveBeenCalledTimes(1));
+  const claim=store.database.prepare('SELECT host_id,paths FROM task_directory_claims WHERE conversation_id=?').get(chat.id);
+  expect(claim?.host_id).toBe('ssh:dev-server');
+  expect(JSON.parse(String(claim?.paths))).toEqual(['/srv/mandala-extra-fixture','/srv/mandala-ssh-fixture']);
+  expect(existsSync(join(home,'outputs','conversations',chat.id))).toBe(true);
+  expect(localFactory).not.toHaveBeenCalled();
 });
