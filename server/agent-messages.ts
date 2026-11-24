@@ -14,12 +14,20 @@ export function createAgentMessages(store:Store,enqueue:(conversationId:string,t
   state TEXT NOT NULL, reply TEXT, reply_state TEXT NOT NULL, auto_resume_allowed INTEGER NOT NULL,
   request_input_id TEXT NOT NULL UNIQUE, reply_input_id TEXT UNIQUE, command_key TEXT NOT NULL,
   created_at TEXT NOT NULL, UNIQUE(source_conversation_id,command_key));
+  CREATE INDEX IF NOT EXISTS agent_messages_origin ON agent_messages(source_conversation_id,source_request_event_id,source_invocation_id);
+  CREATE TABLE IF NOT EXISTS agent_inquiry_key_aliases (
+   source_conversation_id TEXT NOT NULL REFERENCES conversations(id),
+   command_key TEXT NOT NULL, message_id TEXT NOT NULL REFERENCES agent_messages(id) ON DELETE CASCADE,
+   PRIMARY KEY(source_conversation_id,command_key));
   CREATE TABLE IF NOT EXISTS agent_inquiry_conversations (conversation_id TEXT PRIMARY KEY REFERENCES conversations(id));`);
  const atomic=<T>(fn:()=>T)=>db.isTransaction?fn():store.transaction(fn);
  const row=(id:string)=>{
   const value=db.prepare('SELECT * FROM agent_messages WHERE id=?').get(id);
   if(!value)throw new DomainError('message_not_found',404,'Message not found');return value;
  };
+ const keyed=(sourceId:string,key:string)=>db.prepare('SELECT * FROM agent_messages WHERE source_conversation_id=? AND command_key=?').get(sourceId,key)
+  ?? db.prepare(`SELECT m.* FROM agent_inquiry_key_aliases a JOIN agent_messages m ON m.id=a.message_id
+   WHERE a.source_conversation_id=? AND a.command_key=?`).get(sourceId,key);
  const sourceRequest=(r:ReturnType<typeof row>)=>{
   const source=db.prepare('SELECT data FROM events WHERE conversationId=? AND id=? AND superseded=0').get(r.source_conversation_id as string,r.source_request_event_id as number);
   return source?{data:JSON.parse(source.data as string) as {text?:string;queuedInputId?:string}}:undefined;
@@ -60,12 +68,25 @@ export function createAgentMessages(store:Store,enqueue:(conversationId:string,t
   get:(id:string)=>decode(row(id)),
   metadata,
   isDedicated:(id:string)=>Boolean(db.prepare('SELECT conversation_id FROM agent_inquiry_conversations WHERE conversation_id=?').get(id)),
+  hasKey:(sourceId:string,key:string)=>Boolean(keyed(sourceId,key)),
   prior(sourceId:string,key:string,input:AgentMessageInput):AgentMessage|undefined{
-   const r=db.prepare('SELECT * FROM agent_messages WHERE source_conversation_id=? AND command_key=?').get(sourceId,key);
+   const r=keyed(sourceId,key);
    if(!r)return;
    const target=store.getConversation(r.target_conversation_id as string);
    if(r.text!==input.text.trim()||target?.agentId!==input.targetAgentId||input.targetProjectId!==undefined&&target?.projectId!==(input.targetProjectId??'')||input.targetConversationId&&r.target_conversation_id!==input.targetConversationId||input.policy!==undefined&&r.policy!==input.policy)throw new DomainError('idempotency_conflict',409,'Message key already used');
    return decode(r);
+  },
+  reusePrimaryInquiry(sourceId:string,origin:{eventId:number;invocationId:string},input:AgentMessageInput,key:string){
+   const rows=db.prepare(`SELECT * FROM agent_messages WHERE source_conversation_id=? AND source_request_event_id=?
+     AND source_invocation_id=? AND text=? AND policy=? ORDER BY rowid`)
+    .all(sourceId,origin.eventId,origin.invocationId,input.text.trim(),input.policy??'resume');
+   const prior=rows.find(r=>{
+    const target=store.getConversation(r.target_conversation_id as string);
+    return target?.agentId===input.targetAgentId&&target.projectId===(input.targetProjectId??'');
+   });
+   if(!prior)return;
+   db.prepare('INSERT INTO agent_inquiry_key_aliases VALUES (?,?,?)').run(sourceId,key,prior.id as string);
+   return decode(prior);
   },
   create(sourceId:string,targetId:string,input:AgentMessageInput,origin:{eventId:number;invocationId:string},key:string){
    return atomic(()=>{

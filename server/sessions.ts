@@ -2034,13 +2034,18 @@ export function createSessionManager(
         ? {workspaceId:workspace?.id??null,executionLocation,...(workspace?{cwd:workspace.cwd,workspaceName:workspace.name}:{})}
         : {workspaceId:source.workspaceId??null,executionLocation:source.executionLocation,...(source.cwd?{cwd:source.cwd,workspaceName:source.workspaceName}:{})};
       // No awaits between the last binding check and atomic acceptance.
-      const message=store.transaction(()=>{
+      const {message,acceptedNew}=store.transaction(()=>{
+        const origin={eventId:event.id,invocationId:runtime?.runId??String(event.id)};
+        if(primary){
+          const existing=messages.reusePrimaryInquiry(sourceId,origin,input,options.commandKey);
+          if(existing)return {message:existing,acceptedNew:false};
+        }
         target??=store.createConversation({...(agent.systemRole==="mandala"?{purpose:"mandala-background" as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,cli:agent.defaultCli,model:agent.models[agent.defaultCli]??null,...location});
-        const accepted=messages.create(sourceId,target.id,input,{eventId:event.id,invocationId:runtime?.runId??String(event.id)},options.commandKey);
+        const accepted=messages.create(sourceId,target.id,input,origin,options.commandKey);
         if(input.targetConversationId&&messages.isDedicated(target.id))markConversationProgress(store,target.id,false);
-        return accepted;
+        return {message:accepted,acceptedNew:true};
       });
-      setImmediate(()=>{if(!closed)void pump(message.targetConversationId);});return message;
+      if(acceptedNew)setImmediate(()=>{if(!closed)void pump(message.targetConversationId);});return message;
     },
     getAgentMessage(id,agentId){
       const message=messages.get(id),source=chat(message.sourceConversationId),target=chat(message.targetConversationId);
@@ -2754,7 +2759,7 @@ export function createSessionManager(
         if(!active)throw error;
         // A retry/conflict after durable acceptance must not contradict its
         // existing card. Inspect only presence within this origin and key.
-        const accepted=store.database.prepare('SELECT 1 FROM agent_messages WHERE source_conversation_id=? AND command_key=?').get(bound.conversationId,commandKey);
+        const accepted=messages.hasKey(bound.conversationId,commandKey);
         if(accepted)throw error;
       }
       if(!(error instanceof DomainError&&error.status===403)||active){const outcome=inquiry?inquiryOutcome:projectOperationOutcome(name,{},null);if(outcome)record(outcome,error instanceof DomainError&&[400,403,404,409,422].includes(error.status)?'failed':'unknown',error instanceof DomainError?error.code:'result_unconfirmed');}

@@ -2,6 +2,7 @@ import {ensureConfiguredMandala} from './configured-mandala';
 import {afterEach,expect,it,vi} from 'vitest';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
+import {DatabaseSync} from 'node:sqlite';
 import {join} from 'node:path';
 import {openStore} from '../server/store';
 import {DomainError} from '../shared/workspace-contracts';
@@ -368,7 +369,7 @@ it('reports scoped pre-accept inquiry failures without duplicating accepted mess
  await manager.callBoundTool(token,'message_ask',args,'unknown');
  expect(read().at(-1)).toMatchObject({id:unknown.id,sourceEventId:unknown.sourceEventId,invocationId:unknown.invocationId,state:'succeeded'});
  const before=read().length;
- await manager.callBoundTool(token,'message_ask',args,'fresh');
+ await manager.callBoundTool(token,'message_ask',{...args,text:'Different intended inquiry'},'fresh');
  expect(read()).toHaveLength(before);
  await expect(manager.callBoundTool(token,'message_ask',{...args,text:'conflict'},'fresh')).rejects.toMatchObject({code:'idempotency_conflict'});
  expect(read()).toHaveLength(before);
@@ -443,6 +444,50 @@ it('keeps a prior unknown when a later same-key call with different input is rej
  const settled=store.listEvents(chat.id,0).map(event=>(event.data as {operationResult?:import('../shared/operation-results').OperationResult}).operationResult).filter(result=>result?.id===receipts[0].id);
  expect(settled.map(result=>result?.state)).toEqual(['unknown']);
  expect(store.listEvents(chat.id,0).filter(event=>(event.data as {agentMessage?:{direction:string}}).agentMessage?.direction==='sent')).toHaveLength(1);
+});
+
+it('selects the scoped unnamed specialist and dispatches the same one-off inquiry only once across keys',async()=>{
+ const {home,store,manager,chat,entries,finish}=await setup();
+ const state=await readConfig(home);
+ await writeConfig(home,{...state.config,
+  agents:[...state.config.agents.map(a=>a.id==='worker'?{...a,routingRemit:'Histogram captions'}:a),
+   ...['calendar','outsider'].map(id=>({id,name:id,instructions:'Synthetic',defaultCli:'codex' as const,models:{},mcp:[],skills:[],routingRemit:id==='calendar'?'Calendar scheduling':'Histogram captions'}))],
+  projects:[{id:'charts',name:'Histogram Desk',cwd:home,agentIds:['worker','calendar'],resources:[],mcp:[],skills:[]},
+   {id:'external',name:'External Desk',cwd:home,agentIds:['outsider'],resources:[],mcp:[],skills:[]}]},state.revision);
+ await manager.send(chat.id,'Ask the best specialist in Histogram Desk to write one histogram caption; notify me here.');
+ const token=entries[0].token;
+ const route=await manager.callBoundTool(token,'mandala_directory',{query:'histogram caption',projectId:'charts'},'find') as {candidates:{id:string}[]};
+ expect(route.candidates.map(c=>c.id)).toEqual(['worker','calendar']);
+ const args={targetAgentId:route.candidates[0].id,targetProjectId:'charts',text:'Write a histogram caption',policy:'notify'};
+ const [first,second]=await Promise.all(['dispatch','retry-new-key'].map(key=>manager.callBoundTool(token,'message_ask',args,key))) as import('../shared/agent-messages').AgentMessage[];
+ expect(second.id).toBe(first.id);
+ expect(await manager.callBoundTool(token,'message_ask',{...args,text:'  '+args.text+'  '},'retry-trimmed')).toMatchObject({id:first.id});
+ for(const key of ['dispatch','retry-new-key','retry-trimmed'])
+  await expect(manager.callBoundTool(token,'message_ask',{...args,text:'Modified inquiry'},key)).rejects.toMatchObject({code:'idempotency_conflict'});
+ expect(store.database.prepare('SELECT count(*) AS count FROM agent_messages').get()?.count).toBe(1);
+ expect(manager.taskService.listTasks({userId:store.ownerUserId})).toHaveLength(0);
+ finish();
+ await vi.waitFor(()=>expect(store.getConversation(first.targetConversationId)?.turnId).toBeTruthy());
+ const worker=entries[1],turn=worker.native+'-turn';
+ worker.options.onEvent({method:'item/completed',params:{threadId:worker.native,turnId:turn,item:{id:'histogram-caption',type:'agentMessage',phase:'final_answer',text:'Synthetic caption'}}});
+ finish(worker);
+ await vi.waitFor(()=>expect(manager.getAgentMessage(first.id)).toMatchObject({state:'succeeded',reply:'Synthetic caption',replyState:'parked'}));
+ expect(JSON.stringify(store.listEvents(chat.id,0))).toContain('Synthetic caption');
+ expect(entries).toHaveLength(2);
+ await manager.send(chat.id,'Ask for the same histogram caption again, with the same limits.');
+ const next=await manager.callBoundTool(entries.at(-1)!.token,'message_ask',args,'next-human-turn') as typeof first;
+ expect(next.id).not.toBe(first.id);
+ expect(next.sourceRequestEventId).not.toBe(first.sourceRequestEventId);
+ const nextToken=entries.at(-1)!.token;
+ const different=await manager.callBoundTool(nextToken,'message_ask',{...args,targetAgentId:'calendar'},'different-target') as typeof first;
+ expect(different).toMatchObject({targetAgentId:'calendar',sourceRequestEventId:next.sourceRequestEventId});
+ expect(different.id).not.toBe(next.id);
+ const persisted=new DatabaseSync(join(home,'state.sqlite'),{readOnly:true});
+ try{
+  expect(persisted.prepare('SELECT message_id FROM agent_inquiry_key_aliases WHERE source_conversation_id=? AND command_key=?').get(chat.id,'retry-new-key')).toMatchObject({message_id:first.id});
+  expect(persisted.prepare('SELECT count(*) AS count FROM agent_messages').get()?.count).toBe(3);
+ }finally{persisted.close();}
+
 });
 
 it('routes using current Project membership and rejects expired lookup authority',async()=>{
