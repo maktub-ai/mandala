@@ -197,7 +197,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     const inputs = await api<QueuedInput[]>("/conversations/" + id + "/queue");
     if (!isCurrent() || generation !== queueReads.current.generation || version < queueReads.current.applied) return;
     queueReads.current.applied = version;
-    setQueuedInputs(inputs.filter(input => input.state === "queued" || input.unrecorded));
+    setQueuedInputs(inputs.filter(input => input.state === "queued" || input.unrecorded || input.prestartFailure));
   };
   const [executionId,setExecutionId]=useState<string|null>(null);
   const selectedChat = useRef(selected);

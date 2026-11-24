@@ -8,6 +8,10 @@ export async function submitChatInput(
  const commandKey = (body as {commandKey?:string})?.commandKey;
  const uncertain = () => new Error('提交状态待确认；输入已保留。恢复连接后再次发送只核对本机记录，不会重发。请检查对话历史，确认未提交后再重新提出。');
  const confirmed = (input:QueuedInput|undefined) => {
+  if(input?.prestartFailure){
+   state.rejection=new Error('消息未发送到 Codex；原请求已保存。');
+   throw state.rejection;
+  }
   if(input?.state==='cancelled' || input?.unrecorded){
    state.rejection=new Error(input.unrecorded ? '无法确认执行记录；输入已保留，请检查任务状态并调整后重试。' : '提交未执行；输入已保留，请检查任务状态并调整后重试。');
    throw state.rejection;

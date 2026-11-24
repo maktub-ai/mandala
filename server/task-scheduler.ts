@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Store } from './store';
 import { hasUnprovenNativeOccupancy, retainNativeOccupancy } from './task-recovery';
 import type { createTasks } from './tasks';
-import { isHumanInput, type QueuedInput, type Receipt, type Run, type RunRouting, type Task } from '../shared/tasks';
+import { isHumanInput, isQueuedPrestartMailboxCode, queuedPrestartMailboxCodes, type QueuedInput, type Receipt, type Run, type RunRouting, type Task } from '../shared/tasks';
 import { DomainError, type Principal } from '../shared/workspace-contracts';
 import type { ComposerReferenceSelection } from '../shared/composer-references';
 import { validateComposerReferenceSelections } from './composer-references';
@@ -62,6 +62,15 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
   db.prepare('INSERT INTO schema_migrations VALUES (?,?)').run(key,new Date().toISOString());
  });
  if(!db.prepare('PRAGMA table_info(task_user_inputs)').all().some(r=>r.name==='source'))db.exec('ALTER TABLE task_user_inputs ADD COLUMN source TEXT');
+ // Retain the SQL and wire tombstone understood by older apps. Only the
+ // additive reason distinguishes a proven failure from a user's cancellation.
+ store.transaction(() => {
+  const key='chat_input_003_prestart_failure';
+  if(db.prepare('SELECT key FROM schema_migrations WHERE key=?').get(key))return;
+  db.exec(`ALTER TABLE task_user_inputs ADD COLUMN prestart_failure_code TEXT
+   CHECK(prestart_failure_code IS NULL OR (state='cancelled' AND prestart_failure_code IN (${queuedPrestartMailboxCodes.map(code=>`'${code}'`).join(',')})))`);
+  db.prepare('INSERT INTO schema_migrations VALUES (?,?)').run(key, new Date().toISOString());
+ });
  db.exec('CREATE TABLE IF NOT EXISTS task_receipt_inputs(receipt_id TEXT PRIMARY KEY REFERENCES task_receipts(id),input_id TEXT NOT NULL REFERENCES task_user_inputs(id))');
  // Older recoveries left these links behind. The recovery event proves the input never reached native submission.
  db.exec(`DELETE FROM task_receipt_inputs AS link WHERE EXISTS (
@@ -78,7 +87,7 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
   if (!store.getConversation(id)) fail('conversation_not_found', 404);
   if (db.prepare('SELECT id FROM task_user_inputs WHERE conversation_id=? AND owner_user_id<>? LIMIT 1').get(id, principal.userId)) fail('forbidden', 403);
  };
- const inputRow = (r: Record<string, unknown>): QueuedInput => ({ ...(r.source?{source:JSON.parse(r.source as string)}:{}), ...(options.inputMetadata?.(r.id as string)?{agentMessage:options.inputMetadata!(r.id as string)}:{}), commandKey: r.command_key as string, id: r.id as string, conversationId: r.conversation_id as string, text: r.text as string, state: r.state as QueuedInput['state'], createdAt: r.created_at as string, ...(r.unrecorded ? { unrecorded: true } : {}), ...(r.attachments !== "[]" ? { attachments: JSON.parse(r.attachments as string) } : {}), ...(r.reference_selections !== "[]" ? { references: JSON.parse(r.reference_selections as string) } : {}) });
+ const inputRow = (r: Record<string, unknown>): QueuedInput => ({ ...(r.source?{source:JSON.parse(r.source as string)}:{}), ...(options.inputMetadata?.(r.id as string)?{agentMessage:options.inputMetadata!(r.id as string)}:{}), commandKey: r.command_key as string, id: r.id as string, conversationId: r.conversation_id as string, text: r.text as string, state: r.state as QueuedInput['state'], createdAt: r.created_at as string, ...(r.state==='cancelled' && isQueuedPrestartMailboxCode(r.prestart_failure_code)?{prestartFailure:{code:r.prestart_failure_code}}:{}), ...(r.unrecorded ? { unrecorded: true } : {}), ...(r.attachments !== "[]" ? { attachments: JSON.parse(r.attachments as string) } : {}), ...(r.reference_selections !== "[]" ? { references: JSON.parse(r.reference_selections as string) } : {}) });
  const loadInput = (id: string) => {
   const row = db.prepare('SELECT * FROM task_user_inputs WHERE id=?').get(id);
   if (!row) return fail('input_not_found', 404);
@@ -304,6 +313,24 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
     event('task.user_input_requeued',id,{inputId:id,reason});
     return true;
    });
+  },
+  // Called in the session's transaction with the original owned queue row,
+  // matching visible error, and release of only its unsubmitted claim.
+  failPrestartMailboxInput(id:string, conversationId:string, code:unknown):boolean {
+   root();
+   if(!db.isTransaction||!isQueuedPrestartMailboxCode(code))return false;
+   const input=loadInput(id);
+   if(input.conversationId!==conversationId||input.state!=='running'||input.source||!isHumanInput(input))return false;
+   if(db.prepare('SELECT 1 FROM task_receipt_inputs WHERE input_id=?').get(id))return false;
+   const hasClaims=db.prepare("SELECT 1 FROM sqlite_master WHERE name='task_directory_claims'").get();
+   if(hasClaims&&db.prepare("SELECT 1 FROM task_directory_claims WHERE kind='input' AND owner_id=? AND (submitted<>0 OR conversation_id<>?)").get(id,conversationId))return false;
+   const changed=db.prepare(`UPDATE task_user_inputs SET state='cancelled',prestart_failure_code=?
+    WHERE id=? AND conversation_id=? AND owner_user_id=? AND state='running' AND source IS NULL
+     AND NOT EXISTS(SELECT 1 FROM task_input_invocations WHERE input_id=?)
+     AND NOT EXISTS(SELECT 1 FROM task_native_uncertainty WHERE kind='input' AND claim_id=?)`).run(code,id,conversationId,principal.userId,id,id).changes;
+   if(!changed)return false;
+   event('task.user_input_prestart_failed',id,{inputId:id,conversationId,code,nativeTurnSubmitted:false});
+   return true;
   },
   completeUserInput(id: string) {
    root();

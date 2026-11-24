@@ -100,3 +100,16 @@ for(const status of [403,409,422])it(`allows an explicit same-key retry after a 
  await expect(submitChatInput(call,'chat',body,'queue',recovery)).rejects.toThrow('Not accepted');expect(calls).toEqual([body]);
  await expect(submitChatInput(call,'chat',body,'queue',recovery)).resolves.toMatchObject({commandKey:body.commandKey,state:'queued'});expect(calls).toEqual([body,body]);
 });
+
+for(const readback of [false,true])it(`reports a known Codex prestart failure without replay (readback=${readback})`,async()=>{
+ const recovery:SubmissionRecovery={},calls:string[]=[];
+ const failed={...accepted,state:'cancelled',prestartFailure:{code:'codex_mailbox_setup_failed'}};
+ const call=async(_path:string,method:string)=>{
+  calls.push(method);
+  if(method==='POST'&&readback)throw new Error('Lost receipt');
+  return method==='POST'?failed:[failed];
+ };
+ await expect(submitChatInput(call,'chat',body,'queue',recovery)).rejects.toThrow('消息未发送到 Codex');
+ await expect(submitChatInput(call,'chat',body,'queue',recovery)).rejects.toBe(recovery.rejection);
+ expect(calls).toEqual(readback?['POST','GET']:['POST']);
+});

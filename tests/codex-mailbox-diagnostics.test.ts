@@ -105,3 +105,50 @@ it("records only the sanitized Codex mailbox stage before any native turn", asyn
     await rm(home,{recursive:true,force:true});
   }
 });
+
+it("durably rejects a known prestart human queue failure without accepting, replaying or losing the request", async () => {
+  const home = await mkdtemp(join(tmpdir(), "mandala-mailbox-queue-event-"));
+  const { openStore } = await import("../server/store");
+  const { createSessionManager } = await import("../server/sessions");
+  const project = join(home, "project");
+  await mkdir(project);
+  const factory = vi.fn(async () => {
+    throw Object.assign(new Error("PRIVATE_REMOTE_DIAGNOSTIC"), {code:"codex_mailbox_setup_failed",status:500});
+  });
+  const setup = () => {
+    const store = openStore(home);
+    const manager = createSessionManager(store, async () => ({
+      version:2,
+      projects:[{id:"p",name:"Fixture",cwd:project,agentIds:["a"],resources:[],mcp:[],skills:[]}],
+      agents:[{id:"a",name:"Fixture",defaultCli:"codex",models:{},instructions:"",mcp:[],skills:[]}],
+    }), factory, async () => { throw new Error("Unexpected OMP launch"); }, home);
+    return {store,manager};
+  };
+  let {store,manager} = setup();
+  try {
+    const chat = await manager.create("p","a");
+    const body = "Saved synthetic request";
+    const input = manager.enqueueUserInput(chat.id,body,"mailbox-queue-test");
+    await expect(manager.sendQueuedInput(chat.id,input.id)).rejects.toMatchObject({code:"codex_mailbox_setup_failed"});
+    const receipt = () => manager.listUserInputs(chat.id).find(row=>row.id===input.id);
+    expect(receipt()).toMatchObject({
+      id:input.id,text:body,state:"cancelled",prestartFailure:{code:"codex_mailbox_setup_failed"},
+    });
+    expect(store.listEvents(chat.id,0).filter(event=>event.kind==="error").map(event=>event.data)).toMatchObject([
+      {queuedInputId:input.id,nativeTurnSubmitted:false,code:"codex_mailbox_setup_failed"},
+    ]);
+    expect(store.database.prepare("SELECT COUNT(*) n FROM task_input_invocations WHERE input_id=?").get(input.id)?.n).toBe(0);
+    expect(store.database.prepare("SELECT COUNT(*) n FROM task_directory_claims WHERE kind='input' AND owner_id=?").get(input.id)?.n).toBe(0);
+    await manager.close();
+    store.close();
+    ({store,manager} = setup());
+    expect(manager.enqueueUserInput(chat.id,body,"mailbox-queue-test")).toEqual(receipt());
+    expect(()=>manager.enqueueUserInput(chat.id,"changed","mailbox-queue-test")).toThrow(/idempotency_conflict/);
+    await expect(manager.sendQueuedInput(chat.id,input.id)).rejects.toMatchObject({code:"input_not_queued"});
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(store.database.prepare("SELECT state FROM task_user_inputs WHERE command_key=?").get("mailbox-queue-test")?.state).toBe("cancelled");
+    expect(store.database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+  } finally {
+    try { await manager.close(); } finally { store.close(); await rm(home,{recursive:true,force:true}); }
+  }
+});

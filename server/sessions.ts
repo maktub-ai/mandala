@@ -1305,10 +1305,23 @@ export function createSessionManager(
         error instanceof DomainError&&error.status===403&&hasRevokedReceiptHistory(id)&&scheduler.requeueUnsubmittedInput(current.queuedInputId,'context_rebuild_deferred');
       if(recoveredReceipt||deferredReceipt)current.queuedInputId=undefined;
       revokeBusinessCli(current);
-      if(!turnSubmitted){resources.releaseUnsubmitted(owner.kind,owner.id);queueMicrotask(()=>{void wakeDirectories();});}
+      const failureInputId = current.queuedInputId;
+      const failedQueueInput = !!(mailboxFailure && failureInputId && !task && !messageOrigin && !inputSource &&
+        owner.kind==='input' && owner.id===failureInputId && current.runId===invocationId &&
+        store.transaction(()=>{
+          if(!scheduler.failPrestartMailboxInput(failureInputId,id,mailboxFailure.code))return false;
+          resources.releaseUnsubmitted('input',failureInputId);
+          appendEvent(id,'error',{message:mailboxFailure.message,queuedInputId:failureInputId,code:mailboxFailure.code,nativeTurnSubmitted:false});
+          return true;
+        }));
+      if(failedQueueInput)current.queuedInputId=undefined;
+      if(!turnSubmitted){
+        if(!failedQueueInput)resources.releaseUnsubmitted(owner.kind,owner.id);
+        queueMicrotask(()=>{void wakeDirectories();});
+      }
       if (memoryTrace && !memoryLoaded) appendEvent(id, "metadata", { ...memoryTrace, status: "failed",
         message: memoryReadFailed ? error.message : "CLI did not acknowledge memory instructions; retry this turn." });
-      appendEvent(id, "error", { message: error.message, nativeTurnSubmitted: turnSubmitted,
+      if(!failedQueueInput)appendEvent(id, "error", { message: error.message, nativeTurnSubmitted: turnSubmitted,
         ...(reloadBlocked?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy'}:mailboxFailure?{code:mailboxFailure.code}:{}) });
       if (current.queuedInputId && !turnSubmitted && error instanceof DomainError && ["reference_changed", "invalid_references"].includes(error.code)) {
         scheduler.rejectUnsubmittedInput(current.queuedInputId);
@@ -2068,6 +2081,7 @@ export function createSessionManager(
       authorizeHumanContinuation(id);
       const c=chat(id);
       const input = scheduler.enqueueUserInput(id, text, commandKey, attachments, references);
+      if(input.prestartFailure)return input; // Same-key lookup returns the terminal receipt without a new admission.
       if(attachments.length)attachmentAssets.accept(root,id,attachments,input.id,{agentId:c.agentId||undefined,projectId:c.projectId||undefined});
       store.appendEvent(id,"metadata",{queuedInputId:input.id,state:input.state});
       setImmediate(() => { if (!closed) void pump(id); });
