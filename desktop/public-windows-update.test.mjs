@@ -106,7 +106,10 @@ test('Windows signed candidate only invokes confirmed guarded handoff from expli
   const version='1.0.5', tag='v'+version, name='Mandala-'+version+'-win-x64.exe';
   const repo='https://github.com/maktub-ai/mandala-releases/releases';
   const notes=repo+'/tag/'+tag, url=repo+'/download/'+tag+'/'+name;
-  let downloaded=false, installations=0, external=0, confirmations=0, handoff='busy';
+  let downloaded=false, installations=0, external=0, confirmations=0, accepted=false;
+  const {createWindowsInstallAction}=await import('./public-windows-update.cjs');
+  const installPublic=createWindowsInstallAction({confirm:async()=>{installations++;return accepted;},
+    canUnload:async()=>true,installVerified:async()=>'unknown'});
   const update={version,notes,size:42,publicWindows:true};
   const publicWindows={
     check(offered){ assert.equal(offered.url,url); return update; },
@@ -115,7 +118,7 @@ test('Windows signed candidate only invokes confirmed guarded handoff from expli
   };
   const controller=createUpdateController({version:'1.0.4',platform:'win32',arch:'x64',
     fetch:async()=>({ok:true,json:async()=>({schema:1,releases:[{tag,url:notes,assets:[{name,url,size:42}]}]})}),
-    publicWindows, handoffJournal:journal(), installPublic:async()=>{installations++; return handoff;},
+    publicWindows, handoffJournal:journal(), installPublic,
     showMessage:async()=>{confirmations++; return {response:0};},openExternal:()=>{external++;}
   });
   assert.equal((await controller.check('auto')).channel,'signed-windows');
@@ -129,7 +132,7 @@ test('Windows signed candidate only invokes confirmed guarded handoff from expli
   await controller.install();
   assert.equal(installations,1);
   assert.equal(controller.state().status,'ready');
-  handoff='unknown';
+  accepted=true;
   await controller.install();
   assert.equal(controller.state().status,'error');
   assert.equal(controller.state().error,'signed_handoff_unknown');
@@ -139,36 +142,35 @@ test('Windows signed candidate only invokes confirmed guarded handoff from expli
   assert.equal(installations,2);
 });
 
-test('Windows confirmation prevents premature drain and recovers the unchanged runtime only for a known prelaunch failure', async ()=>{
-  const {createWindowsInstallAction}=await import('./public-windows-update.cjs');
+test('Windows confirmation prevents premature drain and preserves the barrier on uncertain adapter outcome', async ()=>{
+  const {createWindowsInstallAction,consumeWindowsPrelaunchFailure}=await import('./public-windows-update.cjs');
   const calls=[];
-  let accepted=false,unsaved=false,lease=true,final='busy';
+  let accepted=false,unsaved=false;
+  const update={version:'1.0.5'};
   const install=createWindowsInstallAction({
     confirm:async()=>{calls.push('confirm');return accepted;},
     canUnload:async()=>{calls.push('unload');return !unsaved;},
     inhibitInput(value){calls.push(value?'block':'unblock');},
     async stopIfIdle(){calls.push('idle-drain');return true;},
-    claimQuiescentHome(){calls.push('claim');return lease?()=>calls.push('release'):null;},
-    async resumeUnchanged(){calls.push('resume');},
+    claimQuiescentHome(){calls.push('claim');return null;},
     async installVerified(authorize){
       calls.push('verified');
       const release=await authorize();
       if(!release) return 'busy';
-      try { calls.push('native'); return final; }
+      try { calls.push('native'); return 'unknown'; }
       finally {release();}
     }
   });
-  assert.equal(await install(),'cancelled');
+  const cancelled=Object.freeze({});
+  assert.equal(consumeWindowsPrelaunchFailure(await install(update,cancelled),update,cancelled),'cancelled');
   assert.deepEqual(calls.splice(0),['confirm']);
   accepted=true; unsaved=true;
-  assert.equal(await install(),'unsaved');
+  const drafts=Object.freeze({});
+  assert.equal(consumeWindowsPrelaunchFailure(await install(update,drafts),update,drafts),'unsaved');
   assert.deepEqual(calls.splice(0),['confirm','unload']);
-  unsaved=false; lease=false;
-  assert.equal(await install(),'busy');
-  assert.deepEqual(calls.splice(0),['confirm','unload','verified','block','unload','idle-drain','claim','unblock','resume']);
-  lease=true; final='unknown';
-  assert.equal(await install(),'unknown');
-  assert.deepEqual(calls.splice(0),['confirm','unload','verified','block','unload','idle-drain','claim','native','release']);
+  unsaved=false;
+  assert.equal(await install(update,Object.freeze({})),'unknown');
+  assert.deepEqual(calls.splice(0),['confirm','unload','verified','block','unload','idle-drain','claim']);
   assert.equal(await install(),'unknown','unknown native handoff never retries');
   assert.deepEqual(calls,[]);
 });

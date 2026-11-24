@@ -111,15 +111,23 @@ function createUpdateController({ version, platform, arch, fetch, local, publicM
       // handoff. Only the journal's owner may clear a known prelaunch outcome.
       try { token=winJournal.tryBegin(); } catch { /* Fail closed. */ }
       if (token == null) { set(settled(readHandoff())); return; }
-      let outcome='unknown';
+      let outcome='unknown', noHandoff=false;
+      const challenge=Object.freeze({});
       try {
-        const result=await installPublic(update);
-        if (['busy','cancelled','unsaved','prelaunch_failed'].includes(result)) outcome=null;
+        const result=await installPublic(update,challenge);
+        // Lazy on the dormant Windows source only; ordinary desktop builds
+        // cannot mint or settle this proof through release data or renderer input.
+        noHandoff=!!result&&typeof result==='object'&&
+          require('./public-windows-update.cjs').consumeWindowsPrelaunchFailure(result,update,challenge);
+        if (noHandoff) outcome=null;
         else if (result==='started') outcome='started';
+      } catch {
+        throw Error('Could not confirm the outcome of the Windows update.');
       } finally {
         try { if(winJournal.settle(token,outcome)!==true) outcome='unknown'; }
         catch {outcome='unknown';}
         if(outcome!==null) set(settled(outcome));
+        else if (noHandoff==='verification_failed') set({status:'error',update:null,error:'signed_verification'});
         else {
           const staged=signed.ready();
           set(staged ? {status:'ready',update:staged} : {status:'idle',update:null});
