@@ -1,10 +1,15 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { createRpcClient, type RpcMessage } from "../server/rpc";
 import { connectCodex, startCodex } from "../server/codex";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { spawn as spawnNative } from "../server/native-spawn";
+vi.mock("../server/native-spawn", () => ({
+  spawn: vi.fn(() => { throw new Error("Test blocked an unexpected native CLI spawn"); }),
+}));
 it("passes_agent_instructions_and_parses_native_ids_and_models", async () => {
   let start!: RpcMessage;
   const rpc = createRpcClient(
@@ -98,31 +103,38 @@ it.each([
   }
 });
 it.each([
-  { profile: ["--profile", "personal"] },
-  { profile: ["--profile=personal"] },
-  { profile: ["-p", "personal"] },
-])("starts Codex with its native profile before the app-server subcommand", async ({ profile }) => {
+  { profile: ["--profile", "personal"], inheritPath: false },
+  { profile: ["--profile=personal"], inheritPath: false },
+  { profile: ["-p", "personal"], inheritPath: false },
+  { profile: ["--profile", "personal"], inheritPath: true },
+])("starts Codex with its native profile before the app-server subcommand", async ({ profile, inheritPath }) => {
   const dir = await mkdtemp(join(tmpdir(), "mana-codex-runtime-"));
-  const executable = join(dir, "codex");
+  const fixture = join(dir, "codex-launch.mjs");
   const capture = join(dir, "launch.json");
-  await writeFile(executable, `#!/usr/bin/env node
-require("node:fs").writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ args: process.argv.slice(2), value: process.env.MANA_RUNTIME_TEST, inherited: process.env.PATH }));
-import(${JSON.stringify(resolve("tests/fixtures/fake-cli.mjs"))});
-`);
-  await chmod(executable, 0o700);
-  const previousPath = process.env.PATH;
-  process.env.PATH = dir + ":" + previousPath;
+  const fake = pathToFileURL(resolve("tests/fixtures/fake-cli.mjs")).href;
+  const native = vi.mocked(spawnNative);
+  native.mockClear();
   let client;
   try {
-    client = await startCodex({ cwd: dir, extraArgs: ["--strict-config", ...profile], env: { MANA_RUNTIME_TEST: "resolved-value" },
+    await writeFile(fixture, `import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ args: process.argv.slice(2), value: process.env.MANA_RUNTIME_TEST, inherited: process.env.PATH }));
+await import(${JSON.stringify(fake)});
+`);
+    native.mockImplementationOnce((command, args, launch) => {
+      expect(command).toBe("codex");
+      expect(launch).toMatchObject({ cwd: dir, stdio: "pipe", shell: false, refreshWindowsPath: inheritPath });
+      // Exercise the real process pipes and RPC, but never resolve a vendor executable.
+      return spawn(process.execPath, [fixture, ...args], { cwd: launch.cwd, env: launch.env, stdio: "pipe" });
+    });
+    client = await startCodex({ cwd: dir, extraArgs: ["--strict-config", ...profile], env: { ...(!inheritPath && { PATH: dir }), MANA_RUNTIME_TEST: "resolved-value" },
       onEvent() {}, onApproval() {}, onExit() {} });
     const launch = JSON.parse(await readFile(capture, "utf8"));
+    expect(native).toHaveBeenCalledTimes(1);
     expect(launch.args).toEqual([...profile, "app-server", "--stdio", "--strict-config"]);
     expect(launch.value).toBe("resolved-value");
-    expect(launch.inherited).toBe(process.env.PATH);
+    expect(launch.inherited).toBe(inheritPath ? process.env.PATH : dir);
   } finally {
-    client?.close();
-    process.env.PATH = previousPath;
+    await client?.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
