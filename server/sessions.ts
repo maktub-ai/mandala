@@ -24,9 +24,9 @@ import { skillIdentity } from "../shared/skills";
 import {createTaskMonitor} from './task-monitor';
 import { createConversationReferences } from './conversation-references';
 import type { ConversationReferenceSummary } from '../shared/conversation-references';
-import type { CodexOptions } from "./codex";
+import type { RuntimeOptions } from './execution-client';
 import { startNativeRuntime } from "./native-runtime";
-import { isCli } from "../shared/runtimes";
+import { runtimeCapabilities, isCli } from "../shared/runtimes";
 import { productEnv } from "../cli/product-env.mjs";
 import {createAgentMessages} from './agent-messages';
 import {markConversationProgress} from './conversation-progress';
@@ -75,7 +75,8 @@ import type {
   EventKind,
 } from "../shared/types";
 import type { Store } from "./store";
-import { codexMailboxFailure, startCodex, type CodexClient } from "./codex";
+import type { ExecutionClient } from './execution-client';
+import { codexMailboxFailure, startCodex } from './codex';
 import { startOmp, prepareCapabilityRuntime, type OmpOptions } from "./omp";
 import { workspaceExecutionLocation } from '../shared/execution-machines';
 import { connectSshExecution, type SshExecution } from './ssh-execution';
@@ -189,7 +190,7 @@ export function createSessionManager(
   const live = new Map<
     string,
     {
-      client?: CodexClient;
+      client?: ExecutionClient;
       approvals: Map<string, Approval>;
       approvalScope?: ConversationApprovalScope;
       stopRequested: boolean;
@@ -329,9 +330,9 @@ export function createSessionManager(
   const coordination=createMandalaCoordination({home,store,tasks});
   let closed = false;
   let closing: Promise<void> | undefined;
-  const initializations = new Set<Promise<CodexClient>>();
-  const clients = new Set<CodexClient>();
-  const initialize = async (create:()=>Promise<CodexClient>) => {
+  const initializations = new Set<Promise<ExecutionClient>>();
+  const clients = new Set<ExecutionClient>();
+  const initialize = async (create:()=>Promise<ExecutionClient>) => {
     if (closed) throw new Error("service closed");
     const pending = (async()=>{
       const client = await create(), nativeClose = client.close.bind(client);
@@ -353,7 +354,7 @@ export function createSessionManager(
   const codexFactory = clientFactory, originalOmpFactory = ompFactory;
   clientFactory = options=>initialize(()=>codexFactory(options));
   ompFactory = options=>initialize(()=>originalOmpFactory(options));
-  const factory = (cli: Cli) => cli === "codex" ? clientFactory : cli === "omp" ? ompFactory : (options: CodexOptions) => initialize(() => startNativeRuntime(cli, options));
+  const factory = (cli: Cli) => cli === "codex" ? clientFactory : cli === "omp" ? ompFactory : (options: RuntimeOptions) => initialize(() => startNativeRuntime(cli, options));
   const remoteExecutions = new Map<string,Promise<SshExecution>>();
   // A presentation-only preflight phase; the scheduler remains the source of durable state.
   const queueRemoteAdmission = new Map<string,'connecting'|'remote_unavailable'>();
@@ -364,12 +365,12 @@ export function createSessionManager(
     if(!pending){pending=connectSshExecution({id:location.machineId,name:location.machineName,host:location.host},{home,conversationId:id});remoteExecutions.set(id,pending);void pending.catch(()=>{if(remoteExecutions.get(id)===pending)remoteExecutions.delete(id);});}
     return pending;
   };
-  const runtimeOptions = (cli:Cli,context:ReturnType<typeof conversationContext>|undefined,config:Config,scope:'runtime'|'system'='runtime'):Pick<CodexOptions,'extraArgs'|'env'|'fullAccess'|'gateway'|'safeSystem'> => {
+  const runtimeOptions = (cli:Cli,context:ReturnType<typeof conversationContext>|undefined,config:Config,scope:'runtime'|'system'='runtime'):Pick<RuntimeOptions,'extraArgs'|'env'|'fullAccess'|'gateway'|'safeSystem'> => {
     if(!context?.executionLocation)return scope==='system'?{...systemRuntime(cli,config.runtimeDefaults),...(cli==='omp'?{extraArgs:['--no-tools']}: {})}:resolveRuntime(cli,executionRuntimePolicy(cli,context?.agent,config.runtimeDefaults));
     const policy=configuredRuntime(cli,executionRuntimePolicy(cli,context.agent,config.runtimeDefaults));
     return {extraArgs:policy.args,...('fullAccess'in policy?{fullAccess:policy.fullAccess}:{}),...(policy.gateway?{gateway:policy.gateway}:{})};
   };
-  const startClient = async(cli:Cli,options:CodexOptions|OmpOptions,context:ReturnType<typeof conversationContext>|undefined,id:string,config:Config,mode:'session'|'inspect'|'fork'='session') => {
+  const startClient = async(cli:Cli,options:RuntimeOptions|OmpOptions,context:ReturnType<typeof conversationContext>|undefined,id:string,config:Config,mode:'session'|'inspect'|'fork'='session') => {
     const isolated=mode!=='session',attachOnly=mode==='inspect',runtimeId=mode==='fork'?'fork-'+randomUUID():id;
     const location=context?.executionLocation;
     const remote=location&&isolated?await connectSshExecution({id:location.machineId,name:location.machineName,host:location.host},{home,conversationId:runtimeId}):context?await remoteFor(context,id):undefined;
@@ -414,7 +415,7 @@ export function createSessionManager(
   };
   const platformMcp = (project: Config["projects"][number], agent: Config["agents"][number]): McpServer[] =>
     [...new Map([...agent.mcp, ...project.mcp].map((m) => [m.name, m])).values()];
-  const verify = async (runtime: { client?: CodexClient; verification?: { mcp: Record<string, string | null>; skills: { name: string; path: string }[] } },
+  const verify = async (runtime: { client?: ExecutionClient; verification?: { mcp: Record<string, string | null>; skills: { name: string; path: string }[] } },
     nativeId: string, cwd: string) => {
     const client = runtime.client;
     try {
@@ -629,7 +630,7 @@ export function createSessionManager(
   };
   const backgroundNotConfirmed = (error:unknown) => error instanceof DomainError &&
     ['native_background_active','native_background_check_failed'].includes(error.code);
-  const waitForQueuedBackground = (id:string,inputId:string,client:CodexClient,nativeId:string) => {
+  const waitForQueuedBackground = (id:string,inputId:string,client:ExecutionClient,nativeId:string) => {
     const executionId=manager.executionId(id);
     const sameThread=()=>{
       const runtime=live.get(id),conversation=store.getConversation(id);
@@ -1484,7 +1485,7 @@ export function createSessionManager(
       store.database.prepare("SELECT id FROM task_user_inputs WHERE conversation_id=? AND (state='unknown' OR state='running' AND id<>?)").get(id,inputId??'')||
       store.database.prepare('SELECT owner_id FROM task_directory_claims WHERE conversation_id=? AND submitted=1').get(id);
     if(continuity.blocked(id)||branching.has(id)||occupied())throw new DomainError('native_context_busy',409,'Current native work must settle before rebuilding context; queued input is preserved.');
-    branching.add(id);let inspection:CodexClient|undefined;
+    branching.add(id);let inspection:ExecutionClient|undefined;
     try{
       // The native runtime can retain background commands even after a terminal turn.
       if(c.nativeId&&c.cli==='codex'){
@@ -1527,7 +1528,7 @@ export function createSessionManager(
     const prefixEnd = runId ? events.find(event => (event.data as { runId?: string }).runId === runId)!.id : eventId;
     if (!source.nativeId) throw new Error("Native message branching unavailable");
     branching.add(id);
-    let client: CodexClient | undefined;
+    let client: ExecutionClient | undefined;
     try {
       const config = await loadConfig();
       const context=conversationContext(config, source, join(home || tmpdir(), "workspaces", "conversations", id));
@@ -1603,7 +1604,8 @@ export function createSessionManager(
         throw new Error("conversation not running");
       if (r.stopping) return r.stopping;
       r.stopRequested = true;
-    r.userStopRequested = source === "user";
+      r.userStopRequested = source === "user";
+      appendEvent(id, "metadata", {reason: "stop_requested", ...(r.activeTurnId ? {turnId:r.activeTurnId} : {})});
       revokeBusinessCli(r);
       if(r.preparing){
         // No turn RPC has been sent. Invalidate ownership before releasing only the unsent claim.
@@ -1624,14 +1626,19 @@ export function createSessionManager(
           r.client?.close();
           r.approvals.clear();
           if(r.directoryOwner&&resources.releaseUnsubmitted(r.directoryOwner.kind,r.directoryOwner.id))queueMicrotask(()=>{void wakeDirectories();});
-          if(c.executionLocation){
-            store.appendEvent(id,'error',{message:'Remote execution did not confirm stopping. Reconnect and check its state before starting more work.',code:'remote_stop_unconfirmed'});
-            state(id,'interrupted');if(r.durableRun)tasks.markUnknown(r.durableRun.id);if(r.queuedInputId)scheduler.reconcileInput(r.queuedInputId,false);r.finishStop?.();return;
+          const remote=!!c.executionLocation;
+          store.appendEvent(id,'error',{
+            message: remote
+              ? 'Remote execution did not confirm stopping. Reconnect and check its state before starting more work.'
+              : 'The CLI did not confirm stopping. The native turn outcome is unknown.',
+            code: remote ? 'remote_stop_unconfirmed' : 'native_stop_unconfirmed',
+          });
+          state(id,'interrupted');
+          if(r.durableRun)tasks.markUnknown(r.durableRun.id);
+          if(r.queuedInputId){
+            messages.finish(r.queuedInputId,'unknown','');
+            scheduler.reconcileInput(r.queuedInputId,false);
           }
-          store.updateConversation(id, { turnId: null });
-          store.appendEvent(id, "error", { message: "CLI did not finish stopping; its runtime was terminated. You can continue this conversation." });
-          state(id, "interrupted");
-          finishTask(id, false, r);
           r.finishStop?.();
         }, 3000);
         r.finishStop = () => { clearTimeout(timer); resolve(); };
@@ -1645,7 +1652,7 @@ export function createSessionManager(
   let recovery: Promise<RecoveryReport> | undefined;
   const inspect = async (identity:import('../shared/tasks').RunIdentity,id:string) => {
     const c=chat(id);if(c.cli!=='codex')return 'unknown' as const;
-    let client:CodexClient|undefined;
+    let client:ExecutionClient|undefined;
     try {
       const config=await loadConfig(),context=conversationContext(config,c,join(home,'workspaces','conversations',id));
       client=await startClient(c.cli,{cwd:context.project.cwd,...runtimeOptions(c.cli,context,config),signal:lifetime.signal,onEvent(){},onApproval(){},onExit(){}},context,id,config,'inspect');
@@ -1653,7 +1660,7 @@ export function createSessionManager(
     } catch {return 'unknown' as const;} finally {await client?.close();}
   };
   const progressMonitor=createTaskMonitor({store,listRuns:()=>tasks.listTasks(root).flatMap(task=>tasks.listRunControls(root,task.id)),inspect:async(identity,id)=>{
-    const c=chat(id);if(c.cli!=='codex')return 'unknown';let client:CodexClient|undefined;
+    const c=chat(id);if(c.cli!=='codex')return 'unknown';let client:ExecutionClient|undefined;
     try{const config=await loadConfig(),context=conversationContext(config,c,join(home,'workspaces','conversations',id));client=await startClient(c.cli,{cwd:context.project.cwd,...runtimeOptions(c.cli,context,config),signal:lifetime.signal,onEvent(){},onApproval(){},onExit(){}},context,id,config,'inspect');return await client.inspectInvocation?.(identity)??'unknown';}catch{return 'unreachable';}finally{await client?.close();}
   }});
   const conversationGoals=(id:string)=>{
@@ -1907,7 +1914,7 @@ export function createSessionManager(
       const project = context?.project;
       const cwd = project?.cwd || await mkdtemp(join(tmpdir(), "mana-catalog-"));
       const catalogId='catalog-'+randomUUID();
-      let client: CodexClient | undefined;
+      let client: ExecutionClient | undefined;
       const diag:NonNullable<CliStatus['diagnostics']>={host:context?.executionLocation?'remote':'local',executable:'not-verified',probe:'failed',auth:'not-verified'};
       let stage:NonNullable<CliStatus['diagnostics']>['failureStage']='configuration';
       const withDetails=(value:CliStatus):CliStatus=> explain?{...value,diagnostics:diag}:value;
@@ -1928,18 +1935,27 @@ export function createSessionManager(
           ...(cli === "omp" ? { ephemeral: true } : {}),
         },context,catalogId,config);
         stage='probe';
-        const {nativeAccountPresent,capabilityIssue,...value}=await client.getStatus(explain);
+        const {nativeAccountPresent,nativeVersion,capabilityIssue,...value}=await client.getStatus(explain);
+        if(explain&&nativeVersion)diag.nativeVersion=nativeVersion;
         if(explain&&capabilityIssue){diag.capabilityIssue=capabilityIssue;diag.probe='acp';}
         if(explain&&value.status!=='unavailable'){
-          diag.probe=cli==='codex'?'account':cli==='cursor'||cli==='antigravity'?'version-only':cli==='omp'||cli==='pi'?'rpc':cli==='hermes'||cli==='openclaw'?'gateway-session':'acp';
-          if(cli==='codex')diag.auth=nativeAccountPresent?'native-account-ready':value.status==='login-required'?'login-required':'not-verified';
+          diag.probe=runtimeCapabilities(cli).probe;
+          if(diag.host==='remote')diag.executable='executable';
+          if(cli==='codex'||cli==='claude')diag.auth=nativeAccountPresent?'native-account-ready':value.status==='login-required'?'login-required':'not-verified';
           else if(value.status==='login-required')diag.auth='configuration-required';
         }
         if(explain&&value.status==='unavailable'&&!capabilityIssue)diag.failureStage=stage;
         return withDetails(value);
-      } catch {
-        if(explain)diag.failureStage=stage;
-          return withDetails({ status: "unavailable", version: null });
+      } catch (error) {
+        if(explain){
+          const code=(error as NodeJS.ErrnoException)?.code;
+          diag.failureStage=code==='runtime-acp-handshake-failed'?'handshake':code==='runtime-gateway-unavailable'?'gateway':stage;
+          if(code==='claude-override-unavailable'||code==='claude-bridge-missing'||code==='claude-bridge-integrity'||code==='claude-version-incompatible'||code==='claude-version-probe-failed'){
+            diag.requiredDependency=code;
+            if(code!=='claude-override-unavailable')diag.executable='executable';
+          }
+        }
+        return withDetails({ status: "unavailable", version: null });
       } finally {
         await client?.close();
         if (!project?.cwd) await rm(cwd, { recursive: true, force: true });
@@ -1953,7 +1969,7 @@ export function createSessionManager(
       const project = context?.project;
       const cwd = project?.cwd || await mkdtemp(join(tmpdir(), "mana-catalog-"));
       const catalogId='catalog-'+randomUUID();
-      let client: CodexClient | undefined;
+      let client: ExecutionClient | undefined;
       try {
         client = await startClient(cli,{
           cwd, model:config.chatDefaults?.[cli]?.model, ...runtimeOptions(cli,context,config,scope), signal: lifetime.signal,

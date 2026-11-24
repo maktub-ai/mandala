@@ -90,7 +90,7 @@ npm start
 npm run dev
 ```
 
-访问 **http://127.0.0.1:4174**。开发模式同时启动 Vite 和本地 API 服务。
+访问 **http://127.0.0.1:4174**。开发模式同时启动 Vite 和本地 API 服务。需要测试 Claude 或 SSH 时，先运行 `npm run build:ssh-runner` 生成 Mandala 的集成产物。桌面构建会自动生成这些产物。
 
 ### 指定数据目录与端口
 

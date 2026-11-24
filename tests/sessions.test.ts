@@ -1074,7 +1074,7 @@ it("stopping Runtime access rejects new chats while preserving existing sessions
   expect(store.getConversation(chat.id)?.cli).toBe("codex");
 });
 
-it.each(["no reply", "acknowledgement only"])("forces a bounded stop when native interrupt gives %s", async (mode) => {
+it.each(["no reply", "acknowledgement only"])("records an unknown outcome when native interrupt gives %s", async (mode) => {
   vi.useFakeTimers();
   manager.close();
   const close = vi.fn();
@@ -1090,8 +1090,9 @@ it.each(["no reply", "acknowledgement only"])("forces a bounded stop when native
   if(mode==='no reply')old.onEvent({method:'thread/tokenUsage/updated',params:{threadId:'native-1',turnId:'turn-1',tokenUsage:{total:{inputTokens:400,outputTokens:20,cachedInputTokens:0,cacheWriteInputTokens:0,reasoningOutputTokens:0,totalTokens:420},last:{inputTokens:400,outputTokens:20,cachedInputTokens:0,cacheWriteInputTokens:0,reasoningOutputTokens:0,totalTokens:420}}}});
   const stopping = manager.stop(c.id);
   await vi.advanceTimersByTimeAsync(3500);
-  expect(store.getConversation(c.id)).toMatchObject({ status: "interrupted", turnId: null, nativeId: "native-1" });
+  expect(store.getConversation(c.id)).toMatchObject({ status: "interrupted", turnId: "turn-1", nativeId: "native-1" });
   await stopping;
+  expect(store.listEvents(c.id,0).some(event=>event.kind==="error"&&(event.data as {code?:string}).code==="native_stop_unconfirmed")).toBe(true);
   expect(getUsage(store,{period:'today',timeZone:'UTC'}).recent[0]).toMatchObject({status:'interrupted',coverage:mode==='no reply'?'partial':'unknown'});
   expect(getUsage(store,{period:'today',timeZone:'UTC'}).totals.totalTokens).toBe(mode==='no reply'?420:null);
   expect(close).toHaveBeenCalledOnce();

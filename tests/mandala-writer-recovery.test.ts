@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { openStore } from '../server/store';
 import { ensureMandalaConversation, mandalaContextBoundary, mandalaContinuity } from '../server/mandala';
 import { createSessionManager } from '../server/sessions';
-import type { CodexClient } from '../server/codex';
+import type { ExecutionClient } from '../server/execution-client';
 import { DomainError } from '../shared/workspace-contracts';
 import { ensureConfiguredMandala } from './configured-mandala';
 import { businessCliContext } from './business-cli-context';
@@ -20,7 +20,7 @@ async function setup() {
   const chat = ensureMandalaConversation(store, config);
   const controls = { token: '', held: true, lostStart: false, loseNameReply: false, wait: undefined as Promise<void> | undefined };
   const named = new Map<string, string>();
-  const starts: Parameters<CodexClient['startThread']>[0][] = [];
+  const starts: Parameters<ExecutionClient['startThread']>[0][] = [];
   const resumes: string[] = [];
   const turns: { id: string; text: string }[] = [];
   const newManager = () => {

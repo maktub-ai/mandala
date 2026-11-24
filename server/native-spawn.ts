@@ -32,15 +32,18 @@ export function diagnoseNativeCli(command: string, env: NodeJS.ProcessEnv = proc
   }
   return {state:problem};
 }
-// Only an explicitly selected Claude executable is mandatory. The vendor
-// adapter otherwise resolves its bundled/adjacent Claude executable itself.
-export function diagnoseRuntimePrerequisites(cli:Cli,env:NodeJS.ProcessEnv=process.env):Pick<NonNullable<CliStatus['diagnostics']>,'executable'|'standaloneClaude'|'requiredDependency'> {
- const executable=diagnoseNativeCli(runtimeCatalog[cli].command,env).state;
- if(cli!=='claude')return {executable};
- const standaloneClaude=executable!=='executable'&&diagnoseNativeCli('claude',env).state==='executable';
- const override=env.CLAUDE_CODE_EXECUTABLE;
- const requiredDependency=override&&(!(isAbsolute(override)||process.platform==='win32'&&win32.isAbsolute(override)||/^[a-z0-9_.-]+$/i.test(override))||diagnoseNativeCli(override,env).state!=='executable')?'claude-override-unavailable' as const:undefined;
- return {executable,...standaloneClaude?{standaloneClaude}:{},...requiredDependency?{requiredDependency}:{}};
+export function resolveClaudeLauncher(env: NodeJS.ProcessEnv): NativeCliDetection {
+  const command = env.CLAUDE_CODE_EXECUTABLE || (process.platform === 'win32' ? 'claude.exe' : 'claude');
+  if (!(isAbsolute(command) || process.platform === 'win32' && win32.isAbsolute(command) || /^[a-z0-9_.-]+$/i.test(command))) {
+    return {state: 'missing'};
+  }
+  return diagnoseNativeCli(command, env);
+}
+
+export function diagnoseRuntimePrerequisites(cli: Cli, env: NodeJS.ProcessEnv = process.env): Pick<NonNullable<CliStatus['diagnostics']>, 'executable' | 'requiredDependency'> {
+  if (cli !== 'claude') return {executable: diagnoseNativeCli(runtimeCatalog[cli].command, env).state};
+  const executable = resolveClaudeLauncher(env).state;
+  return {executable, ...(env.CLAUDE_CODE_EXECUTABLE && executable !== 'executable' ? {requiredDependency: 'claude-override-unavailable'} : {})};
 }
 export function resolveNativeCli(command: string, env: NodeJS.ProcessEnv = process.env): string {
   const found=diagnoseNativeCli(command,env);

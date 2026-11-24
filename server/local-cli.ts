@@ -5,7 +5,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { productHome } from '../cli/product-env.mjs';
 import type { TurnOptions } from '../shared/chat-input';
 import type { ApprovalMode, McpServer, ModelChoice } from '../shared/types';
-import type { CodexClient, CodexOptions } from './codex';
+import type { ExecutionClient, RuntimeOptions } from './execution-client';
 import { spawn } from './native-spawn';
 import { bindLocalCatalogLauncher, runtimeError } from './runtime';
 
@@ -13,7 +13,7 @@ type LocalCli = 'cursor' | 'antigravity';
 type Turn = { id:string; cancelled:boolean; started:boolean; child?:ChildProcessWithoutNullStreams; stop?:Promise<void>; permission?:string; text:string; input:TurnOptions; finishItems?:()=>void; settle:(status:string,error?:string)=>void };
 
 // These headless CLIs cannot mediate individual tools. A host grant covers this turn.
-export async function startLocalCli(cli:LocalCli, options:CodexOptions):Promise<CodexClient> {
+export async function startLocalCli(cli:LocalCli, options:RuntimeOptions):Promise<ExecutionClient> {
  if(options.safeSystem)throw new Error(`${cli} cannot disable all tools; tools-disabled system tasks are unsupported`);
  if(options.extraArgs?.length)throw new Error(`${cli} runtime arguments are managed by Mandala`);
  if(options.gateway&&options.gateway!=='native')throw new Error(`${cli} does not support this credential gateway`);

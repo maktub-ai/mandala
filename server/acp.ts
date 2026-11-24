@@ -7,10 +7,11 @@ import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import {join} from 'node:path';
 import {claudeNativeEnv} from './runtime-credentials';
-import { spawn,resolveNativeCli,diagnoseRuntimePrerequisites } from './native-spawn';
-import type { CodexClient, CodexOptions } from './codex';
+import { spawn,resolveNativeCli } from './native-spawn';
+import { claudeBridgeOptions, prepareClaudeBridge, probeClaudeAccount } from './claude-bridge';
+import type { ExecutionClient, RuntimeOptions } from './execution-client';
 import type { Cli, McpServer, ApprovalMode, ModelChoice } from '../shared/types';
-import { runtimeCatalog,runtimeLabel,supportsSystemTasks } from '../shared/runtimes';
+import { runtimeCapabilities,runtimeCatalog,runtimeLabel,supportsSystemTasks } from '../shared/runtimes';
 import { bindLocalCatalogLauncher, runtimeError, validateRuntimeArgs } from './runtime';
 
 const bounded = async <T>(promise: Promise<T>,timeout=15000): Promise<T> => {
@@ -18,7 +19,7 @@ const bounded = async <T>(promise: Promise<T>,timeout=15000): Promise<T> => {
  try { return await Promise.race([promise,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error('ACP setup timed out')),timeout);})]); }
  finally {clearTimeout(timer!);}
 };
-export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoice;runtimeCli:Cli}, command:string[]): Promise<CodexClient> {
+export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelChoice;nativeVersion?:string;nativeAccount?:()=>Promise<boolean|undefined>;runtimeCli:Cli}, command:string[]): Promise<ExecutionClient> {
  let sessionId='', instructions='', active: {id:string;mode:ApprovalMode;cancelled:boolean;promptStarted?:boolean;wholeTurnApproved?:boolean;sawOutput?:boolean;gatewayFailure?:string}|undefined, closed=false;
  let configuration: SessionConfigOption[]=[];
  let legacyModels:ModelChoice[]=[];
@@ -29,6 +30,8 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
  };
  let messageId='', message='', thought='';
  const calls=new Map<string,Record<string,unknown>>();
+ const secrets=new Set(Object.entries(options.env??{}).filter(([name,value])=>name!=='MANDALA_CLAUDE_RESTRICTED'&&value).map(([,value])=>value));
+ const redact=(message:string)=>{for(const value of secrets)message=message.replaceAll(value,'[redacted]');return message;};
  const permissions=new Map<string,{resolve:(value:RequestPermissionResponse)=>void;allowed:Set<string>}>();
  const emit=(method:string,params:Record<string,unknown>)=>options.onEvent({method,params:{threadId:sessionId,turnId:active?.id,...params}});
  const finishMessage=()=>{
@@ -72,7 +75,7 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
    options.onApproval({id,method:'acp/permission',params:{threadId:sessionId,turnId:active!.id,title:request.toolCall.title??'ACP tool',itemId:request.toolCall.toolCallId,toolCall:request.toolCall,options:request.options}});
   });
  };
- const cli=options.runtimeCli, gatewayBacked=cli==='hermes'||cli==='openclaw';
+ const cli=options.runtimeCli, policy=runtimeCapabilities(cli), gatewayBacked=policy.gateway;
  const setupTimeout=gatewayBacked?45000:15000,lifetime=new AbortController();
  let handle:AcpRuntimeHandle|undefined,nativeTurn:AcpRuntimeTurn|undefined,servers:AcpMcpServer[]=[],stderr='';
  // Mandala persists native session IDs. acpx records only cache this connection;
@@ -87,9 +90,9 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
   processLifecycle:{onExit(exit){
    const agent=agentPids.delete(exit.pid);
    if(!agent||closed||exit.scope.kind!=='runtime-session'||exit.scope.sessionKey!==handle?.sessionKey)return;
-   cancelPermissions();options.onExit(runtimeError('ACP connection closed',stderr,options.env??{}));
+   cancelPermissions();options.onExit(runtimeError('ACP connection closed',redact(stderr)));
   }},
-  sessionRequestMeta:options.safeSystem?()=>({claudeCode:{options:{tools:[],settingSources:[],persistSession:false,settings:{disableAllHooks:true},mcpServers:{}}}}):undefined,
+  sessionRequestMeta:cli==='claude'?()=>({claudeCode:{options:claudeBridgeOptions(options.safeSystem)}}):undefined,
   spawnAgent({command,args,options:launch}){
    lifetime.signal.throwIfAborted();
    const child=spawn(command,args,{...launch,catalogRuntime:options[bindLocalCatalogLauncher]?cli:undefined,stdio:'pipe'});
@@ -146,14 +149,14 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
  options.signal?.addEventListener('abort',abort,{once:true});
  let initialized;
  try {options.signal?.throwIfAborted();initialized=await bounded(runtime.doctor(),setupTimeout);if(!initialized.ok)throw new Error(initialized.details?.at(-1)??initialized.message);}
- catch(error){await close();throw new Error(runtimeError(String(error),stderr,options.env??{}),{cause:error});}
+ catch(error){await close();throw Object.assign(new Error(runtimeError(redact(String(error)),redact(stderr))), {code: 'runtime-acp-handshake-failed'});}
  const capabilities=initialized.agentCapabilities;
  const strictResume=options.runtimeCli==='openclaw';
  const nativeResume=Boolean(capabilities?.sessionCapabilities?.resume);
  const durableResume=nativeResume||(!strictResume&&Boolean(capabilities?.loadSession));
  const strictResumeMessage='OpenClaw must support strict session resume; upgrade the native CLI.';
  const mcpServers=(servers:McpServer[]=[]):AcpMcpServer[]=>{
-  if(servers.length&&(options.runtimeCli==='hermes'||options.runtimeCli==='openclaw'))throw new Error(`${runtimeLabel(options.runtimeCli)} session MCP bindings are unavailable in Mandala. ${options.runtimeCli==='hermes'?'The native Gateway cannot reliably revoke an empty binding set on resume.':'OpenClaw ACP does not support per-session MCP.'} Remove the session bindings and manage MCP in the native Gateway.`);
+  if(servers.length&&!policy.sessionMcp)throw new Error(`${runtimeLabel(options.runtimeCli)} session MCP bindings are unavailable in Mandala. ${options.runtimeCli==='hermes'?'The native Gateway cannot reliably revoke an empty binding set on resume.':'OpenClaw ACP does not support per-session MCP.'} Remove the session bindings and manage MCP in the native Gateway.`);
   return servers.map(server=>{
   if(server.transport==='http'){
    if(!capabilities?.mcpCapabilities?.http)throw new Error('ACP agent does not support HTTP MCP');
@@ -162,7 +165,8 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
   return {name:server.name,command:options.runtimeCli==='dsh'&&!/^(?:\/|[A-Za-z]:[\\/])/.test(server.command!)?resolveNativeCli(server.command!,{...process.env,...options.env}):server.command!,args:server.args??[],env:Object.entries(server.env??{}).map(([name,ref])=>{
    const source=ref.match(/^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/)?.[1];
    if(!source||process.env[source]===undefined)throw new Error(`Missing MCP environment reference: ${name}`);
-   return {name,value:process.env[source]!};
+   const value=process.env[source]!;if(value)secrets.add(value);
+   return {name,value};
   })};
  });
  };
@@ -180,7 +184,7 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
   await bounded(runtime.setConfigOption({handle:handle!,key:setting.id,value:model}));configure(await snapshot());
  };
  let prepared: {id:string;input:TurnOptions;images:ContentBlock[]}|undefined;
- const setup=async<T>(request:Promise<T>):Promise<T>=>{try{return await bounded(request,gatewayBacked?45000:15000);}catch(error){if(!gatewayBacked)throw error;throw new Error(`${runtimeLabel(options.runtimeCli!)} Gateway setup failed. Check the native installation, Gateway startup and provider login in the selected profile. No task was sent.`,{cause:error});}};
+ const setup=async<T>(request:Promise<T>):Promise<T>=>{try{return await bounded(request,gatewayBacked?45000:15000);}catch(error){if(!gatewayBacked)throw new Error(redact(String(error)));throw Object.assign(new Error(`${runtimeLabel(cli)} Gateway setup failed. Check the native installation, Gateway startup and provider login in the selected profile. No task was sent.`), {code: 'runtime-gateway-unavailable'});}};
  const ensureSession=async()=>{if(!sessionId){const result=await setup(attach(options.cwd,[]));sessionId=result.sessionId;configure(result);}};
  const prepareTurn=async(id:string,input:TurnOptions={})=>{
   if(closed||id!==sessionId||active)throw new Error('ACP session is unavailable or busy');
@@ -196,7 +200,9 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
   async getStatus(){
    if(!options.safeSystem&&!durableResume)return {status:'unavailable',version:initialized.agentInfo?.version??null,capabilityIssue:'durable-resume-unsupported'};
    if(gatewayBacked)await ensureSession();
-   return {status:'ready',version:initialized.agentInfo?.version??null};
+   const nativeAccountPresent=await options.nativeAccount?.();
+   return {status:nativeAccountPresent===false?'login-required':'ready',version:initialized.agentInfo?.version??null,
+    nativeAccountPresent,nativeVersion:options.nativeVersion};
   },
   async listModels(){
    if(!options.safeSystem&&!durableResume)return [];
@@ -219,7 +225,7 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
    const servers=mcpServers(mcp);
    if(id!==sessionId){
     if(!durableResume)throw new Error(strictResume?strictResumeMessage:'ACP agent cannot resume this session; start a new chat');
-    const result=await attach(options.cwd,options.safeSystem?[]:servers,id);
+    const result=await setup(attach(options.cwd,options.safeSystem?[]:servers,id));
     sessionId=id;configure(result);
    }
    instructions=nextInstructions??instructions;await setModel(model);
@@ -234,7 +240,7 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
    void (async()=>{
     // These runtimes can execute tools outside ACP permission mediation.
     // Gate the entire turn before sending any prompt rather than imply per-tool control.
-    if(['dsh','hermes','openclaw'].includes(options.runtimeCli??'')&&mode!=='auto'){
+    if(policy.toolApproval==='turn'&&mode!=='auto'){
      const permissionId=randomUUID();
      const result=await new Promise<RequestPermissionResponse>(resolve=>{
       permissions.set(permissionId,{resolve,allowed:new Set(['allow-turn','reject-turn'])});
@@ -249,11 +255,17 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
    })().then(result=>{
     if(closed||active!==turn)return;finishMessage();cancelPermissions();
     if(options.runtimeCli==='openclaw'&&result.stopReason==='end_turn'&&!turn.sawOutput)turn.gatewayFailure='OpenClaw Gateway ended without a response or tool result. Check native model authentication and Gateway logs; the task was not resent.';
-    const status=turn.cancelled||result.stopReason==='cancelled'?'interrupted':!turn.gatewayFailure&&result.stopReason==='end_turn'?'completed':'failed';
+    const status=result.stopReason==='cancelled'?'interrupted':!turn.gatewayFailure&&result.stopReason==='end_turn'?'completed':'failed';
     emit('turn/completed',{turn:{id:turn.id,status,...(status==='failed'?{error:{message:turn.gatewayFailure??`ACP stopped: ${result.stopReason}`}}:{})}});active=undefined;
    }).catch(error=>{
     if(closed||active!==turn)return;finishMessage();cancelPermissions();
-    emit('turn/completed',{turn:{id:turn.id,status:turn.cancelled?'interrupted':'failed',error:{message:String(error)}}});active=undefined;
+    active=undefined;
+    if(turn.cancelled){
+     options.onExit('ACP did not confirm stopping. The native turn outcome is unknown.');
+     void close().catch(()=>{});
+     return;
+    }
+    emit('turn/completed',{turn:{id:turn.id,status:'failed',error:{message:redact(String(error))}}});
    });
    return turn.id;
   },
@@ -267,7 +279,7 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
   close,
  };
 }
-export async function startAcp(cli:Cli,options:CodexOptions):Promise<CodexClient>{
+export async function startAcp(cli:Cli,options:RuntimeOptions):Promise<ExecutionClient>{
  const runtime=runtimeCatalog[cli];if(runtime.protocol!=='acp')throw new Error('Not an ACP runtime');
  if(options.safeSystem&&!supportsSystemTasks(cli))throw new Error(`${cli} cannot disable all tools for system tasks`);
  validateRuntimeArgs(cli,options.extraArgs??[]);
@@ -275,9 +287,12 @@ export async function startAcp(cli:Cli,options:CodexOptions):Promise<CodexClient
  const native=cli==='openclaw'?await openClawNativeSettings(options):undefined;
  let env={...options.env};
  if(cli==='claude'){
-  if(diagnoseRuntimePrerequisites(cli,{...process.env,...env}).requiredDependency)
-   throw new Error('The configured Claude Code executable is not runnable. Correct or remove CLAUDE_CODE_EXECUTABLE in the execution environment.');
-  env=await claudeNativeEnv(env);
+  const bridge=await prepareClaudeBridge(options,env);
+  env=await claudeNativeEnv(bridge.env);
+  return connectAcp({
+   ...options,env,runtimeCli:cli,nativeVersion:bridge.version,
+   nativeAccount:()=>probeClaudeAccount(bridge.env.CLAUDE_CODE_EXECUTABLE,{...options,env}),
+  },bridge.command);
  }
  if(options.safeSystem&&cli==='gemini'){
   const settings=join(options.cwd,'mandala-system-settings.json');

@@ -6,7 +6,7 @@ import { renderChineseMarkup } from './helpers/render-ui';
 import type { CliStatus } from '../shared/types';
 
 const diagnostics = {
-  host: 'local', executable: 'missing', probe: 'acp', auth: 'not-verified', standaloneClaude: true,
+  host: 'local', executable: 'executable', probe: 'acp', auth: 'not-verified', requiredDependency: 'claude-bridge-missing',
 } satisfies NonNullable<CliStatus['diagnostics']>;
 
 it('does not show a missing adapter when the actual launcher probe succeeds', () => {
@@ -14,26 +14,26 @@ it('does not show a missing adapter when the actual launcher probe succeeds', ()
     status: { status: 'ready', version: null, diagnostics },
   }));
   expect(html).toContain('Connection check passed');
-  expect(html).not.toContain('adapter is not runnable');
+  expect(html).not.toContain('missing Mandala');
 });
 
-it('explains that a standalone Claude installation does not supply the ACP adapter when launch fails', () => {
+it('identifies an incomplete Mandala install when Claude is present', () => {
   const html = renderToStaticMarkup(createElement(RuntimeProbeSummary, {
     status: { status: 'unavailable', version: null, diagnostics: { ...diagnostics, probe: 'failed' } },
   }));
-  expect(html).toContain('separate ACP adapter is not runnable');
+  expect(html).toContain('missing Mandala');
 });
 
 it('explains verified incompatibility without treating an ACP handshake as runnable',()=>{
- const html=renderToStaticMarkup(createElement(RuntimeProbeSummary,{status:{status:'unavailable',version:'1.0',diagnostics:{...diagnostics,executable:'executable',standaloneClaude:false,capabilityIssue:'durable-resume-unsupported'}}}));
+ const html=renderToStaticMarkup(createElement(RuntimeProbeSummary,{status:{status:'unavailable',version:'1.0',diagnostics:{...diagnostics,executable:'executable',requiredDependency:undefined,capabilityIssue:'durable-resume-unsupported'}}}));
  expect(html).toContain('cannot resume conversations');
  expect(html).not.toContain('Connection check passed');
 });
 it('explains the actionable Claude override without showing a configured path',()=>{
  const html=renderToStaticMarkup(createElement(RuntimeProbeSummary,{status:{status:'unavailable',version:null,diagnostics:{...diagnostics,requiredDependency:'claude-override-unavailable'}}}));
  expect(html).toContain('CLAUDE_CODE_EXECUTABLE');
- expect(html).toContain('bundled executable');
- expect(html).not.toContain('adapter is not runnable');
+ expect(html).toContain('installed Claude Code');
+ expect(html).not.toContain('missing Mandala');
 });
 
 it.each([

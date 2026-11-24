@@ -21,9 +21,9 @@ it('admits only finite preflight requests, never a prompt or tool operation',()=
  };
  for(const row of cases){
    expect(expected[row.probe],row.cli).toBeDefined();
-   expect(row.methods,row.cli).toEqual(row.cli==='pi'?['get_state','get_commands']:expected[row.probe]);
+   expect(row.methods,row.cli).toEqual(row.cli==='pi'?['get_state','get_commands']:row.cli==='claude'?['--version']:expected[row.probe]);
    expect(row.optionalMethods??[],row.cli).toEqual(row.cli==='hermes'?['session/load']:row.cli==='openclaw'?['session/resume']:[]);
-   expect(row.auth,row.cli).toBe(row.probe==='account'?'native-account-ready':'not-verified');
+   expect(row.auth,row.cli).toBe(row.probe==='account'||row.cli==='claude'?'native-account-ready':'not-verified');
  }
 });
 
@@ -34,7 +34,7 @@ it('covers one synthetic first-turn operation and exact approval scope for each 
  for(const row of cases) {
    const fixture=(row as typeof row & {firstTurn?:{method:string;approval:boolean}}).firstTurn;
    expect(fixture,row.cli).toEqual({
-     method:firstTurn[row.probe as keyof typeof firstTurn],
+     method:row.cli==='claude'?'sdk/user':firstTurn[row.probe as keyof typeof firstTurn],
      approval:['cursor','antigravity','dsh','hermes','openclaw'].includes(row.cli),
    });
  }

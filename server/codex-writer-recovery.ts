@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { CodexWriterRecovery, CodexWriterRecoveryAction } from '../shared/codex-writer-recovery';
 import type { Conversation } from '../shared/types';
 import { DomainError } from '../shared/workspace-contracts';
-import type { CodexClient } from './codex';
+import type { ExecutionClient } from './execution-client';
 import { mandalaContextBoundary } from './mandala';
 import type { Store } from './store';
 
@@ -12,7 +12,7 @@ export function createCodexWriterRecovery(options: {
   lock(id: string): void;
   unlock(id: string): void;
   closed(): boolean;
-  open(chat: Conversation): Promise<{ client: CodexClient; cwd: string }>;
+  open(chat: Conversation): Promise<{ client: ExecutionClient; cwd: string }>;
   isolatePreviousContext(id: string): void;
 }) {
   const { store } = options;
@@ -66,7 +66,7 @@ export function createCodexWriterRecovery(options: {
         conflict(latest) === undefined || options.blocked(id)) throw changed();
       return latest;
     };
-    const useClient = async <T>(fn: (client: CodexClient, cwd: string) => Promise<T>) => {
+    const useClient = async <T>(fn: (client: ExecutionClient, cwd: string) => Promise<T>) => {
       const { client, cwd } = await options.open(validate());
       try { validate(); return await fn(client, cwd); }
       finally { await client.close(); }

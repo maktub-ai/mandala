@@ -8,7 +8,7 @@ Mandala 保留产品适配层，ACP 协议通信交给 [maktub-ai/acpx](https://
 - **Mandala**：原生命令与凭据环境、功能发现、审批界面和策略、系统任务限制、会话归属、MCP 绑定、历史与任务管理、本机和 SSH 执行。
 - **原生适配器**：保留 ACP 尚未覆盖的分叉、压缩、历史检查等能力。Skills 属于执行端的任务能力，不由 acpx 接入层重新实现。
 
-`server/acp.ts` 使用公开的 `acpx/runtime` API，不依赖 `dist` 内部文件。Mandala 保存原生会话 ID；acpx 在内存缓存当前连接状态。已交付的会话 ID 始终严格恢复，失败时报错，不通过创建空会话冒充恢复成功。凭据环境和受限任务元数据不写入 acpx 会话记录。
+`server/acp.ts` 使用公开的 `acpx/runtime` API，不依赖 `dist` 内部文件。产品调用方通过 [ExecutionClient](../server/execution-client.ts) 使用启动、恢复、流式事件、审批与停止。原生扩展通过可选方法提供，审批粒度和会话 MCP 的产品约束从同一目录读取。Mandala 保存原生会话 ID；acpx 在内存缓存当前连接状态。已交付的会话 ID 始终严格恢复，失败时报错，不通过创建空会话冒充恢复成功。凭据环境和受限任务元数据不写入 acpx 会话记录。
 
 ## 当前能力表
 
@@ -18,7 +18,7 @@ Mandala 保留产品适配层，ACP 协议通信交给 [maktub-ai/acpx](https://
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Codex | app-server | 支持 | 原生目录 | 支持 | 支持 | 原生逐项 | 支持 | 分叉、压缩、上下文/执行检查、Skills、MCP 状态 |
 | OMP | RPC | 支持 | 原生目录 | 支持 | 支持 | 原生逐项 | 支持 | 分叉、压缩、上下文、Skills |
-| Claude Code | acpx / ACP | 原生声明 | 原生目录 | 原生声明 | 支持 | ACP 逐项 | 支持 | 保留 Claude 受限任务元数据 |
+| Claude Code | acpx / 固定 ACP 桥 | 原生声明 | 原生目录 | 原生声明 | 支持，Claude Code ≥ 2.1.326 | ACP 逐项，原生 Manual 或更严格模式 | 受管钩子边界可验证时支持 | 绑定已装 Claude，MCP 和设置经初始化流传输 |
 | Gemini CLI | acpx / ACP | 原生声明 | 原生目录 | 原生声明 | 支持 | ACP 逐项 | 支持 | 保留受限启动配置 |
 | OpenCode | acpx / ACP | 原生声明 | 原生目录 | 原生声明 | 支持 | ACP 逐项 | 支持 | 保留原生权限环境 |
 | CodeBuddy | acpx / ACP | 原生声明 | 原生目录 | 原生声明 | 支持 | ACP 逐项 | 支持 | 旧权限种类兼容、受限启动参数 |
@@ -34,6 +34,8 @@ Mandala 保留产品适配层，ACP 协议通信交给 [maktub-ai/acpx](https://
 ACP 模型目录可能使用配置选项或旧 `models` 字段，均保留原生 ID；没有目录时只使用原生默认模型。HTTP MCP 还需执行端声明支持。会话 MCP 支持不表示能控制 CLI 原有的全局工具。审批和权限范围详见 [审批规则](approval-policy.md)。
 
 **问答与工具审批分开。** 此迁移不宣布所有 CLI 都具有可点选问答体验。现有 Codex 问答保持不变；fork 的 Antigravity ACP 问答回调是独立底层能力，默认取消，未接入 Mandala 当前的 Antigravity stream-json 路径。跨 CLI 统一表单仍需逐项验证后再决定上线。
+
+发出停止请求后，只有原生终态能确认已停止。若连接丢失或终态超时，Mandala 保留未知结果和原有执行占用。
 
 已有对话绑定原生 CLI 和原生会话，不能把 A 的会话 ID 交给 B 恢复。切换 CLI 应建立新的原生会话；Mandala 配置与历史展示继续由产品层负责。
 

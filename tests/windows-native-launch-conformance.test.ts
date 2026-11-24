@@ -97,10 +97,9 @@ it('does not spawn a WindowsApps entry with inaccessible target metadata', () =>
   expect(fixture.spawn).not.toHaveBeenCalled();
 });
 
-it('reports standalone Claude without treating it as its missing ACP adapter', () => {
+it('reports the selected vendor executable independently of the managed bridge', () => {
   fixture.paths.set(`${selected}\\claude.exe`, 'file');
-  expect(diagnoseRuntimePrerequisites('claude', options.env)).toEqual({ executable: 'missing', standaloneClaude: true });
-  expect(() => spawn(runtimeCatalog.claude.command, [], options)).toThrow(/not found/);
+  expect(diagnoseRuntimePrerequisites('claude', options.env)).toEqual({ executable: 'executable' });
   expect(fixture.spawn).not.toHaveBeenCalled();
   expect(fixture.exec).not.toHaveBeenCalled();
 });

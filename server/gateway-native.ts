@@ -1,11 +1,11 @@
 import { bindLocalCatalogLauncher } from './runtime';
-import type {CodexOptions} from './codex';
+import type { RuntimeOptions } from './execution-client';
 import type {ModelChoice} from '../shared/types';
 import {spawn} from './native-spawn';
 
 // Read public metadata through the native CLI so profiles, JSON5 includes and
 // environment references keep their native semantics. Never query auth fields.
-async function query(options:Pick<CodexOptions,'cwd'|'env'|'signal'|typeof bindLocalCatalogLauncher>,args:string[],optional=false):Promise<any>{
+async function query(options:Pick<RuntimeOptions,'cwd'|'env'|'signal'|typeof bindLocalCatalogLauncher>,args:string[],optional=false):Promise<any>{
  return new Promise((resolve,reject)=>{
   const child=spawn('openclaw',args,{catalogRuntime:options[bindLocalCatalogLauncher]?'openclaw':undefined,cwd:options.cwd,env:{...process.env,...options.env,OPENCLAW_HIDE_BANNER:'1',OPENCLAW_SUPPRESS_NOTES:'1'},signal:options.signal,stdio:'pipe',shell:false});
   let output='',settled=false;
@@ -23,7 +23,7 @@ async function query(options:Pick<CodexOptions,'cwd'|'env'|'signal'|typeof bindL
   });
  });
 }
-export async function openClawNativeSettings(options:Pick<CodexOptions,'cwd'|'env'|'signal'|typeof bindLocalCatalogLauncher>):Promise<{model?:ModelChoice}>{
+export async function openClawNativeSettings(options:Pick<RuntimeOptions,'cwd'|'env'|'signal'|typeof bindLocalCatalogLauncher>):Promise<{model?:ModelChoice}>{
  const env={...process.env,...options.env};
  // A loopback override may be an SSH tunnel to a different filesystem. Require
  // the native local target; remote execution belongs to the existing SSH host.
