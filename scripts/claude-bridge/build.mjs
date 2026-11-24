@@ -12,7 +12,14 @@ const {build} = require('../../node_modules/esbuild');
 const adapter = '@agentclientprotocol/claude-agent-acp';
 const sdk = '@anthropic-ai/claude-agent-sdk';
 const adapterChanges = [
-  ['v1/acp-agent.js', 'explicit: creationOpts.permissionMode,', 'explicit: "default",'],
+  ['v1/acp-agent.js',
+    'const { mode: initialPermissionMode, builtInDefault: builtInPermissionMode } = resolveInitialPermissionMode({',
+    'const { mode: nativePermissionMode } = resolveInitialPermissionMode({'],
+  ['v1/acp-agent.js', 'const userProvidedOptions = sessionMeta?.claudeCode?.options;',
+    `const initialPermissionMode = nativePermissionMode === "plan" || nativePermissionMode === "dontAsk"
+      ? nativePermissionMode : "default";
+    const builtInPermissionMode = false;
+    const userProvidedOptions = sessionMeta?.claudeCode?.options;`],
   ['v1/acp-agent.js', 'initializationResult = await q.initializationResult();',
     `initializationResult = await q.initializationResult();
       if (params.mcpServers?.length && initializationResult.mcp_servers_applied !== true) {

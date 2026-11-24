@@ -18,7 +18,7 @@ Mandala 保留产品适配层，ACP 协议通信交给 [maktub-ai/acpx](https://
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Codex | app-server | 支持 | 原生目录 | 支持 | 支持 | 原生逐项 | 支持 | 分叉、压缩、上下文/执行检查、Skills、MCP 状态 |
 | OMP | RPC | 支持 | 原生目录 | 支持 | 支持 | 原生逐项 | 支持 | 分叉、压缩、上下文、Skills |
-| Claude Code | acpx / 固定 ACP 桥 | 原生声明 | 原生目录 | 原生声明 | 支持，Claude Code ≥ 2.1.326 | ACP 逐项，原生 Manual | 受管钩子边界可验证时支持 | 绑定已装 Claude，MCP 和设置经初始化流传输 |
+| Claude Code | acpx / 固定 ACP 桥 | 原生声明 | 原生目录 | 原生声明 | 支持，Claude Code ≥ 2.1.326 | ACP 逐项，原生 Manual 或更严格模式 | 受管钩子边界可验证时支持 | 绑定已装 Claude，MCP 和设置经初始化流传输 |
 | Gemini CLI | acpx / ACP | 原生声明 | 原生目录 | 原生声明 | 支持 | ACP 逐项 | 支持 | 保留受限启动配置 |
 | OpenCode | acpx / ACP | 原生声明 | 原生目录 | 原生声明 | 支持 | ACP 逐项 | 支持 | 保留原生权限环境 |
 | CodeBuddy | acpx / ACP | 原生声明 | 原生目录 | 原生声明 | 支持 | ACP 逐项 | 支持 | 旧权限种类兼容、受限启动参数 |
