@@ -73,7 +73,7 @@ import type {
   EventKind,
 } from "../shared/types";
 import type { Store } from "./store";
-import { startCodex, type CodexClient } from "./codex";
+import { codexMailboxFailure, startCodex, type CodexClient } from "./codex";
 import { startOmp, prepareCapabilityRuntime, type OmpOptions } from "./omp";
 import { workspaceExecutionLocation } from '../shared/execution-machines';
 import { connectSshExecution, type SshExecution } from './ssh-execution';
@@ -1292,6 +1292,8 @@ export function createSessionManager(
       if (closed) throw new Error("service closed");
       if (live.get(id) !== current || current.controller.signal.aborted) return;
       let error = e as Error;
+      const mailboxFailure = !turnSubmitted && before.cli === "codex" ? codexMailboxFailure((error as Partial<DomainError>).code) : undefined;
+      if (mailboxFailure) error = mailboxFailure;
       const nativeThreadBusy = !turnSubmitted && before.cli === "codex" &&
         (error as Partial<DomainError>).code === "native_thread_busy" && (error as Partial<DomainError>).status === 409;
       // Remote runtime errors cross the SSH protocol as plain Errors with code/status.
@@ -1307,7 +1309,7 @@ export function createSessionManager(
       if (memoryTrace && !memoryLoaded) appendEvent(id, "metadata", { ...memoryTrace, status: "failed",
         message: memoryReadFailed ? error.message : "CLI did not acknowledge memory instructions; retry this turn." });
       appendEvent(id, "error", { message: error.message, nativeTurnSubmitted: turnSubmitted,
-        ...(reloadBlocked?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy'}:{}) });
+        ...(reloadBlocked?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy'}:mailboxFailure?{code:mailboxFailure.code}:{}) });
       if (current.queuedInputId && !turnSubmitted && error instanceof DomainError && ["reference_changed", "invalid_references"].includes(error.code)) {
         scheduler.rejectUnsubmittedInput(current.queuedInputId);
         current.queuedInputId = undefined;

@@ -13,6 +13,18 @@ import {DomainError} from '../shared/workspace-contracts';
 import { windowsSystemBinary } from '../cli/windows-system.mjs';
 import { codexMailboxSid, ownedPrivatePath } from '../cli/private-path.mjs';
 
+const mailboxErrors = {
+  codex_mailbox_path_invalid: "Mandala could not open the private mailbox directory for Codex.",
+  codex_mailbox_setup_failed: "Codex could not prepare its Windows sandbox for the private Mandala mailbox.",
+  codex_mailbox_capability_unverified: "Mandala could not verify the Codex capability for this private mailbox.",
+  codex_mailbox_permissions_unverified: "Mandala could not verify the private Codex mailbox permissions.",
+} as const;
+type MailboxErrorCode = keyof typeof mailboxErrors;
+const mailboxError = (code: MailboxErrorCode) => new DomainError(code, 500, mailboxErrors[code]);
+export function codexMailboxFailure(code: unknown): DomainError | undefined {
+  return typeof code === "string" && Object.hasOwn(mailboxErrors, code) ? mailboxError(code as MailboxErrorCode) : undefined;
+}
+
 let mailboxPreparations = Promise.resolve();
 type WorkspaceSandbox = {
   type: 'workspaceWrite';
@@ -28,26 +40,27 @@ function prepareWindowsMailbox(rpc: RpcClient, mailboxPath: string, launch: Para
   // The legacy Codex sandbox registers writable-root SIDs with a shared
   // read/modify/write. Register this root before parallel tools can enter it.
   const preparation = mailboxPreparations.then(async () => {
-    const info = await lstat(mailboxPath);
-    if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Codex could not prepare the private Mandala mailbox.');
+    const invalidPath = () => mailboxError('codex_mailbox_path_invalid');
+    const info = await lstat(mailboxPath).catch(() => { throw invalidPath(); });
+    if (!info.isDirectory() || info.isSymbolicLink()) throw invalidPath();
     const env = { ...launch.env };
     const codexHome = env.CODEX_HOME
       ? resolve(String(launch.cwd), env.CODEX_HOME) : join(homedir(), '.codex');
     env.CODEX_HOME = codexHome;
-    const command = [windowsSystemBinary('cmd.exe'), '/d', '/c', 'exit', '0'];
-    const scratch = await mkdtemp(join(mailboxPath, '.sandbox-setup-'));
-    let exitCode: number | null;
-    if (workspaceSandbox) {
-      // Register all roots of the already-authorized workspace policy together.
-      // Otherwise two cold commands can race on the project or temp root.
-      const warm = (cwd: typeof launch.cwd) => rpc.request('command/exec', {
-        command, cwd, sandboxPolicy: workspaceSandbox, timeoutMs: 10000,
-      });
-      exitCode = (await warm(launch.cwd))?.exitCode;
-      // A command in a subdirectory uses the project's extra-root SID instead
-      // of its cwd SID. Register both while preparing the same policy.
-      if (exitCode === 0) exitCode = (await warm(scratch))?.exitCode;
-    } else {
+    const scratch = await mkdtemp(join(mailboxPath, '.sandbox-setup-')).catch(() => { throw invalidPath(); });
+    const setup = async () => {
+      const command = [windowsSystemBinary('cmd.exe'), '/d', '/c', 'exit', '0'];
+      if (workspaceSandbox) {
+        // Register all roots of the already-authorized workspace policy together.
+        // Otherwise two cold commands can race on the project or temp root.
+        const warm = (cwd: typeof launch.cwd) => rpc.request('command/exec', {
+          command, cwd, sandboxPolicy: workspaceSandbox, timeoutMs: 10000,
+        });
+        const exitCode = (await warm(launch.cwd))?.exitCode;
+        // A command in a subdirectory uses the project's extra-root SID instead
+        // of its cwd SID. Register both while preparing the same policy.
+        return exitCode === 0 ? (await warm(scratch))?.exitCode : exitCode;
+      }
       // Never project a named or read-only profile to a workspace-write policy.
       const name = 'mandala-mailbox-setup-' + createHash('sha256').update(mailboxPath).digest('hex').slice(0, 24);
       const profile = 'permissions.' + name + '={extends=":read-only",filesystem={' + JSON.stringify(mailboxPath) + '="write"}}';
@@ -55,16 +68,18 @@ function prepareWindowsMailbox(rpc: RpcClient, mailboxPath: string, launch: Para
         '-c', profile, '-c', 'windows.sandbox="unelevated"', '-C', scratch, '--', ...command], { ...launch, cwd: scratch, env });
       child.stdout.resume();
       child.stderr.resume();
-      exitCode = await new Promise<number | null>((done, reject) => {
+      return new Promise<number | null>((done, reject) => {
         const timeout = setTimeout(() => child.kill(), 10000);
         child.once('error', reject);
         child.once('close', code => { clearTimeout(timeout); done(code); });
       });
-    }
-    const sid = exitCode === 0 ? await codexMailboxSid(join(codexHome, 'cap_sid'), mailboxPath) : undefined;
-    if (!sid || !ownedPrivatePath(mailboxPath, info, Infinity, sid)) {
-      throw new Error('Codex could not prepare the private Mandala mailbox.');
-    }
+    };
+    const setupFailed = () => mailboxError('codex_mailbox_setup_failed');
+    if (await setup().catch(() => { throw setupFailed(); }) !== 0) throw setupFailed();
+    const unverifiedCapability = () => mailboxError('codex_mailbox_capability_unverified');
+    const sid = await codexMailboxSid(join(codexHome, 'cap_sid'), mailboxPath).catch(() => { throw unverifiedCapability(); });
+    if (!sid) throw unverifiedCapability();
+    if (!ownedPrivatePath(mailboxPath, info, Infinity, sid)) throw mailboxError('codex_mailbox_permissions_unverified');
   });
   mailboxPreparations = preparation.catch(() => {});
   return preparation;
