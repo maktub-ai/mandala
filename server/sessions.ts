@@ -13,6 +13,8 @@ import {createMandalaContinuity} from './mandala-continuity';
 import {isHumanInput} from '../shared/tasks';
 import {createMandalaCoordination} from './mandala-coordination';
 import { mandalaInstructions, mandalaContinuity, mandalaContextBoundary, mandalaWriterBoundary, parkPriorWriterReceipts } from "./mandala";
+import { createCodexWriterRecovery } from './codex-writer-recovery';
+import type { CodexWriterRecovery, CodexWriterRecoveryAction } from '../shared/codex-writer-recovery';
 import { effectiveResponseStyle } from "../shared/response-style";
 import { responseStyleInstructions } from "./response-style";
 import { createCodeGraph, type CodeGraphService } from './code-graph';
@@ -103,6 +105,8 @@ type ActiveInvocation = {
 };
 export interface SessionManager {
   maintainMandalaContext():Promise<void>;
+  writerRecoveryStatus(id: string): CodexWriterRecovery | null;
+  recoverCodexWriter(id: string, conflictId: number, action: CodexWriterRecoveryAction): Promise<CodexWriterRecovery>;
   coordination: ReturnType<typeof createMandalaCoordination>;
   setAutomationService(service:import('./automations').Automations):void;
   reconcileRuns(hostId:string):Promise<RecoveryReport>;
@@ -1130,10 +1134,14 @@ export function createSessionManager(
             if(continuity.disconnected(id)){current.client=undefined;return;}
             revokeBusinessCli(current);
             current.client = undefined;
+            const nativeSubmissionState = before.cli==='codex' && current.invocation && !current.preparing
+              ? current.invocation.nativeTurnId ? 'accepted' : 'unknown' : undefined;
             current.preparing = false;
             if(current.directoryOwner)resources.releaseUnsubmitted(current.directoryOwner.kind,current.directoryOwner.id);
             current.approvals.clear();
-            store.appendEvent(id, "error", { message: reason });
+            store.appendEvent(id, "error", { message: reason,
+              ...(nativeSubmissionState ? {nativeSubmissionState} : {}),
+            });
             state(id, "interrupted",'native_disconnected');
             current.finishStop?.();
             if(current.durableRun){tasks.markUnknown(current.durableRun.id);current.durableRun=undefined;}
@@ -1230,7 +1238,7 @@ export function createSessionManager(
       // Local transcript persistence is not native submission acknowledgment.
       if (before.completedAt) store.updateConversation(id,{completedAt:before.completedAt});
       onMessage?.(id);
-      const previousMode = store.listContextEvents(id, 'metadata', 0).reverse().find(event => event.kind === "metadata" &&
+      const previousMode = store.listContextEvents(id, 'metadata', mandalaContextBoundary(store,id)).reverse().find(event => event.kind === "metadata" &&
         ["loaded", "applying"].includes((event.data as { status?: string }).status ?? "") &&
         (event.data as { approvalMode?: string }).approvalMode)?.data as { approvalMode?: string } | undefined;
       if (before.cli === "codex" && approvalMode === "auto")
@@ -1320,7 +1328,7 @@ export function createSessionManager(
           if(!scheduler.failPrestartInput(failureInputId,id,prestartQueueCode))return false;
           resources.releaseUnsubmitted('input',failureInputId);
           reportFailedRecall();
-          appendEvent(id,'error',{message:error.message,queuedInputId:failureInputId,code:prestartQueueCode,nativeTurnSubmitted:false,...mailboxSetupDetails});
+          appendEvent(id,'error',{message:error.message,queuedInputId:failureInputId,code:prestartQueueCode,nativeTurnSubmitted:false,...(nativeThreadBusy?{nativeId:before.nativeId}:{}),...mailboxSetupDetails});
           return true;
         }));
       if(failedQueueInput)current.queuedInputId=undefined;
@@ -1331,7 +1339,8 @@ export function createSessionManager(
       if (!failedQueueInput) {
         reportFailedRecall();
         appendEvent(id, "error", { message: error.message, nativeTurnSubmitted: turnSubmitted,
-          ...(reloadBlocked?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy'}:mailboxFailure?{code:mailboxFailure.code,...mailboxSetupDetails}:{}) });
+          ...(before.cli==='codex' && turnSubmitted ? { nativeSubmissionState: submittedInvocation?.nativeTurnId ? 'accepted' : 'unknown' } : {}),
+          ...(reloadBlocked?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy',nativeId:before.nativeId}:mailboxFailure?{code:mailboxFailure.code,...mailboxSetupDetails}:{}) });
       }
       if (current.queuedInputId && !turnSubmitted && error instanceof DomainError && ["reference_changed", "invalid_references"].includes(error.code)) {
         scheduler.rejectUnsubmittedInput(current.queuedInputId);
@@ -1680,6 +1689,37 @@ export function createSessionManager(
       const runtime=live.get(id);if(runtime){revokeBusinessCli(runtime);runtime.generation++;live.delete(id);runtime.controller.abort();await runtime.client?.close();}
     },
   });
+  const writerRecovery = createCodexWriterRecovery({
+    store, closed: () => closed, lock: id => branching.add(id), unlock: id => branching.delete(id),
+    isolatePreviousContext: id => {
+      conversationApprovals.revoke(id);
+      // Park automatic replies without stopping specialist work or removing its results.
+      messages.stop(id);
+      store.database.prepare(`UPDATE task_receipts SET delivery_state='parked',claim_error='native_execution_boundary'
+        WHERE destination_conversation_id=? AND delivery_state IN ('pending','presented') AND claimed_by_run_id IS NULL`).run(id);
+    },
+    blocked: (id): boolean => queuedSendPending(id) || continuity.blocked(id) || branching.has(id) && !writerRecovery.busy(id) ||
+      !!live.get(id) || hasUnprovenNativeOccupancy(store,id) ||
+      !!store.database.prepare("SELECT id FROM task_runs WHERE json_extract(routing,'$.executionConversationId')=? AND state IN ('queued','starting','running','approval','unknown')").get(id) ||
+      !!store.database.prepare("SELECT id FROM task_user_inputs WHERE conversation_id=? AND state IN ('queued','running','unknown')").get(id) ||
+      !!store.database.prepare("SELECT owner_id FROM task_directory_claims WHERE conversation_id=? AND submitted=1").get(id),
+    async open(c) {
+      authorizeConversationRead(c.id);
+      const config = await loadConfig();
+      assertExecutionAvailable(config, c);
+      const context = conversationContext(config, c, join(home, 'workspaces', 'conversations', c.id));
+      const agent = config.agents.find(agent => agent.id === c.agentId && agent.systemRole === 'mandala');
+      if (context.executionLocation || !agent || config.mandala?.agentId !== agent.id ||
+          agent.defaultCli !== 'codex' || (agent.models.codex || null) !== c.model)
+        throw new DomainError('writer_recovery_changed', 409, 'Codex execution settings changed. Refresh before continuing.');
+      const cwd = context.project.cwd;
+      const client = await startClient('codex', {
+        cwd, ...runtimeOptions('codex', context, config), signal: lifetime.signal,
+        onEvent() {}, onApproval() {}, onExit() {},
+      }, context, c.id, config, 'inspect');
+      return { client, cwd };
+    },
+  });
   const progressTimer=setInterval(()=>{if(!closed){void progressMonitor.tick().catch(()=>{});void continuity.tick().catch(()=>{});}},60000);progressTimer.unref();
   const prepareAutomation = async(taskId:string,input:AutomationRun) => {
     const commandKey=`automation:${input.id}`;
@@ -1706,6 +1746,8 @@ export function createSessionManager(
     const run=await scheduler.dispatchTask(taskId,commandKey,undefined,{selection:prepared.get(taskId),agentId:agent.id,projectId:project.id||null,request:input.instructions,criteria:input.criteria??task.criteria});setImmediate(()=>{if(!closed)void pump(run.routing!.executionConversationId);});return run;
   };
   const manager: SessionManager = {
+    writerRecoveryStatus: writerRecovery.status,
+    recoverCodexWriter: writerRecovery.request,
     maintainMandalaContext:()=>continuity.tick(),
     setAutomationService(service){automationService=service;},
     reconcileRuns(hostId) {
@@ -2095,6 +2137,7 @@ export function createSessionManager(
     },
     enqueueUserInput(id, text, commandKey, attachments = [], references = []) {
       authorizeHumanContinuation(id);
+      if(writerRecovery.busy(id))throw new DomainError('conversation_busy',409,'Codex session recovery is in progress; the draft is preserved.');
       const c=chat(id);
       const input = scheduler.enqueueUserInput(id, text, commandKey, attachments, references);
       if(input.prestartFailure)return input; // Same-key lookup returns the terminal receipt without a new admission.
@@ -2104,6 +2147,7 @@ export function createSessionManager(
       return manager.listUserInputs(id).find(row=>row.id===input.id) ?? input;
     },
     enqueueTelegramInput(id,text,requestId,attachments) {
+      if(writerRecovery.busy(id))throw new DomainError('conversation_busy',409,'Codex session recovery is in progress.');
       const c=chat(id);
       if(c.purpose!=='mandala-main'||c.executionLocation)throw new DomainError('telegram_scope',403,'此对话不在 Telegram 的 Mandala 范围内。');
       authorizeHumanContinuation(id);
@@ -2700,7 +2744,7 @@ export function createSessionManager(
       }
       lifetime.abort();
       for(const r of runtimes)r.finishStop?.();
-      const stops=[...(skillLearning?[skillLearning.close()]:[]),...nativeClients.map(async client=>{
+      const stops=[writerRecovery.close(),...(skillLearning?[skillLearning.close()]:[]),...nativeClients.map(async client=>{
         const inputs=entries.filter(([id,runtime])=>!chat(id).executionLocation&&chat(id).cli==='omp'&&runtime.client===client&&!runtime.durableRun&&runtime.queuedInputId&&runtime.invocation?.nativeTurnId);
         await client.close();
         // OMP close waits for its process to exit. Its outcome remains unconfirmed,

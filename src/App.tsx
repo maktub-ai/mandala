@@ -32,6 +32,7 @@ import { modelOptions, effortOptions, effortLabels, efforts, type ReasoningEffor
 import { type SubmissionRecovery } from "./chat-send";
 import ApprovalRequest from "./ApprovalRequest";
 import QueuedMessages from "./QueuedMessages";
+import CodexWriterRecovery from "./CodexWriterRecovery";
 import "./composer-queue.css";
 import TaskWorkspace, { TaskDialog } from "./TaskWorkspace";
 import { navigateAssetPage } from "./AssetLibrary";
@@ -696,6 +697,8 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       stream.close();
     };
   }, [selected, chatActive]);
+  const [writerRecoveryBusyId, setWriterRecoveryBusyId] = useState('');
+  const writerRecoveryBusy = !!selected && writerRecoveryBusyId === selected;
   const busy =
     pending || chat?.status === "running" || chat?.status === "approval";
   const project = config.projects.find((p) => p.id === projectId),
@@ -949,7 +952,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     window.getSelection()?.removeAllRanges();
   };
   const send = async (interrupt = false) => {
-    if(voiceBusy)return;
+    if(voiceBusy || writerRecoveryBusy)return;
     if (selected && (chat?.id !== selected || !historyReady)) return;
     if (!composerDraft.loaded || (composerDraft.value.missingAttachments.length && !composerDraft.pending) || ((!text.trim() && !files.length && !selectedReferences.length) && !composerDraft.pending) || pending || stopping || modeSaving || branchPending || approvalPreferenceLoading || approvalPreferenceError || (!selected && (!cli || !runtimes.includes(cli)))) return;
     const view = navigationVersion.current;
@@ -1693,7 +1696,8 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
                 <div className="message-avatar">{agent ? <IdentityAvatar identity={agent} kind="agent" size={28} /> : <Icon name="agent" size={18} />}</div>
                 <div className="message-name">{agent?.name ?? (runtimeName(cli))}</div>
               </header>}
-              <TurnProcess turn={turn} run={run} onInspect={inspect} approvals={approvals} renderApproval={renderApprovalRequest} />
+              <TurnProcess turn={turn} run={run} onInspect={inspect} approvals={approvals} renderApproval={renderApprovalRequest}
+                writerRecoveryAvailable={mandalaMain && chat?.cli === 'codex' && !chat.executionLocation} />
               {run.answers.map(m => <article className={"message text"+(mandalaMain?" chat-reply-bubble":"")} key={m.key} data-message-key={m.key}>
                 <div className="message-content"><MarkdownMessage text={m.text} streaming={run.status === 'running'} publishedFiles={publishedFilesByRun.get((turn.events.find(event=>event.id===m.key)?.data as {runId?:string})?.runId??'')} /></div>
               </article>)}
@@ -1726,7 +1730,12 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               <Icon name="arrowDown" size={16} />{t("回到最新消息")}
             </Button>
           )}
-          <QueuedMessages inputs={queuedInputs} busy={busy} disabled={pending||stopping||branchPending||navigationLocked||modeSaving||!historyReady} onSend={input=>void sendQueued(input)} onCopy={input => void copyMessage(-1, input.text)} onReuse={input => void reuseRequest({ text: input.text, attachments: input.attachments?.map(id => ({ id })), referenceItems: referenceItems.filter(item => input.references?.some(ref => ref.id === item.id)) })} onCancel={async inputId=>{
+          {chat?.id === selected && mandalaMain && chat.cli === 'codex' && !chat.executionLocation && historyReady &&
+            <CodexWriterRecovery key={selected} id={selected} showNotice={['error', 'interrupted'].includes(chat.status)}
+              eventId={chat.status === 'error' ? events.at(-1)?.id : undefined}
+              disabled={busy || stopping || navigationLocked || !!composerDraft.pending}
+              onBusy={setWriterRecoveryBusyId} />}
+          <QueuedMessages inputs={queuedInputs} busy={busy} disabled={pending||writerRecoveryBusy||stopping||branchPending||navigationLocked||modeSaving||!historyReady} onSend={input=>void sendQueued(input)} onCopy={input => void copyMessage(-1, input.text)} onReuse={input => void reuseRequest({ text: input.text, attachments: input.attachments?.map(id => ({ id })), referenceItems: referenceItems.filter(item => input.references?.some(ref => ref.id === item.id)) })} onCancel={async inputId=>{
             const view=navigationVersion.current;
             queueReads.current.generation++;
             try {await api("/conversations/"+selected+"/queue/"+inputId,"DELETE");if(view===navigationVersion.current){queueReads.current.generation++;setQueuedInputs(items=>items.filter(item=>item.id!==inputId));}}
@@ -1837,7 +1846,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               </ComposerSettings>}
               <VoiceInput key={JSON.stringify([draftIdentity,selected,projectId,agentId])} disabled={!composerDraft.loaded||pending||stopping||branchPending||!!composerDraft.pending} onBusyChange={setVoiceBusy} onText={value=>{setText(current=>appendVoiceText(current,value));composerInput.current?.focus();}}/>
               <ComposerActions recovering={!!composerDraft.pending} busy={busy} waiting={waitingForMessages||waitingForTasks} stopping={stopping} stopDisabled={!chat || stopping || pending}
-                disabled={voiceBusy || !composerDraft.loaded || !!(composerDraft.value.missingAttachments.length && !composerDraft.pending) || !configLoaded || !!selected && (chat?.id !== selected || !historyReady) || (!text.trim() && !files.length && !selectedReferences.length && !composerDraft.pending) || pending || stopping || modeSaving || branchPending || approvalPreferenceLoading || approvalPreferenceError || (!selected && (!cli || !runtimes.includes(cli)))}
+                disabled={voiceBusy || writerRecoveryBusy || !composerDraft.loaded || !!(composerDraft.value.missingAttachments.length && !composerDraft.pending) || !configLoaded || !!selected && (chat?.id !== selected || !historyReady) || (!text.trim() && !files.length && !selectedReferences.length && !composerDraft.pending) || pending || stopping || modeSaving || branchPending || approvalPreferenceLoading || approvalPreferenceError || (!selected && (!cli || !runtimes.includes(cli)))}
                 continuing={chat?.status === 'interrupted' || chat?.status === 'error'} onStop={() => void control('stop',{expectedExecutionId:executionId,continueQueued:busy})} onSend={() => void send()} onInterrupt={() => void send(true)} />
             </div>
           </div>

@@ -1,0 +1,19 @@
+.codex-writer-recovery {
+  display: grid;
+  gap: 4px;
+  margin-block-end: 8px;
+  color: var(--muted);
+  font-size: var(--type-meta);
+}
+.codex-writer-recovery p { margin: 0; }
+.codex-writer-record { overflow-wrap: anywhere; }
+.codex-writer-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.codex-writer-dialog {
+  width: min(480px, calc(100vw - 32px));
+  padding: 16px;
+}
+.codex-writer-dialog h2 {
+  margin: 0;
+  font-size: var(--section-heading-size);
+}
+.codex-writer-dialog .codex-writer-actions { justify-content: flex-end; }

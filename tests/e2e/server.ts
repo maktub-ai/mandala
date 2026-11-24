@@ -70,8 +70,8 @@ const manager = createSessionManager(
     );
     let token = '';
     return {...client,
-      async startThread(params) { token=businessCliContext(params.instructions).token;const id=await client.startThread(params);native.set(id,options);responseInstructions.set(id,params.instructions);return id; },
-      async resumeThread(id,mcp,instructions,model) { token=businessCliContext(instructions).token;await client.resumeThread(id,mcp,instructions,model);native.set(id,options);responseInstructions.set(id,instructions ?? ""); },
+      async startThread(params) { token=params.instructions ? businessCliContext(params.instructions).token : '';const id=await client.startThread(params);native.set(id,options);responseInstructions.set(id,params.instructions);return id; },
+      async resumeThread(id,mcp,instructions,model) { token=instructions ? businessCliContext(instructions).token : '';await client.resumeThread(id,mcp,instructions,model);native.set(id,options);responseInstructions.set(id,instructions ?? ""); },
       async startTurn(id,text,approvalMode,roots,turnOptions) {
         const turnId=await client.startTurn(id,text,approvalMode,roots,turnOptions);
         if(text.startsWith('fixture-delegate:'))setImmediate(async()=>{
@@ -164,6 +164,21 @@ const server = createServer(async(req,res)=>{
   }
   if(await wikiFixture(req,res,home,store,manager.knowledgeBase))return;
   if(await skillFixture(req,res,home,store))return;
+  if (req.method === 'POST' && req.url === '/__test__/primary-writer-conflict') {
+    const { ensureMandalaConfig } = await import('../../server/config');
+    const { ensureMandalaConversation } = await import('../../server/mandala');
+    const { config } = await ensureMandalaConfig(home);
+    const chat = ensureMandalaConversation(store, config);
+    const nativeId = 'native-held-' + chat.id;
+    store.updateConversation(chat.id, { nativeId, status: 'idle' });
+    store.appendEvent(chat.id, 'user', { text: 'Prior visible history for isolated continuation', runId: 'fixture-prior-run' });
+    store.appendEvent(chat.id, 'text', { text: 'Prior visible answer', runId: 'fixture-prior-run' });
+    store.appendEvent(chat.id, 'status', { status: 'idle', runId: 'fixture-prior-run' });
+    try { await manager.send(chat.id, 'Retained unsent input during the external lock'); } catch {}
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ id: chat.id, nativeId }));
+    return;
+  }
   const conflictReply=/^\/__test__\/writer-conflict-reply\/([a-zA-Z0-9_-]+)(\/queued)?$/.exec(req.url??'');
   if(req.method==='POST'&&conflictReply){
     const chat=store.getConversation(conflictReply[1]);

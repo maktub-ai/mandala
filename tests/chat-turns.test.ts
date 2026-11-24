@@ -338,3 +338,18 @@ it('does not offer mailbox draft recovery for scheduled, queued, worker, or unce
    failure({nativeTurnSubmitted:true}), failure({runId:'other'}), failure({code:'codex_mailbox_unknown'}),
  ]) expect(recoverableUnsubmittedDraft(groupChatTurns([request(),error]),'error')).toBeUndefined();
 });
+
+it('keeps draft recovery available after a matching writer-link receipt with no native turn', () => {
+ const request=event(1,'user',{text:'Original draft',runId:'conflict'});
+ const failure=event(2,'error',{code:'native_thread_busy',runId:'conflict',nativeTurnSubmitted:false,nativeId:'original'});
+ const terminal=event(3,'status',{status:'error'});
+ const receipt = { conflictId: failure.id, state: 'linked', previousNativeId: 'original', nativeId: 'fresh' };
+ expect(recoverableUnsubmittedDraft(groupChatTurns([request,failure,terminal,
+  event(4,'metadata',{codexWriterRecovery:receipt,nativeExecutionBoundary:{version:1}})]),'error')).toBe(request.id);
+ for (const invalid of [
+  {codexWriterRecovery:{...receipt,conflictId:7}},
+  {codexWriterRecovery:{...receipt,previousNativeId:'different'}},
+  {codexWriterRecovery:{...receipt,state:'unexpected'}},
+  {codexWriterRecovery:receipt,execution:'started'},
+ ]) expect(recoverableUnsubmittedDraft(groupChatTurns([request,failure,terminal,event(4,'metadata',invalid)]),'error')).toBeUndefined();
+});

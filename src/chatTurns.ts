@@ -2,6 +2,7 @@ export * from '../shared/chat-turns';
 
 import { unsubmittedCodexMailboxCode } from '../shared/codex-mailbox-errors';
 import type { ChatTurn } from '../shared/chat-turns';
+import type { CodexWriterRecovery } from '../shared/codex-writer-recovery';
 
 // Presentation can regroup late events under an earlier turn. Look at event IDs,
 // not the order of the rendered turns, before exposing a saved request.
@@ -12,16 +13,21 @@ export function recoverableUnsubmittedDraft(turns:readonly ChatTurn[],status?: s
   if(event.kind==='error'&&(!latest||event.id>latest.failure.id))latest={turn,failure:event};
  if(!latest)return;
  const {turn,failure}=latest;
- const data=failure.data as {code?:string;nativeTurnSubmitted?:boolean;runId?:string;queuedInputId?:unknown}|null;
+ const data=failure.data as {code?:string;nativeTurnSubmitted?:boolean;runId?:string;queuedInputId?:unknown;nativeId?:string}|null;
  const mailbox=unsubmittedCodexMailboxCode(data);
  if(!data?.runId||data.nativeTurnSubmitted!==false||(!mailbox&&data.code!=='native_thread_busy'))return;
  let terminalErrorSeen=false;
  for(const candidate of turns)for(const event of candidate.events){
   if(event.id<=failure.id)continue;
   if(event.conversationId!==failure.conversationId)return;
-  const subsequent=event.data as {agentMessage?:{direction?:string;replyState?:string};runId?:unknown;execution?:unknown;status?:string}|null;
+  const subsequent=event.data as {agentMessage?:{direction?:string;replyState?:string};runId?:unknown;execution?:unknown;status?:string;codexWriterRecovery?:CodexWriterRecovery}|null;
   if(event.kind==='metadata'&&subsequent?.agentMessage?.direction==='reply'&&subsequent.agentMessage.replyState==='parked'&&
      subsequent.runId===undefined&&subsequent.execution===undefined)continue;
+  const recovery=subsequent?.codexWriterRecovery;
+  if(event.kind==='metadata'&&data.code==='native_thread_busy'&&recovery?.conflictId===failure.id&&
+     (!data.nativeId||recovery.previousNativeId===data.nativeId)&&
+     ['released','held','creating','unknown','linked'].includes(recovery.state)&&
+     subsequent?.runId===undefined&&subsequent?.execution===undefined)continue;
   if(event.kind==='status'&&!terminalErrorSeen&&subsequent?.status==='error'&&
      (subsequent.runId===undefined||subsequent.runId===data.runId)){terminalErrorSeen=true;continue;}
   return;

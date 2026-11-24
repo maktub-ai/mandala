@@ -648,15 +648,20 @@ export function createHttpServer({
         }
       }
       const match = path.match(
-        /^\/api\/conversations\/([a-zA-Z0-9_-]+)(?:\/(workspace|environment|workspace-file|local-file|local-files|attachments|model|queue|results|messages|edit|branch|fork|stop|continue|events|history|reference-summary|references|questions|approvals|completion|archive|title|memory|approval-mode)(?:\/([a-zA-Z0-9_:-]+))?)?$/,
+        /^\/api\/conversations\/([a-zA-Z0-9_-]+)(?:\/(workspace|environment|workspace-file|local-file|local-files|attachments|model|queue|results|messages|edit|branch|fork|stop|continue|events|history|reference-summary|references|questions|approvals|completion|archive|title|memory|approval-mode|codex-writer-recovery)(?:\/([a-zA-Z0-9_:-]+))?)?$/,
       );
       if (match) {
         const [, id, action, approvalId] = match;
         const conversation = store.getConversation(id);
         if (!conversation) throw new Error("conversation not found");
-        if(method==='GET'||method==='POST'&&['workspace-file','local-file','local-files','attachments','model','queue','fork','branch','edit','messages','continue','questions','title','memory'].includes(action??''))manager.authorizeConversationRead(id);
+        if(method==='GET'||method==='POST'&&['workspace-file','local-file','local-files','attachments','model','queue','fork','branch','edit','messages','continue','questions','title','memory','codex-writer-recovery'].includes(action??''))manager.authorizeConversationRead(id);
         if(action==='results'&&method==='GET')return json(res,200,readScope(()=>conversationResults(store,manager.taskService,{userId:store.ownerUserId},id,manager.authorizeConversationRead)));
         if (action === "reference-summary" && method === "GET") return json(res,200,await manager.listReferenceSummary(id,url.searchParams.get("view")==="outputs"));
+        const assertSameNativeAssociation = () => {
+          if (conversation.purpose === 'mandala-main' && conversation.cli === 'codex' && conversation.status === 'error' &&
+              conversation.nativeId && store.getConversation(id)?.nativeId !== conversation.nativeId)
+            throw new DomainError('execution_changed', 409, 'Codex session association changed. Review the draft before sending.');
+        };
         const recentTurns = () => {
           const recent = Number(url.searchParams.get('recent'));
           if (!Number.isSafeInteger(recent) || recent < 1 || recent > 100) throw new Error('invalid history window');
@@ -817,12 +822,22 @@ export function createHttpServer({
           await manager.setModel(id, string(b.model), b.effort);
           return json(res, 200, { conversation: store.getConversation(id) });
         }
+        if (action === 'codex-writer-recovery' && !approvalId) {
+          if (method === 'GET') return json(res, 200, { recovery: manager.writerRecoveryStatus(id) });
+          if (method === 'POST') {
+            const b = await requestBody(req);
+            if (!Number.isSafeInteger(b.conflictId) || b.conflictId < 1 || !['retry-original', 'isolate', 'check'].includes(b.action))
+              throw new DomainError('invalid_writer_recovery', 400, 'Invalid Codex writer recovery action');
+            return json(res, 200, { recovery: await manager.recoverCodexWriter(id, b.conflictId, b.action) });
+          }
+        }
         if (action === "queue") {
           if (method === "GET") return json(res,200,manager.listUserInputs(id));
           if(method==='POST'&&approvalId){const b=await requestBody(req);if(b.expectedExecutionId!==undefined&&b.expectedExecutionId!==null&&typeof b.expectedExecutionId!=='string')throw new DomainError('invalid_execution_id',400,'Invalid execution identity');await manager.sendQueuedInput(id,approvalId,b.expectedExecutionId);return json(res,202,{ok:true});}
           if (method === "POST") {
             const b=await requestBody(req),text=b.text === "" ? "" : string(b.text),key=string(b.commandKey);
             const attachments=(await loadAttachments(home,id,b.attachments??[])).map(item=>item.id);
+            assertSameNativeAssociation();
             if(b.expectedExecutionId===undefined)return json(res,202,manager.enqueueUserInput(id,text,key,attachments,b.references));
             if(typeof b.expectedExecutionId!=='string'||!b.expectedExecutionId)throw new DomainError('invalid_execution_id',400,'Invalid execution identity');
             return json(res,202,await manager.interruptAndSend(id,text,key,b.expectedExecutionId,attachments,b.references));
@@ -938,9 +953,13 @@ export function createHttpServer({
             if (!Number.isSafeInteger(b.eventId)) throw new Error("invalid branch message");
             const revised = await manager[action](id, b.eventId, string(b.text));
             return json(res, action === "branch" ? 201 : 200, { conversation: revised, approvals: manager.getApprovals(revised.id) });
-          } else if (action === "messages") await manager.send(id, b.text === "" ? "" : string(b.text), await loadAttachments(home, id, b.attachments ?? []),b.references);
-          else if (action === "continue")
-            await manager.continue(id, b.text === "" ? "" : string(b.text), await loadAttachments(home, id, b.attachments ?? []),b.references,b.commandKey);
+          } else if (action === "messages" || action === "continue") {
+            const attachments = await loadAttachments(home, id, b.attachments ?? []);
+            assertSameNativeAssociation();
+            const text = b.text === "" ? "" : string(b.text);
+            if (action === "messages") await manager.send(id, text, attachments, b.references);
+            else await manager.continue(id, text, attachments, b.references, b.commandKey);
+          }
           else if (action === "stop") {
             if (b.expectedExecutionId !== undefined && b.expectedExecutionId !== null && typeof b.expectedExecutionId !== 'string')
               throw new DomainError('invalid_execution_id',400,'Invalid execution identity');

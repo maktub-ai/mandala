@@ -72,9 +72,9 @@ function ApprovalHistory({approval,events}:{approval:RunApproval;events:DisplayE
  </ActivityDisclosure>;
 }
 
-export default function TurnProcess({turn,run:providedRun,onInspect,approvals=[],renderApproval}:{
+export default function TurnProcess({turn,run:providedRun,onInspect,approvals=[],renderApproval,writerRecoveryAvailable=false}:{
  turn:ChatTurn;run?:ReturnType<typeof presentRun>;onInspect:()=>void;
- approvals?:Approval[];renderApproval?:(approval:Approval)=>ReactNode;
+ approvals?:Approval[];writerRecoveryAvailable?:boolean;renderApproval?:(approval:Approval)=>ReactNode;
 }){
  const {text: localize, t,errorText}=useLanguage();
  const [expanded,setExpanded]=useState(false),[now,setNow]=useState(Date.now());
@@ -95,10 +95,18 @@ export default function TurnProcess({turn,run:providedRun,onInspect,approvals=[]
  const connecting=active&&connection?.remoteConnection==='connecting',machineLabel=connection?.machineName||connection?.host||'';
  const nativeAccepted=turn.events.some(event=>{const data=event.data as {method?:string;status?:string;cli?:string};return event.kind==='tool'&&data.method==='turn/started'||event.kind==='metadata'&&data.status==='loaded'&&!!data.cli;});
  const showIncompleteError=run.incomplete&&!run.userStopped;
+ const writerConflict=(data:unknown)=>{
+  const failure=data as {code?:string;nativeTurnSubmitted?:boolean}|null;
+  return writerRecoveryAvailable&&failure?.code==='native_thread_busy'&&failure.nativeTurnSubmitted===false;
+ };
  const status=connecting?localize(`正在连接执行机器 ${machineLabel}…`,`Connecting to ${machineLabel}…`):run.status==='queued'?t(run.queueReason==='directory'?'等待目录释放':run.queueReason==='concurrency'?'等待执行名额':'等待执行'):run.status==='approval'?t('等待审批'):active?t(current?'正在执行的操作':nativeAccepted||latestReport||run.progress.length||run.reasoning.length||run.answers.length?'正在生成回复':'正在启动执行端'):run.userStopped?localize('本轮已停止','Stopped this turn'):showIncompleteError?t('本轮未完成'):run.answers.length?localize('本轮已回复','Replied this turn'):t('本轮结束');
  const quietTime=run.lastActivityAt===undefined?0:Math.max(0,now-run.lastActivityAt);
  const renderRunError=(message:{key:number;text:string})=>{
-  const code=unsubmittedCodexMailboxCode(turn.events.find(event=>event.kind==='error'&&event.id===message.key)?.data);
+  const data=turn.events.find(event=>event.kind==='error'&&event.id===message.key)?.data as {nativeSubmissionState?:string} | undefined;
+  const code=unsubmittedCodexMailboxCode(data);
+  if(writerConflict(data))return localize('原生会话被另一个 Codex 客户端占用。本轮未提交。', 'Another Codex client held the native session. This turn was not submitted.');
+  if(data?.nativeSubmissionState==='unknown')return errorText(message.text)+' '+localize('Codex 是否接收此请求尚未确认。请检查原生会话后再继续。', 'Codex acceptance is unconfirmed. Check the native session before continuing.');
+  if(data?.nativeSubmissionState==='accepted')return errorText(message.text)+' '+localize('Codex 已接收此请求。', 'Codex accepted this request.');
   if(!code)return errorText(message.text);
   return localize(
    mailboxErrorChinese[code]+' 消息未发送到 Codex。排除故障后，请检查已保存的请求。',
@@ -142,7 +150,7 @@ export default function TurnProcess({turn,run:providedRun,onInspect,approvals=[]
      !entry.approval.decision&&renderApproval&&liveApprovals.has(entry.approval.request.id)?renderApproval(liveApprovals.get(entry.approval.request.id)!):<ApprovalHistory approval={entry.approval.state==='pending'&&!liveApprovals.has(entry.approval.request.id)?{...entry.approval,state:'unknown'}:entry.approval} events={turn.events}/>}
    </li>)}</ol>
   </div>
-  {showIncompleteError&&<p className="run-incomplete">{t(turn.events.some(event=>event.kind==='error'&&(event.data as {nativeTurnSubmitted?:boolean}).nativeTurnSubmitted===false)?'请求已保存，执行端尚未接受。可复制消息或在新对话中使用。':'本轮没有完整的最终答复；已收到的内容保留在过程中。')}</p>}
+  {showIncompleteError&&!turn.events.some(event=>event.kind==='error'&&writerConflict(event.data))&&<p className="run-incomplete">{t(turn.events.some(event=>event.kind==='error'&&(event.data as {nativeTurnSubmitted?:boolean}).nativeTurnSubmitted===false)?'请求已保存，执行端尚未接受。可复制消息或在新对话中使用。':'本轮没有完整的最终答复；已收到的内容保留在过程中。')}</p>}
  </section>;
 }
 

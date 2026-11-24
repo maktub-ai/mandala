@@ -7,6 +7,9 @@ const readThreads = () => {
   try { return JSON.parse(readFileSync(statePath, "utf8")); } catch { return {}; }
 };
 const saveThreads = (threads) => writeFileSync(statePath, JSON.stringify(threads));
+const readNames = () => {
+  try { return JSON.parse(readFileSync(statePath + ".names", "utf8")); } catch { return {}; }
+};
 let activeThread = "native-1", activeTurn = "turn-1";
 const send = (x) => process.stdout.write(JSON.stringify(x) + "\n");
 createInterface({ input: process.stdin }).on("line", (line) => {
@@ -54,7 +57,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     result = { thread: { id: activeThread } };
     send({ method: "fixture/start", params: r.params });
   }
-  if (r.method === "thread/resume" && process.argv.includes("--resume-conflict")) {
+  if (r.method === "thread/resume" && (process.argv.includes("--resume-conflict") || persistent && r.params.threadId.startsWith("native-held-"))) {
     send({ id: r.id, error: { code: -32600, message: `thread ${r.params.threadId} already has an active writer` } });
     return;
   }
@@ -62,8 +65,17 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     activeThread = r.params.threadId;
     result = { thread: { id: activeThread } };
   }
-  if (r.method === "thread/read" && persistent)
-    result = { thread: { id: r.params.threadId, turns: readThreads()[r.params.threadId] || [] } };
+  if (r.method === "thread/name/set" && persistent) {
+    const names = readNames();
+    names[r.params.threadId] = r.params.name;
+    writeFileSync(statePath + ".names", JSON.stringify(names));
+    result = {};
+  }
+  if (r.method === "thread/read" && persistent) {
+    const threadId = r.params.threadId;
+    result = { thread: { id: threadId, name: readNames()[threadId] ?? null, ephemeral: false,
+      status: { type: "notLoaded" }, turns: readThreads()[threadId] || [] } };
+  }
   if (r.method === "thread/fork" && persistent) {
     const threads = readThreads();
     const turns = threads[r.params.threadId] || [];

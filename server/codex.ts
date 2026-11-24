@@ -132,6 +132,8 @@ export interface CodexClient {
     runtimeMailboxPath?: string;
   }): Promise<string>;
   resumeThread(nativeId: string, mcp?: McpServer[], instructions?: string, model?: string, runtimeWorkspaceRoots?: string[], runtimeMailboxPath?: string): Promise<void>;
+  nameEmptyThread?(nativeId: string, name: string): Promise<void>;
+  readEmptyNamedThread?(nativeId: string, name: string): Promise<boolean>;
   forkThread?(nativeId: string, userTexts: string[], beforeIndex: number, model?: string): Promise<string>;
   setSkillRoots?(roots: string[]): Promise<void>;
   listMcpStatus?(nativeId: string): Promise<Record<string, string | null>>;
@@ -285,6 +287,15 @@ export async function connectCodex(rpc: RpcClient, cwd?: string, fullAccess = tr
       if(instructions!==undefined)await rpc.request('thread/inject_items',{threadId,items:[{type:'message',role:'developer',content:[{type:'input_text',text:'Current Mandala runtime instructions replace earlier Mandala invocation instructions. Earlier CLI launchers have expired.\n\n'+instructions}]}]});
       loadedPermissionsSignature=permissions.signature;loadedMailboxProfile=!!permissions.profiles;loadedMailboxPath=runtimeMailboxPath;
       if(result.model)onUsageEvent({method:'mandala/usageModel',params:{threadId,model:result.model}});
+    },
+    async nameEmptyThread(threadId, name) {
+      // Naming materializes the rollout without introducing a model-visible item.
+      await rpc.request('thread/name/set', { threadId, name });
+    },
+    async readEmptyNamedThread(threadId, name) {
+      const { thread } = await rpc.request('thread/read', { threadId, includeTurns: true });
+      return thread?.id === threadId && thread.name === name && thread.ephemeral === false &&
+        ['notLoaded', 'idle'].includes(thread.status?.type) && Array.isArray(thread.turns) && thread.turns.length === 0;
     },
     async forkThread(threadId, userTexts, beforeIndex, model) {
       const readMessages = (thread: any) => (thread.turns ?? []).flatMap((turn: any) =>
