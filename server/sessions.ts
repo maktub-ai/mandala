@@ -2530,7 +2530,7 @@ export function createSessionManager(
       const response=questionResponse(approval,answers);
       r.client.replyApproval(approval.nativeRequestId,response);
       r.approvals.delete(approvalId);
-      store.appendEvent(id,"metadata",{answeredQuestionId:approvalId,questionAnswerDisplay:projectQuestionAnswer(approval,response)});
+      appendEvent(id,"metadata",{answeredQuestionId:approvalId,questionAnswerDisplay:projectQuestionAnswer(approval,response)});
       state(id,hasBlockingApprovals(r.approvals.values())?"approval":"running");
     },
     async approve(id, approvalId, decision) {

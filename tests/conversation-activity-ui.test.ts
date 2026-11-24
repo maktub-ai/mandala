@@ -12,7 +12,7 @@ afterEach(()=>vi.unstubAllGlobals());
 const renderMarkup=(component:React.ReactNode)=>renderToStaticMarkup(React.createElement(LanguageProvider,null,component));
 
 const event=(id:number,kind:DisplayEvent['kind'],data:unknown):DisplayEvent=>({id,kind,data,conversationId:'c',createdAt:'2026-10-30T08:00:00Z'});
-const render=(events:DisplayEvent[])=>renderMarkup(React.createElement(TurnProcess,{turn:groupChatTurns([event(1,'user',{text:'Inspect'}),...events])[0],onInspect:()=>{}}));
+const render=(events:DisplayEvent[],runId?:string)=>renderMarkup(React.createElement(TurnProcess,{turn:groupChatTurns([event(1,'user',{text:'Inspect',runId}),...events])[0],onInspect:()=>{}}));
 it('defaults to a folded process with only the latest public explanation',()=>{
  const html=render([event(2,'status',{status:'running'}),event(3,'progress',{text:'Explicit progress',source:'cli',runId:'r'}),event(4,'tool',{method:'item/completed',params:{item:{id:'comment',type:'agentMessage',phase:'commentary',text:'Native commentary'}}})]);
  expect(html).toContain('Native commentary');expect(html).not.toContain('Explicit progress');expect(html).not.toContain('>过程说明<');
@@ -89,7 +89,7 @@ it('retains startup status before the native CLI accepts the request',()=>{
 });
 
 it('shows the safe selected option by itself even without the original question page',()=>{
- const html=render([event(2,'metadata',{answeredQuestionId:'q1',questionAnswerDisplay:{version:1,selectedOptions:['In app']}}),event(3,'status',{status:'idle'})]);
+ const html=render([event(2,'metadata',{answeredQuestionId:'q1',runId:'owner',questionAnswerDisplay:{version:1,selectedOptions:['In app']}}),event(3,'status',{status:'idle'})],'owner');
  expect(html).toContain('已提交回答');
  expect(html).toContain('In app');
 });
@@ -97,4 +97,9 @@ it('does not infer submitted options from a legacy or unrelated event',()=>{
  const html=render([event(2,'metadata',{answeredQuestionId:'legacy',answers:{choice:'RAW_UNVERIFIED'}}),event(3,'metadata',{questionAnswerDisplay:{version:1,selectedOptions:['UNCORRELATED']}})]);
  expect(html).not.toContain('RAW_UNVERIFIED');
  expect(html).not.toContain('UNCORRELATED');
+});
+
+it('does not show an unbound historical answer chip under a different turn',()=>{
+ const html=render([event(2,'metadata',{answeredQuestionId:'q1',questionAnswerDisplay:{version:1,selectedOptions:['MISPLACED OPTION']}})]);
+ expect(html).not.toContain('MISPLACED OPTION');
 });

@@ -98,7 +98,17 @@ export default function TurnProcess({turn,run:providedRun,onInspect,approvals=[]
   {!showHistory&&(active||run.incomplete)&&run.latestProgress&&<ExplicitProgressView progress={run.latestProgress} compact hideOutputLabel live={active}/>}
   {turn.events.map(event=>{
    const display=event.kind==='metadata'?readQuestionAnswerDisplay(event.data):null;
-   return display&&<div key={event.id} className="run-question-answer">
+   if(!display)return null;
+   const runId=(event.data as {runId?:string}).runId;
+   const belongs=turn.events.some(prior=>{
+    if(prior.id>=event.id||prior.conversationId!==event.conversationId)return false;
+    if(prior.kind==='user'&&runId)return (prior.data as {runId?:string}).runId===runId;
+    if(prior.kind!=='approval')return false;
+    const approval=prior.data as Approval;
+    return approval.id===display.id&&approval.conversationId===event.conversationId&&approval.method==='item/tool/requestUserInput';
+   });
+   if(!belongs)return null;
+   return <div key={event.id} className="run-question-answer">
     <span>{localize('已提交回答','Answer submitted')}</span>
     {display.options.map((label,index)=><span key={index} className="run-question-option">{label}</span>)}
    </div>;

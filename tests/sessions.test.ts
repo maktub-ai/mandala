@@ -1510,12 +1510,20 @@ it('records only a safe selected option for a submitted native question', async 
  ]}});
  const approval=manager.getApprovals(chat.id)[0];
  const answer={choice:{answers:['In app']},secret:{answers:['DO_NOT_PROJECT_SECRET']},custom:{answers:['DO_NOT_PROJECT_CUSTOM']},duplicate:{answers:['DO_NOT_PROJECT_DUPLICATE']}};
+ store.appendEvent(chat.id,'metadata',{agentMessage:{id:'fixture-helper',direction:'reply',reply:'Interleaved helper reply'}});
  await manager.answerQuestions(chat.id,approval.id,answer);
  expect(replies).toEqual([{id:91,result:{answers:answer}}]);
  const records=store.listEvents(chat.id,0).filter(e=>e.kind==='metadata'&&(e.data as any).answeredQuestionId===approval.id);
  expect(records).toHaveLength(1);
  expect(records[0].data).toMatchObject({answeredQuestionId:approval.id,questionAnswerDisplay:{version:1,selectedOptions:['In app']}});
  expect(JSON.stringify(records[0].data)).not.toContain('DO_NOT_PROJECT');
+ const {groupChatTurns}=await import('../shared/chat-turns');
+ const turns=groupChatTurns(store.listEvents(chat.id,0));
+ const source=turns.find(turn=>turn.messages.some(message=>message.kind==='user'&&message.text==='ask'));
+ const helper=turns.find(turn=>turn.messages.some(message=>message.text==='Interleaved helper reply'));
+ expect(helper).toBeDefined();
+ expect(source?.events.map(event=>event.id)).toContain(records[0].id);
+ expect(helper?.events.map(event=>event.id)).not.toContain(records[0].id);
  expect(manager.listUserInputs(chat.id)).toEqual([]);
 });
 
