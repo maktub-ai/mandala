@@ -1,18 +1,29 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { startPi } from '../server/pi';
 import type { CodexClient } from '../server/codex';
+import { spawn as spawnNative } from '../server/native-spawn';
+
+vi.mock('../server/native-spawn', () => ({
+  spawn: vi.fn(() => { throw new Error('Test blocked an unexpected native CLI spawn'); }),
+}));
+const native = vi.mocked(spawnNative);
 
 const cleanups: (() => Promise<void>)[] = [];
-afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
+afterEach(async () => {
+  native.mockReset();
+  for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
+});
 async function fixture(mode = 'normal', safeSystem = false) {
   const dir = await mkdtemp(join(tmpdir(), 'mandala-pi-'));
+  cleanups.push(() => rm(dir, {recursive:true,force:true}));
+  const executable = join(dir, 'pi-fixture.cjs');
   const capture = join(dir, 'requests.jsonl');
   const launch = join(dir, 'launch.json');
-  await writeFile(join(dir, 'pi'), `#!/usr/bin/env node
-const fs = require('node:fs');
+  await writeFile(executable, `const fs = require('node:fs');
 const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
 fs.writeFileSync(${JSON.stringify(launch)}, JSON.stringify({args:process.argv.slice(2),home:process.env.HOME}));
 let path = ${JSON.stringify(join(dir, 'native.jsonl'))};
@@ -48,11 +59,18 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
  send({type:'agent_end',messages:[]});send({type:'agent_end',messages:[]});
 });
 `);
-  await chmod(join(dir, 'pi'), 0o700);
   await writeFile(join(dir, 'file.txt'), 'sample');
   const events: {method?: string; params?: any}[] = [], approvals: any[] = [], exits: string[] = [];
-  const client = await startPi({cwd:dir,safeSystem,env:{PATH:dir+':'+process.env.PATH,HOME:dir,PI_CODING_AGENT_DIR:join(dir,'profile')},onEvent:e=>events.push(e),onApproval:r=>approvals.push(r),onExit:r=>exits.push(r)});
-  cleanups.push(async () => { await client.close(); await rm(dir,{recursive:true,force:true}); });
+  native.mockImplementationOnce((command, args, options) => {
+    expect(command).toBe('pi');
+    expect(options).toMatchObject({cwd:dir,stdio:'pipe',shell:false,detached:process.platform!=='win32'});
+    // Keep real RPC pipes and process-group behavior without resolving an installed Pi binary.
+    return spawn(process.execPath, [executable, ...args], {
+      cwd:options.cwd, env:options.env, stdio:'pipe', shell:false, detached:options.detached,
+    });
+  });
+  const client = await startPi({cwd:dir,safeSystem,env:{PATH:dir,HOME:dir,PI_CODING_AGENT_DIR:join(dir,'profile')},onEvent:e=>events.push(e),onApproval:r=>approvals.push(r),onExit:r=>exits.push(r)});
+  cleanups.push(async () => { await client.close(); });
   return {dir,client,events,approvals,exits,requests:async ()=>(await readFile(capture,'utf8')).trim().split('\n').map(line=>JSON.parse(line)),launch:async()=>JSON.parse(await readFile(launch,'utf8'))};
 }
 async function until(check: () => boolean) {
@@ -145,5 +163,7 @@ it('uses native model and effort capabilities and sends image bytes',async()=>{
 });
 it('rejects requested MCP and unmanaged extension arguments explicitly',async()=>{
  const f=await fixture();await expect(f.client.startThread({cwd:f.dir,instructions:'',mcp:[{name:'server',transport:'stdio',command:'server'}]})).rejects.toThrow('MCP');
+ native.mockClear();
  await expect(startPi({cwd:f.dir,extraArgs:['-e','unsafe.mjs'],onEvent(){},onApproval(){},onExit(){}})).rejects.toThrow('arguments');
+ expect(native).not.toHaveBeenCalled();
 });
