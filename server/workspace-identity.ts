@@ -18,7 +18,7 @@ export function bindWorkspaceOwner(store: Store, userId: string): void {
     }
     const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row => row.name));
     // Transfer authority fields only; immutable source snapshots, chat bytes and blob files stay intact.
-    for (const table of ['work_tasks', 'task_user_inputs', 'local_composer_drafts']) {
+    for (const table of ['work_tasks', 'task_user_inputs', 'local_composer_drafts', 'local_draft_attachments', 'local_draft_files']) {
       if (tables.has(table)) db.prepare(`UPDATE ${table} SET owner_user_id=? WHERE owner_user_id=?`).run(userId, LOCAL_USER_ID);
     }
     for (const [table, path] of [['assets', '$.owner.userId'], ['memory_jobs', '$.principal.userId']] as const) {

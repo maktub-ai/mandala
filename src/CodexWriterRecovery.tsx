@@ -7,12 +7,13 @@ import Button from './ui/Button';
 import Disclosure from './ui/Disclosure';
 import './codex-writer-recovery.css';
 
-export default function CodexWriterRecovery({ id, eventId, showNotice, disabled, onBusy }: {
+export default function CodexWriterRecovery({ id, eventId, showNotice, disabled, onBusy, flushDraft }: {
   id: string;
   eventId: number | undefined;
   showNotice: boolean;
   disabled: boolean;
   onBusy: (id: string) => void;
+  flushDraft: () => Promise<void>;
 }) {
   const { text: localize } = useLanguage();
   const [recovery, setRecovery] = useState<Recovery | null>(null);
@@ -41,6 +42,7 @@ export default function CodexWriterRecovery({ id, eventId, showNotice, disabled,
     onBusy(id);
     setError('');
     try {
+      if (action === 'isolate') await flushDraft();
       const value = await api<{ recovery: Recovery }>(route, 'POST', { conflictId: recovery.conflictId, action });
       setRecovery(value.recovery);
       setConfirming(false);

@@ -223,7 +223,10 @@ writerConflictTest('writer conflict retains the submitted request and attachment
   await expect(message.getByRole('button', { name: '编辑消息', exact: true })).toBeEnabled();
   await expect(composer).toHaveValue('');
   await expect(page.locator('.composer-attachments')).toHaveCount(0);
-  const sourceScope=encodeURIComponent(JSON.stringify({kind:'chat',conversationId:chat.id}));const originalDraft=(await(await request.get('/api/drafts/entry?scope='+sourceScope)).json()).draft;
+  const sourceScope=encodeURIComponent(JSON.stringify({kind:'chat',conversationId:chat.id}));
+  const loadSourceDraft=async()=>(await(await request.get('/api/drafts/entry?scope='+sourceScope)).json()).draft;
+  await expect.poll(loadSourceDraft).toMatchObject({text:'',attachments:[]});
+  const originalDraft=await loadSourceDraft();
   await message.hover();
   await message.getByRole('button', { name: '在新对话中使用此请求', exact: true }).click();
   await expect(page.getByRole('region', { name: '新对话准备' })).toBeVisible();
@@ -527,4 +530,28 @@ writerConflictTest('the primary chat can cancel or explicitly link an empty nati
   await expect(page.getByText(/Fixture reply: Manual input after review/)).toBeVisible();
   expect((await read()).nativeId).toBe(next);
   expect((await history()).filter((event: { kind: string }) => event.kind === 'user')).toHaveLength(turnCount + 1);
+});
+
+test('restores a local chat draft with its file bytes after a fresh browser origin cache', async ({ page, browser, request }) => {
+  const chat = await (await request.post('/api/conversations', { data: { projectId: 'resilience', agentId: 'first' } })).json();
+  const route = '/?project=resilience&conversation=' + chat.id;
+  const scope = encodeURIComponent(JSON.stringify({ kind: 'chat', conversationId: chat.id }));
+  const payload = 'Durable attachment across service origin change';
+  await page.goto(route);
+  await page.getByRole('textbox', { name: '消息', exact: true }).fill('Keep the unsent draft');
+  await page.locator('input[type=file]').setInputFiles({ name: 'durable.txt', mimeType: 'text/plain', buffer: Buffer.from(payload) });
+  await expect.poll(async () => (await (await request.get('/api/drafts/entry?scope=' + scope)).json()).draft?.attachments?.[0]?.name).toBe('durable.txt');
+  const fresh = await browser.newContext({ locale: 'zh-CN' });
+  try {
+    const reopened = await fresh.newPage();
+    await reopened.addInitScript(() => localStorage.setItem('mana-language', 'zh-CN'));
+    await reopened.goto(new URL(route, page.url()).href);
+    await expect(reopened.getByRole('textbox', { name: '消息', exact: true })).toHaveValue('Keep the unsent draft');
+    await expect(reopened.locator('.composer-attachments')).toContainText('durable.txt');
+    const visible = await (await request.get('/api/conversations/' + chat.id + '/history')).json();
+    expect(visible.filter((entry: { kind: string }) => entry.kind === 'user')).toHaveLength(0);
+    const draft = (await (await request.get('/api/drafts/entry?scope=' + scope)).json()).draft;
+    const bytes = await request.get('/api/drafts/files/' + chat.id + '/' + draft.attachments[0].storageId);
+    expect(await bytes.text()).toBe(payload);
+  } finally { await fresh.close(); }
 });

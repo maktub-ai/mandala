@@ -1088,6 +1088,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
         // The user may have typed while saved attachments were being read.
         draft.setValue(current => current.text || current.files.length || current.references.length ||
           current.missingAttachments.length ? current : restored);
+        await draft.flush();
       } else {
         flushSync(() => { navigate(projectId, "", agentId); setWorkspaceId(chat?.workspaceId); setDirectory(chat?.cwd ?? ""); });
         composerDraftRef.current.replaceValue(restored);
@@ -1734,7 +1735,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
             <CodexWriterRecovery key={selected} id={selected} showNotice={['error', 'interrupted'].includes(chat.status)}
               eventId={chat.status === 'error' ? events.at(-1)?.id : undefined}
               disabled={busy || stopping || navigationLocked || !!composerDraft.pending}
-              onBusy={setWriterRecoveryBusyId} />}
+              onBusy={setWriterRecoveryBusyId} flushDraft={composerDraft.flush} />}
           <QueuedMessages inputs={queuedInputs} busy={busy} disabled={pending||writerRecoveryBusy||stopping||branchPending||navigationLocked||modeSaving||!historyReady} onSend={input=>void sendQueued(input)} onCopy={input => void copyMessage(-1, input.text)} onReuse={input => void reuseRequest({ text: input.text, attachments: input.attachments?.map(id => ({ id })), referenceItems: referenceItems.filter(item => input.references?.some(ref => ref.id === item.id)) })} onCancel={async inputId=>{
             const view=navigationVersion.current;
             queueReads.current.generation++;

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { DraftScope, ComposerDraft, PendingSubmission } from '../shared/drafts';
+import type { DraftScope, ComposerDraft, DraftAttachment, PendingSubmission } from '../shared/drafts';
 import { DomainError } from '../shared/workspace-contracts';
 import type { SessionManager } from './sessions';
 import type { Store } from './store';
 import { workspacePrincipal } from './workspace-identity';
 import { readJsonBody } from './http-body';
+import { MAX_ATTACHMENT_SIZE, MAX_ATTACHMENTS } from './attachments';
 const invalid = (): never => { throw new DomainError('invalid_draft',422,'Invalid draft request'); };
 const fields = (value: unknown, allowed: string[]): Record<string, any> => {
  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !allowed.includes(key))) return invalid();
@@ -18,7 +19,7 @@ const text = (value: unknown, max: number, empty = true): string => {
 const identifier = (value: unknown, empty = false) => text(value,200,empty);
 const list = (value: unknown): unknown[] => { if(!Array.isArray(value) || value.length > 100)return invalid();return value; };
 const integer = (value: unknown) => { if(!Number.isSafeInteger(value) || (value as number) < 0)return invalid();return value as number; };
-function parseDraft(value: unknown): ComposerDraft {
+function parseDraft(value: unknown, scope: DraftScope): ComposerDraft {
  const data = fields(value,['text','references','attachments']);
  const result: ComposerDraft = {text:text(data.text,1024*1024)};
  if(data.references !== undefined)result.references = list(data.references).map(item => {
@@ -29,9 +30,13 @@ function parseDraft(value: unknown): ComposerDraft {
   return ref as ComposerDraft['references'] extends (infer T)[] | undefined ? T : never;
  });
  if(data.attachments !== undefined)result.attachments = list(data.attachments).map(item => {
-  const attachment=fields(item,['name','size','type','lastModified']);
-  return {name:text(attachment.name,1000,false),size:integer(attachment.size),type:text(attachment.type,200),lastModified:integer(attachment.lastModified)};
+  const attachment=fields(item,['name','size','type','lastModified','storageId']);
+  const storageId=attachment.storageId===undefined?undefined:identifier(attachment.storageId);
+  if(storageId&&(!scope.conversationId||! /^[a-f0-9-]{36}$/.test(storageId)))invalid();
+  return {name:text(attachment.name,1000,false),size:integer(attachment.size),type:text(attachment.type,200),
+    lastModified:integer(attachment.lastModified),...(storageId?{storageId}:{})};
  });
+ if((result.attachments?.filter(item=>item.storageId).length??0)>MAX_ATTACHMENTS)invalid();
  return result;
 }
 function parsePending(value: unknown, scope: DraftScope): PendingSubmission {
@@ -49,7 +54,12 @@ type Row = {scope: string; record_kind: 'draft'|'pending'; revision: number; dat
 export function createDrafts(store: Store, manager: Pick<SessionManager,'taskService'|'authorizeConversationRead'>) {
  const db=store.database,p=workspacePrincipal(store);
  db.exec(`CREATE TABLE IF NOT EXISTS local_draft_device (id INTEGER PRIMARY KEY CHECK(id=1), device_id TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS local_composer_drafts (owner_user_id TEXT NOT NULL, device_id TEXT NOT NULL, scope TEXT NOT NULL, record_kind TEXT NOT NULL CHECK(record_kind IN ('draft','pending')), revision INTEGER NOT NULL, data TEXT, updated_at TEXT NOT NULL, PRIMARY KEY(owner_user_id,device_id,scope,record_kind));`);
+ CREATE TABLE IF NOT EXISTS local_composer_drafts (owner_user_id TEXT NOT NULL, device_id TEXT NOT NULL, scope TEXT NOT NULL, record_kind TEXT NOT NULL CHECK(record_kind IN ('draft','pending')), revision INTEGER NOT NULL, data TEXT, updated_at TEXT NOT NULL, PRIMARY KEY(owner_user_id,device_id,scope,record_kind));
+ CREATE TABLE IF NOT EXISTS local_draft_attachments (owner_user_id TEXT NOT NULL, device_id TEXT NOT NULL, scope TEXT NOT NULL, revision INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(owner_user_id,device_id,scope));
+ CREATE TABLE IF NOT EXISTS local_draft_files (owner_user_id TEXT NOT NULL, device_id TEXT NOT NULL, conversation_id TEXT NOT NULL,
+ id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, last_modified INTEGER NOT NULL,
+ bytes BLOB NOT NULL, created_at INTEGER NOT NULL);
+ CREATE INDEX IF NOT EXISTS local_draft_files_owner ON local_draft_files(owner_user_id,device_id,conversation_id);`);
  db.prepare('INSERT OR IGNORE INTO local_draft_device VALUES(1,?)').run(randomUUID());
  const deviceId = db.prepare('SELECT device_id FROM local_draft_device WHERE id=1').get()!.device_id as string;
  const scopeOf = (value: unknown, recoveryOnly = false): DraftScope => {
@@ -68,10 +78,62 @@ export function createDrafts(store: Store, manager: Pick<SessionManager,'taskSer
   return {kind:'chat',conversationId:'',projectId:data.projectId??'',agentId:data.agentId??''};
  };
  const row = (scope: DraftScope,kind:'draft'|'pending') => db.prepare('SELECT * FROM local_composer_drafts WHERE owner_user_id=? AND device_id=? AND scope=? AND record_kind=?').get(store.ownerUserId,deviceId,JSON.stringify(scope),kind) as Row|undefined;
- const record = (value: Row|undefined,kind:'draft'|'pending') => ({revision:value?.revision??0,...value?{updatedAt:value.updated_at}:{},[kind]:value?.data?JSON.parse(value.data):null});
+ // Keep the legacy draft record readable and editable by earlier builds.
+ const draftData = (draft: ComposerDraft) => JSON.stringify({
+  ...draft, ...(draft.attachments?{attachments:draft.attachments.map(({storageId:_storageId,...file})=>file)}:{}),
+ });
+ const fileById = db.prepare(`SELECT name,type,size,last_modified FROM local_draft_files
+  WHERE owner_user_id=? AND device_id=? AND conversation_id=? AND id=?`);
+ const garbage = db.prepare(`DELETE FROM local_draft_files WHERE owner_user_id=? AND device_id=?
+  AND (conversation_id=? AND id IN (SELECT value FROM json_each(?)) OR created_at<?)
+  AND NOT EXISTS(SELECT 1 FROM local_draft_attachments a JOIN local_composer_drafts d
+   ON d.owner_user_id=a.owner_user_id AND d.device_id=a.device_id AND d.scope=a.scope AND d.record_kind='draft' AND d.revision=a.revision
+   JOIN json_each(a.data) id ON id.value=local_draft_files.id WHERE a.owner_user_id=local_draft_files.owner_user_id AND a.device_id=local_draft_files.device_id)`);
+ const saveAttachmentIds = (scope: DraftScope, revision: number, draft: ComposerDraft | null) => {
+  const key=JSON.stringify(scope),ids=draft?.attachments?.map(file=>file.storageId??null);
+  for(const attachment of draft?.attachments??[]){
+   if(!attachment.storageId)continue;
+   const file=fileById.get(store.ownerUserId,deviceId,scope.conversationId,attachment.storageId);
+   if(!file||file.name!==attachment.name||file.type!==attachment.type||
+      file.size!==attachment.size||file.last_modified!==attachment.lastModified)invalid();
+  }
+  const prior=db.prepare('SELECT data FROM local_draft_attachments WHERE owner_user_id=? AND device_id=? AND scope=?')
+   .get(store.ownerUserId,deviceId,key);
+  if(ids?.some(Boolean))db.prepare(`INSERT INTO local_draft_attachments VALUES(?,?,?,?,?) ON CONFLICT(owner_user_id,device_id,scope)
+   DO UPDATE SET revision=excluded.revision,data=excluded.data`).run(store.ownerUserId,deviceId,key,revision,JSON.stringify(ids));
+  else db.prepare('DELETE FROM local_draft_attachments WHERE owner_user_id=? AND device_id=? AND scope=?').run(store.ownerUserId,deviceId,key);
+  if(prior)garbage.run(store.ownerUserId,deviceId,scope.conversationId,prior.data as string,0);
+ };
+ const stageFile=(conversationId:string,file:DraftAttachment,bytes:Buffer)=>{
+  scopeOf({kind:'chat',conversationId});
+  const id=randomUUID(),now=Date.now();
+  store.transaction(()=>{
+   // Bound abandoned uploads. Saved drafts keep their exact revision references.
+   garbage.run(store.ownerUserId,deviceId,conversationId,'[]',now-24*3600000);
+   db.prepare('INSERT INTO local_draft_files VALUES(?,?,?,?,?,?,?,?,?,?)')
+    .run(store.ownerUserId,deviceId,conversationId,id,file.name,file.type,bytes.length,file.lastModified,bytes,now);
+  });
+  return id;
+ };
+ const readFile=(conversationId:string,id:string)=>{
+  scopeOf({kind:'chat',conversationId});
+  return db.prepare('SELECT bytes FROM local_draft_files WHERE owner_user_id=? AND device_id=? AND conversation_id=? AND id=?')
+   .get(store.ownerUserId,deviceId,conversationId,id)?.bytes as Uint8Array|undefined;
+ };
+ const record = (value: Row|undefined,kind:'draft'|'pending') => {
+  const data=value?.data?JSON.parse(value.data):null;
+  if(kind==='draft'&&data?.attachments?.length){
+   const stored=db.prepare('SELECT data FROM local_draft_attachments WHERE owner_user_id=? AND device_id=? AND scope=? AND revision=?')
+    .get(store.ownerUserId,deviceId,value!.scope,value!.revision);
+   const ids=stored&&JSON.parse(stored.data as string) as (string|null)[]|undefined;
+   if(ids)data.attachments=data.attachments.map((file:DraftAttachment,index:number)=>ids[index]?{...file,storageId:ids[index]}:file);
+  }
+  return {revision:value?.revision??0,...value?{updatedAt:value.updated_at}:{},[kind]:data};
+ };
  const get=(input:unknown,kind:'draft'|'pending'='draft') => record(row(scopeOf(input,true),kind),kind);
  const save=(input:unknown,expected:unknown,value:unknown,kind:'draft'|'pending'='draft',remove=false) => {
-  const scope=scopeOf(input,remove),expectedRevision=integer(expected),data=remove?null:JSON.stringify(kind==='draft'?parseDraft(value):parsePending(value,scope));
+  const scope=scopeOf(input,remove),expectedRevision=integer(expected),draft=!remove&&kind==='draft'?parseDraft(value,scope):null;
+  const data=remove?null:draft?draftData(draft):JSON.stringify(parsePending(value,scope));
   if(data && Buffer.byteLength(data)>1152*1024)invalid();
   return store.transaction(()=>{
    const current=row(scope,kind);if((current?.revision??0)!==expectedRevision)throw new DomainError('draft_revision_conflict',409,'Draft changed in another window');
@@ -84,12 +146,13 @@ export function createDrafts(store: Store, manager: Pick<SessionManager,'taskSer
    }
    const updatedAt=new Date().toISOString(),revision=expectedRevision+1;
    db.prepare('INSERT INTO local_composer_drafts VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner_user_id,device_id,scope,record_kind) DO UPDATE SET revision=excluded.revision,data=excluded.data,updated_at=excluded.updated_at').run(store.ownerUserId,deviceId,JSON.stringify(scope),kind,revision,data,updatedAt);
+   if(kind==='draft')saveAttachmentIds(scope,revision,draft);
    return record({scope:JSON.stringify(scope),record_kind:kind,revision,data,updated_at:updatedAt},kind);
   });
  };
  const handoff=(input:unknown,expected:unknown,targetId:unknown,targetExpected:unknown,value:unknown,pendingValue?:unknown,pendingExpected?:unknown)=>{
   const source=scopeOf(input);if(source.kind!=='chat'||source.conversationId)invalid();
-  const target=scopeOf({kind:'chat',conversationId:identifier(targetId)}),expectedRevision=integer(expected),targetRevision=integer(targetExpected),data=JSON.stringify(parseDraft(value));
+  const target=scopeOf({kind:'chat',conversationId:identifier(targetId)}),expectedRevision=integer(expected),targetRevision=integer(targetExpected),draft=parseDraft(value,target),data=draftData(draft);
   const pendingData=pendingValue===undefined?null:JSON.stringify(parsePending(pendingValue,target)),pendingRevision=pendingValue===undefined?0:integer(pendingExpected);
   if(Buffer.byteLength(data)>1152*1024||pendingData&&Buffer.byteLength(pendingData)>1152*1024)invalid();
   return store.transaction(()=>{
@@ -106,6 +169,8 @@ export function createDrafts(store: Store, manager: Pick<SessionManager,'taskSer
    const updatedAt=new Date().toISOString(),write=db.prepare('INSERT INTO local_composer_drafts VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner_user_id,device_id,scope,record_kind) DO UPDATE SET revision=excluded.revision,data=excluded.data,updated_at=excluded.updated_at');
    write.run(store.ownerUserId,deviceId,JSON.stringify(source),'draft',expectedRevision+1,null,updatedAt);
    write.run(store.ownerUserId,deviceId,JSON.stringify(target),'draft',targetRevision+1,data,updatedAt);
+   saveAttachmentIds(source,expectedRevision+1,null);
+   saveAttachmentIds(target,targetRevision+1,draft);
    if(pendingData)write.run(store.ownerUserId,deviceId,JSON.stringify(target),'pending',pendingRevision+1,pendingData,updatedAt);
    return {source:record({scope:JSON.stringify(source),record_kind:'draft',revision:expectedRevision+1,data:null,updated_at:updatedAt},'draft'),target:record({scope:JSON.stringify(target),record_kind:'draft',revision:targetRevision+1,data,updated_at:updatedAt},'draft'),pending:pendingData?record({scope:JSON.stringify(target),record_kind:'pending',revision:pendingRevision+1,data:pendingData,updated_at:updatedAt},'pending'):record(receipt,'pending')};
   });
@@ -116,13 +181,38 @@ export function createDrafts(store: Store, manager: Pick<SessionManager,'taskSer
   for(const value of rows){try{const scope=scopeOf(JSON.parse(value.scope),value.record_kind==='pending');result[value.record_kind==='draft'?'entries':'pending'].push({scope,...record(value,value.record_kind)});}catch(error){if(!(error instanceof DomainError)||![403,404].includes(error.status))throw error;}}
   return result;
  };
- return {deviceId,get,save,handoff,entries};
+ return {deviceId,get,save,handoff,entries,stageFile,readFile};
 }
 export function createDraftHttp(store:Store,manager:SessionManager){
  const drafts=createDrafts(store,manager);
  return async(req:IncomingMessage,res:ServerResponse,url:URL)=>{
   if(url.pathname!=='/api/drafts'&&!url.pathname.startsWith('/api/drafts/'))return false;
   let result:unknown;const path=url.pathname;
+  const files=/^\/api\/drafts\/files\/([a-zA-Z0-9_-]+)(?:\/([a-f0-9-]{36}))?$/.exec(path);
+  if(files){
+   const [,conversationId,id]=files;
+   if(req.method==='GET'&&id&&!url.search){
+    const bytes=drafts.readFile(conversationId,id);
+    if(!bytes)throw new DomainError('draft_attachment_not_found',404,'Draft attachment unavailable');
+    res.writeHead(200,{'Content-Type':'application/octet-stream','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});
+    res.end(bytes);return true;
+   }
+   if(req.method!=='POST'||id||req.headers['content-type']!=='application/octet-stream')invalid();
+   for(const key of ['name','type','lastModified'])if(url.searchParams.getAll(key).length!==1)invalid();
+   if([...url.searchParams.keys()].length!==3)invalid();
+   const name=text(url.searchParams.get('name'),1000,false),type=text(url.searchParams.get('type'),200);
+   const lastModified=integer(Number(url.searchParams.get('lastModified'))),chunks:Buffer[]=[];
+   let size=0;
+   for await(const chunk of req){
+    const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);
+    size+=bytes.length;if(size>MAX_ATTACHMENT_SIZE)throw new DomainError('attachment_size',413,'Attachment exceeds 20 MB');
+    chunks.push(bytes);
+   }
+   if(!size)invalid();
+   result={id:drafts.stageFile(conversationId,{name,type,size,lastModified},Buffer.concat(chunks,size))};
+   res.writeHead(201,{'Content-Type':'application/json','Cache-Control':'no-store'});
+   res.end(JSON.stringify(result));return true;
+  }
   if(path==='/api/drafts/meta'&&req.method==='GET'&&!url.search)result={deviceId:drafts.deviceId};
   else if(path==='/api/drafts/handoff'&&req.method==='POST'&&!url.search){const data=fields(await readJsonBody(req,{maxBytes:3*1024*1024,contentTypeError:'invalid content type',sizeError:'invalid request size',jsonError:'invalid JSON'}),['scope','expectedRevision','targetConversationId','targetExpectedRevision','draft','pending','targetPendingExpectedRevision']);result=drafts.handoff(data.scope,data.expectedRevision,data.targetConversationId,data.targetExpectedRevision,data.draft,data.pending,data.targetPendingExpectedRevision);}
   else if(path==='/api/drafts'&&req.method==='GET'&&!url.search)result=drafts.entries();

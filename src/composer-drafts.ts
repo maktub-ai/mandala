@@ -2,6 +2,8 @@ import nacl from 'tweetnacl';
 import { createContext, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ComposerReferenceItem } from '../shared/composer-references';
 import { requestJson } from './api';
+import type { DraftAttachment } from '../shared/drafts';
+import { readComposerFile, storedComposerFile, stageComposerFile } from './composer-file-storage';
 
 export const ComposerDraftIdentity = createContext('fixture');
 export const useComposerDraftIdentity = () => useContext(ComposerDraftIdentity);
@@ -12,7 +14,7 @@ export type PendingComposerSubmission = {
  body:{text:string;attachments:string[];references:string[]};
  recovery:{attempted:boolean;stopAttempted:boolean;stopConfirmed:boolean;expectedExecutionId?:string;rejectionMessage?:string};
 };
-type AttachmentName = {name:string;size:number;type:string;lastModified:number};
+type AttachmentName = DraftAttachment;
 export type ComposerDraftValue = {text:string;files:File[];references:ComposerReferenceItem[];missingAttachments:AttachmentName[]};
 type StoredDraft = {text:string;references:ComposerReferenceItem[];attachments:AttachmentName[]};
 type Stored<T> = {revision:number;updatedAt?:string} & T;
@@ -20,7 +22,7 @@ type CacheValue = {draft?:StoredDraft;files?:File[];pending?:PendingComposerSubm
 const emptyDraft = ():ComposerDraftValue => ({text:'',files:[],references:[],missingAttachments:[]});
 const scopeKey = (scope:ComposerDraftScope) => JSON.stringify(scope.kind === 'task' ? {kind:scope.kind,taskId:scope.taskId,conversationId:scope.conversationId} : scope.conversationId ? {kind:scope.kind,conversationId:scope.conversationId} : scope);
 export function composerDraftFingerprint(value:ComposerDraftValue):string {
- const bytes=nacl.hash(new TextEncoder().encode(JSON.stringify({text:value.text,references:value.references.map(item=>item.id),attachments:[...value.files.map(file=>({name:file.name,size:file.size,type:file.type,lastModified:file.lastModified})),...value.missingAttachments]})));
+ const bytes=nacl.hash(new TextEncoder().encode(JSON.stringify({text:value.text,references:value.references.map(item=>item.id),attachments:[...value.files.map(file=>({name:file.name,size:file.size,type:file.type,lastModified:file.lastModified})),...value.missingAttachments.map(metadata)]})));
  return Array.from(bytes,byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 export function clearAcceptedComposerDraft(value:ComposerDraftValue,fingerprint?:string):ComposerDraftValue {
@@ -46,41 +48,72 @@ async function cachePatch(key:string,patch:Partial<CacheValue>) {
   read.onsuccess=()=>store.put({...read.result,...patch},key);transaction.oncomplete=()=>resolve();transaction.onerror=()=>reject(transaction.error);transaction.onabort=()=>reject(transaction.error);
  });
 }
-const metadata=(file:File):AttachmentName=>({name:file.name,size:file.size,type:file.type,lastModified:file.lastModified});
-const serialize=(value:ComposerDraftValue):StoredDraft=>({text:value.text,references:value.references,attachments:[...value.files.map(metadata),...value.missingAttachments]});
+const metadata=(file:Pick<File,'name'|'size'|'type'|'lastModified'>):AttachmentName=>({name:file.name,size:file.size,type:file.type,lastModified:file.lastModified});
+const sameAttachment=(file:Pick<File,'name'|'size'|'type'|'lastModified'>,item:AttachmentName)=>
+ file.name===item.name&&file.size===item.size&&file.type===item.type&&file.lastModified===item.lastModified;
+const serialize=(value:ComposerDraftValue,conversationId=''):StoredDraft=>({
+ text:value.text,references:value.references,attachments:[...value.files.map(file=>{
+  const stored=conversationId&&storedComposerFile(file,conversationId);
+  return {...metadata(file),...(stored?{storageId:stored}:{})};
+ }),...value.missingAttachments],
+});
 const restore=(value:StoredDraft|null|undefined,files:File[]=[]):ComposerDraftValue=>{
  if(!value)return emptyDraft();
  const metadata=value.attachments??[],available=files.filter(file=>file instanceof File&&metadata.some(item=>file.name===item.name&&file.size===item.size&&file.type===item.type&&file.lastModified===item.lastModified));
  return {text:value.text,references:(value.references??[]).map(item=>({...item,name:item.name??item.id,source:item.source??'',detail:item.detail??'',status:item.status??''})),files:available,missingAttachments:metadata.filter(item=>!available.some(file=>file.name===item.name&&file.size===item.size&&file.type===item.type&&file.lastModified===item.lastModified))};
 };
 
+async function restoreLocalFiles(value:StoredDraft|undefined|null, cache:CacheValue|undefined, conversationId:string):Promise<ComposerDraftValue>{
+ const cached=cache?.files??[];
+ if(!value||!conversationId||!value.attachments?.some(item=>item.storageId))return restore(value,cached);
+ const files:File[]=[],missingAttachments:AttachmentName[]=[];
+ const unclaimed=cached.filter(file=>file instanceof File).map(file=>({file,metadata:undefined as AttachmentName|undefined}));
+ for(const metadata of cache?.draft?.attachments??[]){
+  const item=unclaimed.find(item=>!item.metadata&&sameAttachment(item.file,metadata));
+  if(item)item.metadata=metadata;
+ }
+ const loads=value.attachments.map(async item=>{
+  const index=unclaimed.findIndex(buffer=>sameAttachment(buffer.file,item)&&
+   (item.storageId===undefined||item.storageId===buffer.metadata?.storageId));
+  const buffered=index<0?undefined:unclaimed.splice(index,1)[0].file;
+  return {item,file:await readComposerFile(conversationId,item)??buffered};
+ });
+ for(const {item,file} of await Promise.all(loads)){
+  if(file)files.push(file);else missingAttachments.push(item);
+ }
+ return {...restore(value),files,missingAttachments};
+}
+
 /** Local HOME is authoritative; IndexedDB is a truthful offline buffer and remote authority. */
 export function useComposerDraft(scope:ComposerDraftScope, identity:string, remote=false, enabled=true) {
- const key=scopeKey(scope);
+ const key=scopeKey(scope),conversationId=remote?'':scope.conversationId;
  const session=useMemo(()=>({loaded:false,revision:0,pendingRevision:0,cacheKey:'',cache:{} as CacheValue,chain:Promise.resolve(),conflicted:false,latest:emptyDraft(),preloadTextChanged:false,preloadReferencesChanged:false,preloadReplace:false,sequence:0,savedSequence:0,completion:null as {revision:number;fingerprint:string}|null,pendingUpdate:null as {revision:number;pending:PendingComposerSubmission|null}|null,redirects:new Map<string,{revision:number;cacheKey:string;cache:CacheValue}>()}),[key,identity,remote,enabled]);
  const active=useRef(session);active.current=session;
  const [value,setValueState]=useState<ComposerDraftValue>(emptyDraft),[loaded,setLoaded]=useState(false),[status,setStatus]=useState<'loading'|'saving'|'saved'|'buffered'|'error'|'conflict'>('loading'),[error,setError]=useState(''),[pending,setPendingState]=useState<PendingComposerSubmission|null>(null);
  const report=useCallback((state:typeof status,message='')=>{if(active.current===session){setStatus(state);setError(message);}},[session]);
  const buffer=useCallback(async(next:ComposerDraftValue)=>{
   if(!session.cacheKey)return;
-  session.cache={...session.cache,draft:serialize(next),revision:session.revision,unsaved:!remote,files:next.files};
+  session.cache={...session.cache,draft:serialize(next,conversationId),revision:session.revision,unsaved:!remote,files:next.files};
   await cacheWrite(session.cacheKey,session.cache);
- },[session,remote]);
+ },[session,remote,conversationId]);
  const save=useCallback(async(next:ComposerDraftValue,requireDurable=false)=>{
   if(!session.loaded||!enabled||!session.cacheKey)return;
-  const serial=session.sequence,serialized=serialize(next);
+  const serial=session.sequence;
   if(remote){try{await buffer(next);}catch(reason){report('error',(reason as Error).message);throw reason;}session.savedSequence=serial;report('saved');return;}
   if(session.conflicted){if(requireDurable)throw Error('Draft changed in another window');return;}
   report('saving');
   const work=session.chain.catch(()=>{}).then(async()=>{
    if(serial>0&&serial<=session.savedSequence)return;
    try{await buffer(session.latest);}catch(reason){report('error',(reason as Error).message);if(requireDurable&&next.files.length)throw reason;}
+   if(conversationId)for(const file of next.files.filter(file=>file.size>0&&file.size<=20*1024*1024))
+    await stageComposerFile(conversationId,file);
+   const serialized=serialize(next,conversationId);
    const saved=await requestJson<Stored<{draft:StoredDraft}>>('/api/drafts/entry',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:JSON.parse(key),expectedRevision:session.revision,draft:serialized})});
    session.revision=saved.revision;session.savedSequence=serial;session.conflicted=false;
    if(serial===session.sequence){session.cache={...session.cache,draft:serialized,revision:saved.revision,unsaved:false};await cacheWrite(session.cacheKey,session.cache).catch(()=>{});report('saved');}
   });session.chain=work;
   try {await work;}catch(reason){session.conflicted=(reason as {status?:number}).status===409;report(session.conflicted?'conflict':'buffered',(reason as Error).message);if(requireDurable)throw reason;}
- },[session,key,enabled,remote,buffer,report]);
+ },[session,key,enabled,remote,buffer,report,conversationId]);
  useLayoutEffect(()=>{
   setLoaded(false);setStatus('loading');setError('');setValueState(emptyDraft());setPendingState(null);
   if(!enabled)return;
@@ -116,7 +149,7 @@ export function useComposerDraft(scope:ComposerDraftScope, identity:string, remo
    }catch(reason){message=(reason as Error).message;}}
    if(session.pendingUpdate&&session.pendingUpdate.revision>=session.pendingRevision){receipt=session.pendingUpdate.pending;session.pendingRevision=session.pendingUpdate.revision;}
    session.cache={draft,pending:receipt,revision:session.revision,pendingRevision:session.pendingRevision,unsaved:state==='buffered',files:storedBuffer?.files??[]};
-   const incoming=session.latest,restored=restore(draft,storedBuffer?.files);
+   const restored=await restoreLocalFiles(draft,storedBuffer,conversationId),incoming=session.latest;
    if(session.preloadReplace)session.latest=incoming;
    else if(session.sequence){
     const same=(a:AttachmentName,b:AttachmentName)=>a.name===b.name&&a.size===b.size&&a.type===b.type&&a.lastModified===b.lastModified;
@@ -129,7 +162,7 @@ export function useComposerDraft(scope:ComposerDraftScope, identity:string, remo
    if(active.current===session){setValueState(session.latest);setPendingState(receipt);setLoaded(true);setStatus(state);setError(message);}
   })().catch(reason=>{if(active.current===session){setLoaded(true);report('error',(reason as Error).message);}});
   return()=>{removeEventListener('mandala-draft-completed',completed);removeEventListener('mandala-draft-pending',pendingUpdated);if(session.loaded&&session.sequence!==session.savedSequence)void save(session.latest);};
- },[session,key,identity,remote,enabled,save,buffer,report]);
+ },[session,key,identity,remote,enabled,save,buffer,report,conversationId]);
  const setValue=useCallback((next:ComposerDraftValue|((old:ComposerDraftValue)=>ComposerDraftValue))=>{
   const previous=session.latest,updated=typeof next==='function'?next(previous):next;if(!session.loaded){session.preloadTextChanged||=updated.text!==previous.text;session.preloadReferencesChanged||=updated.references!==previous.references;}session.latest=updated;session.sequence++;
   if(active.current===session){setValueState(updated);report('saving');}
@@ -154,10 +187,14 @@ export function useComposerDraft(scope:ComposerDraftScope, identity:string, remo
  },[session,key,remote,identity]);
  const reload=useCallback(async()=>{
   if(remote)return;
+  const sequence=session.sequence;
   const stored=await requestJson<Stored<{draft:StoredDraft|null}>>('/api/drafts/entry?scope='+encodeURIComponent(key));
-  session.revision=stored.revision;session.conflicted=false;session.sequence=0;session.savedSequence=0;session.latest=restore(stored.draft);session.cache={...session.cache,draft:stored.draft??undefined,revision:stored.revision,unsaved:false};await cacheWrite(session.cacheKey,session.cache);
+  const restored=await restoreLocalFiles(stored.draft,session.cache,conversationId);
+  if(active.current!==session||session.sequence!==sequence)return;
+  session.revision=stored.revision;session.conflicted=false;session.sequence=0;session.savedSequence=0;session.latest=restored;
+  session.cache={...session.cache,draft:stored.draft??undefined,files:restored.files,revision:stored.revision,unsaved:false};await cacheWrite(session.cacheKey,session.cache);
   if(active.current===session){setValueState(session.latest);report('saved');}
- },[session,key,remote,report]);
+ },[session,key,remote,report,conversationId]);
  const clearStoredIfMatch=useCallback(async(fingerprint?:string)=>{
   if(remote)throw Error('Local recovery only');
   const stored=await requestJson<Stored<{draft:StoredDraft|null}>>('/api/drafts/entry?scope='+encodeURIComponent(key));
@@ -176,7 +213,7 @@ export function useComposerDraft(scope:ComposerDraftScope, identity:string, remo
  },[identity]);
  const copyToConversation=useCallback(async(conversationId:string,pending?:PendingComposerSubmission)=>{
   const targetKey=scopeKey({kind:'chat',conversationId}),query='?scope='+encodeURIComponent(targetKey),serial=session.sequence;
-  const selectedFiles=session.latest.files,selected=serialize(session.latest);
+  const selectedFiles=session.latest.files,selected=serialize(session.latest,conversationId);
   const work=session.chain.catch(()=>{}).then(async()=>{
    const [existing,recovery]=await Promise.all([requestJson<Stored<{draft:StoredDraft|null}>>('/api/drafts/entry'+query),requestJson<Stored<{pending:PendingComposerSubmission|null}>>('/api/drafts/pending'+query)]);
    const saved=await requestJson<{source:Stored<{draft:null}>;target:Stored<{draft:StoredDraft}>;pending:Stored<{pending:PendingComposerSubmission|null}>}>('/api/drafts/handoff',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:JSON.parse(key),expectedRevision:session.revision,targetConversationId:conversationId,targetExpectedRevision:existing.revision,draft:selected,...pending?{pending,targetPendingExpectedRevision:recovery.revision}:{}})});

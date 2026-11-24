@@ -1,6 +1,6 @@
 import type { ComposerReferenceItem, ComposerReferenceSelection } from './composer-references';
 export type DraftScope = { kind: 'chat' | 'task'; conversationId: string; taskId?: string; projectId?: string; agentId?: string };
-export type DraftAttachment = { name: string; size: number; type: string; lastModified: number };
+export type DraftAttachment = { name: string; size: number; type: string; lastModified: number; storageId?: string };
 export type ComposerDraft = { text: string; references?: (ComposerReferenceSelection | ComposerReferenceItem)[]; attachments?: DraftAttachment[] };
 export type PendingSubmission = {
  conversationId: string; commandKey: string; draftFingerprint?: string; action: 'queue' | 'continue' | 'interrupt';

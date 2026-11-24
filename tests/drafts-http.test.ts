@@ -169,3 +169,30 @@ test('persists new typed object references and exact Unicode message excerpts ac
  expect((await put(scope,0,{text:'Keep existing draft',references})).status).toBe(200);
  expect(await(await get(scope)).json()).toMatchObject({draft:{text:'Keep existing draft',references}});
 });
+
+test('keeps local draft attachment ids scoped and leaves the legacy draft record readable',async()=>{
+ const conversation=chat(),other=chat(),target={kind:'chat',conversationId:conversation.id};
+ const upload=await fetch(url+'/api/drafts/files/'+conversation.id+'?name=kept.txt&type=text%2Fplain&lastModified=9',
+  {method:'POST',headers:{'Content-Type':'application/octet-stream'},body:'test'});
+ expect(upload.status).toBe(201);
+ const {id}=await upload.json();
+ const attachment={name:'kept.txt',type:'text/plain',size:4,lastModified:9,storageId:id};
+ expect((await put(scope,0,{text:'Wrong scope',attachments:[attachment]})).status).toBe(422);
+ expect((await put({...target,conversationId:other.id},0,{text:'Wrong chat',attachments:[attachment]})).status).toBe(422);
+ expect((await put(target,0,{text:'Wrong file',attachments:[{...attachment,name:'other.txt'}]})).status).toBe(422);
+ expect((await put(target,0,{text:'Keep this draft',attachments:[attachment]})).status).toBe(200);
+ const legacy=store.database.prepare("SELECT data FROM local_composer_drafts WHERE scope=? AND record_kind='draft'").get(JSON.stringify(target));
+ expect(JSON.parse(legacy!.data as string).attachments).toEqual([{name:'kept.txt',type:'text/plain',size:4,lastModified:9}]);
+ bindWorkspaceOwner(store,'claimed-owner');
+ await stop();await start();
+ expect(await(await get(target)).json()).toMatchObject({revision:1,draft:{attachments:[attachment]}});
+ const bytes=await request('/api/drafts/files/'+conversation.id+'/'+id);
+ expect(await bytes.text()).toBe('test');
+ expect((await request('/api/drafts/files/'+other.id+'/'+id)).status).toBe(404);
+ expect((await request('/api/conversations/'+conversation.id+'/attachments/'+id+'?download=1')).ok).toBe(false);
+ // An earlier reader can change the record. Its revision must not adopt old attachment IDs.
+ store.database.prepare("UPDATE local_composer_drafts SET revision=2 WHERE scope=?").run(JSON.stringify(target));
+ expect((await(await get(target)).json()).draft.attachments[0]).not.toHaveProperty('storageId');
+ expect((await request('/api/drafts/entry','DELETE',{scope:target,expectedRevision:2})).status).toBe(200);
+ expect((await request('/api/drafts/files/'+conversation.id+'/'+id)).status).toBe(404);
+});
