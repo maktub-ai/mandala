@@ -343,19 +343,19 @@ test.each(['identity','occupancy','submitted','unknown'] as const)('receipt spli
  expect(f.scheduler.enqueueReceiptInput(f.chat.id,result)).toBeNull();
 });
 
-test('prestart failure never takes over an invocation, system input or mismatched conversation',()=>{
- const f=setup(), code='codex_mailbox_setup_failed';
+test.each(['codex_mailbox_setup_failed','native_thread_busy'])('prestart failure %s never takes over an invocation, system input or mismatched conversation',code=>{
+ const f=setup();
  const input=f.scheduler.enqueueUserInput(f.chat.id,'Test only','native-proof');
  expect(f.scheduler.takeNext(f.chat.id)).toMatchObject({input:{id:input.id}});
- expect(f.store.transaction(()=>f.scheduler.failPrestartMailboxInput(input.id,'unrelated',code))).toBe(false);
- expect(f.store.transaction(()=>f.scheduler.failPrestartMailboxInput(input.id,f.chat.id,'generic_failure'))).toBe(false);
+ expect(f.store.transaction(()=>f.scheduler.failPrestartInput(input.id,'unrelated',code))).toBe(false);
+ expect(f.store.transaction(()=>f.scheduler.failPrestartInput(input.id,f.chat.id,'generic_failure'))).toBe(false);
  f.scheduler.bindInputInvocation(input.id,'invocation','synthetic-session',null);
- expect(f.store.transaction(()=>f.scheduler.failPrestartMailboxInput(input.id,f.chat.id,code))).toBe(false);
+ expect(f.store.transaction(()=>f.scheduler.failPrestartInput(input.id,f.chat.id,code))).toBe(false);
  expect(f.scheduler.listUserInputs(f.chat.id)[0]).not.toHaveProperty('prestartFailure');
  f.scheduler.completeUserInput(input.id);
  const system=f.scheduler.enqueueSystemInput(f.chat.id,'Test automation','system-proof',{kind:'schedule',automationId:'synthetic'});
  expect(f.scheduler.takeNext(f.chat.id)).toMatchObject({input:{id:system.id}});
- expect(f.store.transaction(()=>f.scheduler.failPrestartMailboxInput(system.id,f.chat.id,code))).toBe(false);
+ expect(f.store.transaction(()=>f.scheduler.failPrestartInput(system.id,f.chat.id,code))).toBe(false);
  expect(f.scheduler.listUserInputs(f.chat.id).at(-1)).toMatchObject({id:system.id,state:'running'});
 });
 
@@ -370,7 +370,7 @@ test('adding the prestart failure column preserves older rows, indexes and refer
  const upgraded=createTaskScheduler(f.store,f.tasks,{principal:p});
  expect(rowPoints()).toEqual(snapshot);
  expect(upgraded.takeNext(f.chat.id)).toMatchObject({input:{id:first.id}});
- expect(f.store.transaction(()=>upgraded.failPrestartMailboxInput(first.id,f.chat.id,code))).toBe(true);
+ expect(f.store.transaction(()=>upgraded.failPrestartInput(first.id,f.chat.id,code))).toBe(true);
  expect(upgraded.takeNext(f.chat.id)).toMatchObject({input:{id:second.id}});
  // The older worker only selects queued rows, and the older submission
  // consumer already treats a physical cancelled receipt as not executed.

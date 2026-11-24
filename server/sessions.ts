@@ -1306,12 +1306,13 @@ export function createSessionManager(
       if(recoveredReceipt||deferredReceipt)current.queuedInputId=undefined;
       revokeBusinessCli(current);
       const failureInputId = current.queuedInputId;
-      const failedQueueInput = !!(mailboxFailure && failureInputId && !task && !messageOrigin && !inputSource &&
+      const prestartQueueCode = nativeThreadBusy ? 'native_thread_busy' : mailboxFailure?.code;
+      const failedQueueInput = !!(prestartQueueCode && failureInputId && !task && !messageOrigin && !inputSource &&
         owner.kind==='input' && owner.id===failureInputId && current.runId===invocationId &&
         store.transaction(()=>{
-          if(!scheduler.failPrestartMailboxInput(failureInputId,id,mailboxFailure.code))return false;
+          if(!scheduler.failPrestartInput(failureInputId,id,prestartQueueCode))return false;
           resources.releaseUnsubmitted('input',failureInputId);
-          appendEvent(id,'error',{message:mailboxFailure.message,queuedInputId:failureInputId,code:mailboxFailure.code,nativeTurnSubmitted:false});
+          appendEvent(id,'error',{message:error.message,queuedInputId:failureInputId,code:prestartQueueCode,nativeTurnSubmitted:false});
           return true;
         }));
       if(failedQueueInput)current.queuedInputId=undefined;

@@ -72,6 +72,13 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
    CHECK(prestart_failure_code IS NULL OR (state='cancelled' AND prestart_failure_code IN (${Object.keys(codexMailboxErrors).map(code=>`'${code}'`).join(',')})))`);
   db.prepare('INSERT INTO schema_migrations VALUES (?,?)').run(key, new Date().toISOString());
  });
+ // Keep the existing mailbox-code CHECK intact on databases already migrated.
+ store.transaction(() => {
+  const key='chat_input_004_native_writer_conflict';
+  if(db.prepare('SELECT key FROM schema_migrations WHERE key=?').get(key))return;
+  db.exec("ALTER TABLE task_user_inputs ADD COLUMN native_writer_conflict INTEGER NOT NULL DEFAULT 0 CHECK(native_writer_conflict=0 OR (native_writer_conflict=1 AND state='cancelled'))");
+  db.prepare('INSERT INTO schema_migrations VALUES (?,?)').run(key,new Date().toISOString());
+ });
  db.exec('CREATE TABLE IF NOT EXISTS task_receipt_inputs(receipt_id TEXT PRIMARY KEY REFERENCES task_receipts(id),input_id TEXT NOT NULL REFERENCES task_user_inputs(id))');
  // Older recoveries left these links behind. The recovery event proves the input never reached native submission.
  db.exec(`DELETE FROM task_receipt_inputs AS link WHERE EXISTS (
@@ -88,7 +95,7 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
   if (!store.getConversation(id)) fail('conversation_not_found', 404);
   if (db.prepare('SELECT id FROM task_user_inputs WHERE conversation_id=? AND owner_user_id<>? LIMIT 1').get(id, principal.userId)) fail('forbidden', 403);
  };
- const inputRow = (r: Record<string, unknown>): QueuedInput => ({ ...(r.source?{source:JSON.parse(r.source as string)}:{}), ...(options.inputMetadata?.(r.id as string)?{agentMessage:options.inputMetadata!(r.id as string)}:{}), commandKey: r.command_key as string, id: r.id as string, conversationId: r.conversation_id as string, text: r.text as string, state: r.state as QueuedInput['state'], createdAt: r.created_at as string, ...(r.state==='cancelled' && isCodexMailboxErrorCode(r.prestart_failure_code)?{prestartFailure:{code:r.prestart_failure_code}}:{}), ...(r.unrecorded ? { unrecorded: true } : {}), ...(r.attachments !== "[]" ? { attachments: JSON.parse(r.attachments as string) } : {}), ...(r.reference_selections !== "[]" ? { references: JSON.parse(r.reference_selections as string) } : {}) });
+ const inputRow = (r: Record<string, unknown>): QueuedInput => ({ ...(r.source?{source:JSON.parse(r.source as string)}:{}), ...(options.inputMetadata?.(r.id as string)?{agentMessage:options.inputMetadata!(r.id as string)}:{}), commandKey: r.command_key as string, id: r.id as string, conversationId: r.conversation_id as string, text: r.text as string, state: r.state as QueuedInput['state'], createdAt: r.created_at as string, ...(r.state==='cancelled' && r.native_writer_conflict===1?{prestartFailure:{code:'native_thread_busy'}}:r.state==='cancelled' && isCodexMailboxErrorCode(r.prestart_failure_code)?{prestartFailure:{code:r.prestart_failure_code}}:{}), ...(r.unrecorded ? { unrecorded: true } : {}), ...(r.attachments !== "[]" ? { attachments: JSON.parse(r.attachments as string) } : {}), ...(r.reference_selections !== "[]" ? { references: JSON.parse(r.reference_selections as string) } : {}) });
  const loadInput = (id: string) => {
   const row = db.prepare('SELECT * FROM task_user_inputs WHERE id=?').get(id);
   if (!row) return fail('input_not_found', 404);
@@ -317,18 +324,19 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
   },
   // Called in the session's transaction with the original owned queue row,
   // matching visible error, and release of only its unsubmitted claim.
-  failPrestartMailboxInput(id:string, conversationId:string, code:unknown):boolean {
+  failPrestartInput(id:string, conversationId:string, code:unknown):boolean {
    root();
-   if(!db.isTransaction||!isCodexMailboxErrorCode(code))return false;
+   const writerConflict=code==='native_thread_busy';
+   if(!db.isTransaction||!writerConflict&&!isCodexMailboxErrorCode(code))return false;
    const input=loadInput(id);
    if(input.conversationId!==conversationId||input.state!=='running'||input.source||!isHumanInput(input))return false;
    if(db.prepare('SELECT 1 FROM task_receipt_inputs WHERE input_id=?').get(id))return false;
    const hasClaims=db.prepare("SELECT 1 FROM sqlite_master WHERE name='task_directory_claims'").get();
    if(hasClaims&&db.prepare("SELECT 1 FROM task_directory_claims WHERE kind='input' AND owner_id=? AND (submitted<>0 OR conversation_id<>?)").get(id,conversationId))return false;
-   const changed=db.prepare(`UPDATE task_user_inputs SET state='cancelled',prestart_failure_code=?
+   const changed=db.prepare(`UPDATE task_user_inputs SET state='cancelled',prestart_failure_code=?,native_writer_conflict=?
     WHERE id=? AND conversation_id=? AND owner_user_id=? AND state='running' AND source IS NULL
      AND NOT EXISTS(SELECT 1 FROM task_input_invocations WHERE input_id=?)
-     AND NOT EXISTS(SELECT 1 FROM task_native_uncertainty WHERE kind='input' AND claim_id=?)`).run(code,id,conversationId,principal.userId,id,id).changes;
+     AND NOT EXISTS(SELECT 1 FROM task_native_uncertainty WHERE kind='input' AND claim_id=?)`).run(writerConflict?null:code as string,writerConflict?1:0,id,conversationId,principal.userId,id,id).changes;
    if(!changed)return false;
    event('task.user_input_prestart_failed',id,{inputId:id,conversationId,code,nativeTurnSubmitted:false});
    return true;

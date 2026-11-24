@@ -11,7 +11,7 @@ import { DomainError } from "../shared/workspace-contracts";
 import type { OmpOptions } from "../server/omp";
 import { createKnowledge, updateKnowledge } from "../server/knowledge";
 import { getUsage } from '../server/usage';
-import { groupChatTurns } from '../src/chatTurns';
+import { groupChatTurns, recoverableUnsubmittedDraft } from '../src/chatTurns';
 
 it('records conversation usage with actual invocation identity and preserves consumed tokens on interruption',async()=>{
  const c=await manager.create('p','a');await manager.send(c.id,'Use native accounting');
@@ -2005,4 +2005,41 @@ it.each(['getCliStatus','listModels'] as const)('%s reads runtime settings witho
  const result=await manager[method]('p','codex',{agentId:'a'});
  expect(result).toEqual(method==='listModels'?[{id:'native-model',label:'Native'}]:{status:'ready',version:'0.154.0'});
  expect(options.extraArgs).toEqual(['--strict-config']);
+});
+
+it.each(['direct','queued'] as const)('preserves the same native thread without replay until a human retries a %s writer-conflict request',async mode=>{
+ await manager.close();
+ const nativeId='fixture-original-native-thread';
+ let held=true;
+ manager=createSessionManager(store,async()=>config,async o=>({
+  ...await factory(o),
+  resumeThread:async id=>{ resumed.push(id); if(held)throw new DomainError('native_thread_busy',409,'Codex conversation is open in another client'); },
+ }));
+ const chat=await manager.create('p','a');
+ store.updateConversation(chat.id,{nativeId});
+ const text='Synthetic repeat only after manual release';
+ let inputId:string|undefined;
+ if(mode==='queued'){
+  const original=manager.enqueueUserInput(chat.id,text,'writer-first-request');
+  inputId=original.id;
+  await expect.poll(()=>manager.listUserInputs(chat.id).find(i=>i.id===inputId)).toMatchObject({state:'cancelled',prestartFailure:{code:'native_thread_busy'}});
+  await expect(manager.sendQueuedInput(chat.id,inputId)).rejects.toMatchObject({code:'input_not_queued'});
+ }else await expect(manager.send(chat.id,text)).rejects.toMatchObject({code:'native_thread_busy'});
+ expect(store.getConversation(chat.id)?.nativeId).toBe(nativeId);
+ expect(turns).toEqual([]);
+ expect(resumed).toEqual([nativeId]);
+ const events=store.listEvents(chat.id,0);
+ expect(events.filter(e=>e.kind==='error')).toEqual([expect.objectContaining({data:expect.objectContaining({code:'native_thread_busy',nativeTurnSubmitted:false,...(inputId?{queuedInputId:inputId}:{})})})]);
+ const saved=events.filter(e=>e.kind==='user');
+ expect(saved).toHaveLength(1);
+ expect(recoverableUnsubmittedDraft(groupChatTurns(events),'error')).toBe(saved[0].id);
+ held=false;
+ await new Promise(resolve=>setTimeout(resolve,40));
+ expect(turns).toEqual([]);
+ expect(resumed).toEqual([nativeId]);
+ await manager.send(chat.id,text);
+ expect(turns).toHaveLength(1);
+ expect(resumed).toEqual([nativeId,nativeId]);
+ expect(store.getConversation(chat.id)?.nativeId).toBe(nativeId);
+ if(inputId)expect(manager.listUserInputs(chat.id).find(i=>i.id===inputId)?.state).toBe('cancelled');
 });
