@@ -82,3 +82,17 @@ the Windows constructor therefore returns unavailable unless desktop main
 supplies a reviewed native NTFS ACL/identity and namespace-durability adapter.
 Do not silently skip that step or claim power-loss tolerance on Windows from
 these process-restart tests.
+
+A separately maintained SQLite journal candidate uses the stock SQLite VFS
+and a dedicated, preprovisioned database. It will not initialize a missing
+database or use the Mandala chat database. It requires a main-owned local
+private directory/ACL predicate, exact schema and identity, DELETE journaling
+and EXTRA synchronous writes. Corrupt or incomplete ownership is unknown,
+not eligible to retry. Pending ownership is committed before any handoff.
+
+Run `node --test desktop/windows-sqlite-handoff-journal.test.mjs` in a
+clean local fixture. Native Windows tests cover child-process conflict and
+abrupt exit, not physical power loss. They provide a scratch-only path
+predicate rather than evidence of packaged Windows directory ACL validation.
+This optional module is not bundled, has no production caller, and cannot
+enable update download, execution or recovery on its own.
