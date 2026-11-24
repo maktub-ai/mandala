@@ -6,6 +6,14 @@ import {join} from 'node:path';
 import {test} from 'node:test';
 import {prepareWindowsReceipt} from '../scripts/windows-release-receipt.mjs';
 
+function journal(){
+  let state=null, owner;
+  return { read:()=>state,
+    tryBegin(){if(state)return null; state='pending'; return owner=Symbol();},
+    settle(token,result){assert.equal(token,owner); state=result; return true;}
+  };
+}
+
 test('only exact signed Windows bytes and a bound trusted native publisher can reach the idle install gate', async () => {
   const {createWindowsUpdateGate,createWindowsInstallAction} = await import('./public-windows-update.cjs');
   const scratch = await mkdtemp(join(tmpdir(),'mandala-win-update-'));
@@ -80,16 +88,16 @@ test('only exact signed Windows bytes and a bound trusted native publisher can r
     const {createUpdateController}=await import('./updates.cjs');
     let stage={version:expected.version,publicWindows:true,notes:'https://example.invalid',size:data.length};
     const controller=createUpdateController({version:'1.0.4',platform:'win32',arch:'x64',
-      publicWindows:{ready:()=>stage},
+      publicWindows:{ready:()=>stage}, handoffJournal:journal(),
       async installPublic(){const result=await action(); if(result==='started')stage=null; return result;},
     });
     assert.equal(controller.state().status,'ready');
     await controller.check('auto');
     assert.equal(launches,2);
     await controller.install();
-    assert.equal(controller.state().status,'idle');
+    assert.equal(controller.state().status,'handoff');
     assert.equal(launches,3);
-    assert.deepEqual(calls,['confirm','check drafts','block input','check drafts','drain','claim','release','unblock input']);
+    assert.deepEqual(calls,['confirm','check drafts','block input','check drafts','drain','claim']);
   } finally { await rm(scratch,{recursive:true,force:true}); }
 });
 
@@ -107,7 +115,7 @@ test('Windows signed candidate only invokes confirmed guarded handoff from expli
   };
   const controller=createUpdateController({version:'1.0.4',platform:'win32',arch:'x64',
     fetch:async()=>({ok:true,json:async()=>({schema:1,releases:[{tag,url:notes,assets:[{name,url,size:42}]}]})}),
-    publicWindows, installPublic:async()=>{installations++; return handoff;},
+    publicWindows, handoffJournal:journal(), installPublic:async()=>{installations++; return handoff;},
     showMessage:async()=>{confirmations++; return {response:0};},openExternal:()=>{external++;}
   });
   assert.equal((await controller.check('auto')).channel,'signed-windows');
@@ -160,7 +168,7 @@ test('Windows confirmation prevents premature drain and recovers the unchanged r
   assert.deepEqual(calls.splice(0),['confirm','unload','verified','block','unload','idle-drain','claim','unblock','resume']);
   lease=true; final='unknown';
   assert.equal(await install(),'unknown');
-  assert.deepEqual(calls.splice(0),['confirm','unload','verified','block','unload','idle-drain','claim','native','release','unblock']);
+  assert.deepEqual(calls.splice(0),['confirm','unload','verified','block','unload','idle-drain','claim','native','release']);
   assert.equal(await install(),'unknown','unknown native handoff never retries');
   assert.deepEqual(calls,[]);
 });
@@ -185,4 +193,31 @@ test('ordinary Windows never activates a signed adapter or install from release 
   assert.equal(external,null);
   await controller.download();
   assert.equal(external,url);
+});
+
+
+test('a durable pending or started Windows handoff blocks new calls and survives reopening Settings and app restart', async ()=>{
+  const {createUpdateController}=await import('./updates.cjs');
+  let attempts=0, resolve;
+  const ready={publicWindows:true,version:'1.1.1',size:8,notes:'https://example.invalid'};
+  const handoffJournal=journal();
+  const configure=()=>createUpdateController({version:'1.0.4',platform:'win32',arch:'x64',
+    publicWindows:{ready:()=>ready},handoffJournal,
+    installPublic:()=>{attempts++; return new Promise(r=>{resolve=r;});}
+  });
+  const first=configure();
+  const pending=first.install();
+  assert.equal(handoffJournal.read(),'pending');
+  const reopened=configure();
+  assert.equal(reopened.state().error,'signed_handoff_unknown');
+  await reopened.install();
+  await first.install();
+  assert.equal(attempts,1);
+  resolve('started');
+  await pending;
+  assert.equal(first.state().status,'handoff');
+  assert.equal(configure().state().status,'handoff');
+  await first.check('auto');
+  await first.install();
+  assert.equal(attempts,1);
 });

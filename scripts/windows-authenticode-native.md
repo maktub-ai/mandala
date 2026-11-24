@@ -58,3 +58,15 @@ a known prelaunch failure. An uncertain handoff is not retried. Neither
 restart, installed build verification, nor rollback after the installer
 starts is proven. Keep the production feature disabled until a trusted
 release fixture, the exact native handoff and durable recovery are verified.
+
+A Windows signed source is only selectable when the desktop owner supplies
+a durable handoff journal. Its `tryBegin()` contract is an atomic,
+exclusive pending checkpoint; `settle(token, outcome)` must only settle
+the token it owns. A new process finding pending treats it as an unknown
+handoff, not as a stale lock to clear. Started and unknown retain the
+current main process's input and quiescent-home barriers. A reconciler
+would need to check the installed version and the native handoff's
+persistent outcome before restoring workspace admission; there is no
+such component bundled yet. The in-process fixture intentionally tests
+the journal interface and reopening against shared state, not a
+real filesystem journal surviving a reboot.

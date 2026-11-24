@@ -24,10 +24,10 @@ function createWindowsUpdateGate({version,arch,trust,native}) {
   const {publicKey,publisherSpkiSha256}=trust;
   const withLockedInstaller=native.withLockedInstaller.bind(native);
   let pending=false;
-  let launchAttempted=false;
+  let heldHomeLease=null;
   return Object.freeze({
     async install(input, authorize) {
-      if(pending||launchAttempted) return 'busy';
+      if(pending||heldHomeLease) return 'busy';
       pending=true;
       try {
         const {path,receipt,signature,version:offered}=input??{};
@@ -54,16 +54,16 @@ function createWindowsUpdateGate({version,arch,trust,native}) {
               if(!accepting) throw reject();
               // Once handed off, even unknown completion requires reconciliation;
               // this instance never resends an install command.
-              launchAttempted=true;
+              heldHomeLease=release;
               try { result=await start()==='started'?'started':'unknown'; }
               catch { result='unknown'; }
-            } finally { await release(); }
+            } finally { if (!heldHomeLease) await release(); }
           });
         } finally {accepting=false;}
         if (!result) throw reject();
         return result;
       } catch {
-        if(launchAttempted)return 'unknown';
+        if(heldHomeLease)return 'unknown';
         throw reject();
       } finally {pending=false;}
     }
@@ -101,7 +101,7 @@ function createWindowsInstallAction({confirm,canUnload,inhibitInput,stopIfIdle,c
       throw error;
     } finally {
       try {
-        if(blocked)inhibitInput(false);
+        if(blocked&&!terminal)inhibitInput(false);
         if(recover)await resumeUnchanged();
       } finally {pending=false;}
     }

@@ -3,7 +3,7 @@ export type DesktopUpdate = { version: string } & ({ local: true; publicMac?: fa
 export type DesktopUpdateState = {
   supported: boolean;
   channel: 'unsupported' | 'installer' | 'local' | 'signed-mac' | 'signed-windows';
-  current: string; status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'installing' | 'current' | 'error';
+  current: string; status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'installing' | 'handoff' | 'current' | 'error';
   update: DesktopUpdate | null; checkedAt: number | null; autoCheck: boolean; error: string | null;
 };
 export type DesktopUpdates = {

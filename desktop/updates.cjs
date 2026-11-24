@@ -65,16 +65,24 @@ async function checkForUpdate({ version, platform, arch, fetch = globalThis.fetc
 const memoryStore = () => { let saved = {}; return { read: () => saved, write: value => { saved = value; } }; };
 // Keeps the update state for the menu, the settings page and the background schedule.
 // mode: 'auto' (silent; notifies once per version), 'menu' (native dialogs), 'settings' (the page shows the result).
-function createUpdateController({ version, platform, arch, fetch, local, publicMac, publicWindows, installPublic = async () => false, readyToQuit = () => {}, store = memoryStore(), now = Date.now, isActive = () => true, showMessage, openExternal, notify = () => {}, onChange = () => {} }) {
+function createUpdateController({ version, platform, arch, fetch, local, publicMac, publicWindows, handoffJournal, installPublic = async () => false, readyToQuit = () => {}, store = memoryStore(), now = Date.now, isActive = () => true, showMessage, openExternal, notify = () => {}, onChange = () => {} }) {
   let saved = {};
   try { const value = store.read(); if (value && typeof value === 'object') saved = value; } catch { /* Start fresh. */ }
   const supported = platform === 'darwin' || platform === 'win32';
-  const signed = local ? null : platform === 'darwin' ? publicMac : platform === 'win32' ? publicWindows : null;
+  // A Windows source is not eligible without a main-owned, durable journal.
+  const signed = local ? null : platform === 'darwin' ? publicMac : platform === 'win32' &&
+    ['read','tryBegin','settle'].every(key=>typeof handoffJournal?.[key]==='function') ? publicWindows : null;
   const isSigned = update => !!signed && (platform === 'darwin' ? update?.publicMac === true : update?.publicWindows === true);
   const channel = !supported ? 'unsupported' : local ? 'local' : signed ? platform === 'darwin' ? 'signed-mac' : 'signed-windows' : 'installer';
   const localInfo = build => build && { version: build.version, local: true };
-  const staged = localInfo(local?.ready()) ?? signed?.ready();
-  let state = { supported, channel, current: version, status: staged ? 'ready' : 'idle', update: staged ?? null, checkedAt: Number.isFinite(saved.checkedAt) ? saved.checkedAt : null, autoCheck: saved.autoCheck !== false, error: null };
+  const winJournal = channel === 'signed-windows' ? handoffJournal : null;
+  // 'pending' is indistinguishable from a lost native acknowledgement after a restart.
+  const settled = value => value === 'started' ? {status:'handoff',update:null,error:null} :
+    {status:'error',update:null,error:'signed_handoff_unknown'};
+  const readHandoff = () => { try { return winJournal ? winJournal.read() : null; } catch { return 'unknown'; } };
+  const initialHandoff=readHandoff();
+  const staged = initialHandoff === null ? localInfo(local?.ready()) ?? signed?.ready() : null;
+  let state = { supported, channel, current: version, status: staged ? 'ready' : 'idle', update: staged ?? null, checkedAt: Number.isFinite(saved.checkedAt) ? saved.checkedAt : null, autoCheck: saved.autoCheck !== false, error: null, ...initialHandoff !== null ? settled(initialHandoff) : {} };
   let pending = null;
   const persist = () => { try { store.write({ autoCheck: state.autoCheck, checkedAt: state.checkedAt, notified: saved.notified ?? null }); } catch { /* Convenience only. */ } };
   const set = patch => { state = { ...state, ...patch }; if (isActive()) onChange(state); };
@@ -97,19 +105,37 @@ function createUpdateController({ version, platform, arch, fetch, local, publicM
     if (state.status !== 'ready' || !isSigned(state.update) || !isActive()) return;
     const update = state.update;
     set({ status: 'installing' });
-    let handoff;
-    try { handoff = await installPublic(update); }
-    finally {
-      if (update.publicWindows && handoff === 'unknown') set({status:'error',update:null,error:'signed_handoff_unknown'});
-      else {
-        const staged=signed?.ready();
-        set(staged ? {status:'ready',update:staged} : {status:'idle',update:null});
+    if (update.publicWindows) {
+      let token;
+      // This must atomically persist pending before confirmation or native
+      // handoff. Only the journal's owner may clear a known prelaunch outcome.
+      try { token=winJournal.tryBegin(); } catch { /* Fail closed. */ }
+      if (token == null) { set(settled(readHandoff())); return; }
+      let outcome='unknown';
+      try {
+        const result=await installPublic(update);
+        if (['busy','cancelled','unsaved','prelaunch_failed'].includes(result)) outcome=null;
+        else if (result==='started') outcome='started';
+      } finally {
+        try { if(winJournal.settle(token,outcome)!==true) outcome='unknown'; }
+        catch {outcome='unknown';}
+        if(outcome!==null) set(settled(outcome));
+        else {
+          const staged=signed.ready();
+          set(staged ? {status:'ready',update:staged} : {status:'idle',update:null});
+        }
       }
+      return;
+    }
+    try { await installPublic(update); }
+    finally {
+      const staged=signed?.ready();
+      set(staged ? {status:'ready',update:staged} : {status:'idle',update:null});
     }
   };
   // One request at a time; callers that arrive meanwhile share its result.
   const refresh = () => pending ??= (async () => {
-    if (state.error === 'signed_handoff_unknown' || ['ready','downloading','installing'].includes(state.status)) return;
+    if (state.error === 'signed_handoff_unknown' || ['ready','downloading','installing','handoff'].includes(state.status)) return;
     set({ status: 'checking', error: null });
     try {
       const installer = local ? null : await checkForUpdate({ version, platform, arch, fetch });
@@ -125,6 +151,7 @@ function createUpdateController({ version, platform, arch, fetch, local, publicM
     } else if (mode === 'menu') {
       if (status === 'ready') { if (isSigned(update)) await install(); else await readyToQuit(); }
       else if (status === 'downloading' || status === 'installing') return;
+      else if (status === 'handoff') await showMessage({type:'info',title:'Update handed off',message:'The installer is starting. Mandala has not yet verified that installation finished.',buttons:['OK']});
       else if (status === 'error') await showMessage({ type: 'warning', title: 'Could not check for updates', message: state.error === 'signed_handoff_unknown' ? 'Mandala could not confirm that the installer opened. Check Windows before trying again.' : state.error === 'signed_verification' ? 'Could not verify the signed update. The current app was not changed.' : 'Check your connection and try again later. You can keep using Mandala.', buttons: ['OK'] });
       else if (status === 'available') {
         const externalInstaller = !update.local && !isSigned(update);
