@@ -165,6 +165,9 @@ export function openStore(home: string, maintenanceToken?:symbol): Store {
     END;`);
   db.exec(`CREATE INDEX IF NOT EXISTS events_native_context_reset ON events(conversationId,id)
     WHERE kind='metadata' AND json_extract(data,'$.nativeContextReset.reason')='receipt_access_revoked'`);
+  db.exec(`CREATE INDEX IF NOT EXISTS events_native_execution_boundary ON events(conversationId,id)
+    WHERE kind='metadata' AND superseded=0 AND json_type(data,'$.nativeExecutionBoundary.version')='integer'
+      AND json_extract(data,'$.nativeExecutionBoundary.version')=1`);
   db.exec(`CREATE INDEX IF NOT EXISTS events_context ON events(conversationId,kind,id)
     WHERE superseded=0 AND kind IN ('user','metadata')`);
   db.exec(`CREATE INDEX IF NOT EXISTS events_memory_history ON events(conversationId,id)

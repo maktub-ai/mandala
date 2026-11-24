@@ -56,13 +56,17 @@ it('queues racing human text and references until native maintenance settles',as
  e.options.onEvent({method:'turn/completed',params:{threadId:e.native,turn:{id:'compact',status:'completed'}}});await maintenance;
  await expect.poll(()=>entries.at(-1)?.text).toBe('Do not lose me');
 });
-it('falls back on unsupported compression with a bounded public excerpt, preserving the security cutoff',async()=>{
+it.each([
+ ['receipt revocation',{nativeContextReset:{reason:'receipt_access_revoked'}}],
+ ['execution-only boundary',{nativeExecutionBoundary:{version:1}}],
+] as const)('falls back on unsupported compression without replaying old context after %s',async(_reason,marker)=>{
  const {manager,chat,entries,finish,age,store}=await setup('unsupported');await manager.send(chat.id,'Old secret');finish();
- const cutoff=store.appendEvent(chat.id,'metadata',{nativeContextReset:{reason:'receipt_access_revoked'}}).id;
+ const cutoff=store.appendEvent(chat.id,'metadata',marker).id;
  store.appendEvent(chat.id,'user',{text:'Current public request'});store.appendEvent(chat.id,'text',{text:'PRIVATE_REASONING',phase:'analysis'});age();
  await manager.maintainMandalaContext();expect(store.getConversation(chat.id)).toMatchObject({nativeId:null,continuityPending:true});
  expect(mandalaContextBoundary(store,chat.id)).toBe(cutoff);
  await manager.send(chat.id,'Next');expect(entries.at(-1)?.text).toContain('Current public request');expect(entries.at(-1)?.text).not.toContain('Old secret');expect(entries.at(-1)?.text).not.toContain('PRIVATE_REASONING');
+ expect(store.listEvents(chat.id,0).find(e=>e.kind==='user')?.data).toMatchObject({text:'Old secret'});
 });
 it('native automatic compaction satisfies the watermark and does not trigger a duplicate request',async()=>{
  const {manager,chat,entries,finish,age}=await setup();await manager.send(chat.id,'Hello');

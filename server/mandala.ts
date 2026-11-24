@@ -40,7 +40,12 @@ export function mandalaInstructions(config: Config, conversation: Conversation):
 // Server-only execution boundary. Historical read APIs deliberately keep their full ACL checks.
 export function mandalaContextBoundary(store: Store, id: string): number {
   if (store.getConversation(id)?.purpose !== 'mandala-main') return 0;
-  return Number(store.database.prepare("SELECT id FROM events WHERE conversationId=? AND kind='metadata' AND json_extract(data,'$.nativeContextReset.reason')='receipt_access_revoked' ORDER BY id DESC LIMIT 1").get(id)?.id ?? 0);
+  const revoked=store.database.prepare("SELECT id FROM events WHERE conversationId=? AND kind='metadata' AND json_extract(data,'$.nativeContextReset.reason')='receipt_access_revoked' ORDER BY id DESC LIMIT 1").get(id);
+  // Read compatibility only: no operation writes this marker until rollback readers honor it.
+  const reset=store.database.prepare(`SELECT id FROM events WHERE conversationId=? AND kind='metadata'
+    AND superseded=0 AND json_type(data,'$.nativeExecutionBoundary.version')='integer'
+    AND json_extract(data,'$.nativeExecutionBoundary.version')=1 ORDER BY id DESC LIMIT 1`).get(id);
+  return Math.max(Number(revoked?.id??0),Number(reset?.id??0));
 }
 
 export function mandalaContinuity(store: Store, id: string, reason: 'runtime'|'maintenance' = 'runtime', after = 0, before = Infinity): string {
