@@ -15,7 +15,7 @@ export function RuntimeProbeSummary({status}:{status:CliStatus}){
   if(detail.executable==='broken')return <small>{l('启动命令的链接指向不存在的文件。','Launcher link points to a missing file.')}</small>;
   if(detail.executable==='blocked')return <small>{l('找到了启动路径，但该文件不能执行。','A launcher path exists but is not executable.')}</small>;
   if(detail.failureStage==='launch')return <small>{l('未能启动或初始化原生 CLI。请在同一台电脑检查安装及版本。','Could not start the native CLI or initialize its connection. Check its installation and supported version on this computer.')}</small>;
-  if(detail.failureStage==='probe')return <small>{l('原生 CLI 已启动，但未通过就绪检查。请在原生工具中检查配置和版本。','The native CLI started, but its readiness check failed. Review its native settings and supported version.')}</small>;
+  if(detail.failureStage==='probe')return <small>{l('原生 CLI 未通过就绪检查。请在原生工具中检查配置和版本。','The native CLI readiness check failed. Review its native settings and supported version.')}</small>;
   if(detail.executable==='not-verified')return <small>{l('未能验证执行端。请检查这台电脑上的安装和运行设置。','The runtime could not be verified. Check its installation and runtime settings.')}</small>;
   return <small>{l('找到了启动命令，但启动或协议检查失败。','The launcher was found, but startup or its protocol check failed.')}</small>;
  }
