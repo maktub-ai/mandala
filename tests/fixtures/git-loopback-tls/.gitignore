@@ -1,0 +1,4 @@
+# Public synthetic Git TLS fixtures only. Never add a CA signing key.
+!/ca.pem
+!/server.pem
+!/server-key.pem
