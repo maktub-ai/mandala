@@ -103,7 +103,7 @@ Every package is reviewed before it is listed, and the app installs only the exa
 
 ## Get started
 
-**Desktop.** Download macOS (`.dmg`, Apple Silicon) or Windows (`.exe`) from [mandala.pub](https://mandala.pub) or [Releases](https://github.com/maktub-ai/mandala-releases/releases). Installers are not yet code-signed: on macOS, right-click Mandala.app and choose **Open** the first time; on Windows, choose **More info → Run anyway** in SmartScreen. Verify downloads against `SHA256SUMS.txt`.
+**Desktop.** Download macOS (`.dmg`, Apple Silicon) or Windows (`.exe`, x64) from [mandala.pub](https://mandala.pub) or [Releases](https://github.com/maktub-ai/mandala-releases/releases). The macOS app is ad-hoc signed and not notarized by Apple; the Windows installer is unsigned. Your operating system may block installation or launch. Compare the download’s SHA-256 with the `SHA256SUMS.txt` in the same release to check file integrity. A matching checksum does not certify safety or justify overriding warnings. On macOS, see [Apple’s guidance on opening apps safely](https://support.apple.com/en-us/102445).
 
 **From source.** Requires Node.js 22.23.2 or later, and at least one supported CLI that already works in your terminal.
 

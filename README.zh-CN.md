@@ -103,7 +103,7 @@ Mandala 的源码是公开的，围绕它的一切也是。主题、语言包和
 
 ## 快速开始
 
-**桌面版。** 从 [官网](https://mandala.pub) 或 [Releases](https://github.com/maktub-ai/mandala-releases/releases) 下载 macOS（`.dmg`，Apple Silicon）或 Windows（`.exe`）安装包。安装包暂未做代码签名：macOS 首次打开请右键 Mandala.app 选择「打开」；Windows 在 SmartScreen 提示中选择「更多信息 → 仍要运行」。下载后可用 `SHA256SUMS.txt` 校验。
+**桌面版。** 从 [官网](https://mandala.pub) 或 [Releases](https://github.com/maktub-ai/mandala-releases/releases) 下载 macOS（`.dmg`，Apple 芯片）或 Windows（`.exe`，x64）版。macOS 应用使用临时签名，未经 Apple 公证；Windows 安装包未签名。系统可能阻止安装或启动。请对照同一发布版本中的 `SHA256SUMS.txt` 核对下载文件的完整性。校验值一致不代表应用安全，也不是忽略系统警告的依据。macOS 用户可参考 [Apple 的安全打开应用指南](https://support.apple.com/zh-cn/102445)。
 
 **从源码运行。** 需要 Node.js 22.23.2 或更高版本，以及至少一个已在终端里能正常使用的受支持 CLI。
 
