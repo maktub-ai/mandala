@@ -70,3 +70,15 @@ persistent outcome before restoring workspace admission; there is no
 such component bundled yet. The in-process fixture intentionally tests
 the journal interface and reopening against shared state, not a
 real filesystem journal surviving a reboot.
+
+The isolated filesystem journal writes an exclusive pending checkpoint
+before returning its owner token and stores the matching started/unknown
+outcome in a separate exclusive record. It synchronizes file and namespace,
+never clears malformed, unmatched or uncertain state, and never puts owner
+tokens in the user-visible update state. Tests spawn separate processes on a
+private local directory and reconstruct the controller from the checkpoint.
+Windows does not expose directory synchronization through the same Node API;
+the Windows constructor therefore returns unavailable unless desktop main
+supplies a reviewed native NTFS ACL/identity and namespace-durability adapter.
+Do not silently skip that step or claim power-loss tolerance on Windows from
+these process-restart tests.
