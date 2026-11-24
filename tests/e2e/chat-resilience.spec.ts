@@ -129,7 +129,23 @@ test('a lost interrupt-and-send receipt is checked without repeating the interru
 });
 
 
-test('writer conflict retains the submitted request and attachment across reload and copies them into a new draft', async ({ page, request }) => {
+// Exercise the writer conflict without unrelated asynchronous memory jobs
+// affecting its intentionally conservative chronological recovery predicate.
+const writerConflictTest = test.extend<{ quietMemory: true }>({
+  quietMemory: [async ({request}, use) => {
+    const {config,revision}=await (await request.get('/api/config')).json();
+    const original=config.system?.memoryCapture;
+    config.system={...config.system,memoryCapture:false};
+    expect((await request.put('/api/config',{data:{config,revision}})).ok()).toBe(true);
+    try { await use(true); }
+    finally {
+      const current=await (await request.get('/api/config')).json();
+      current.config.system={...current.config.system,memoryCapture:original};
+      expect((await request.put('/api/config',{data:current})).ok()).toBe(true);
+    }
+  },{auto:true}],
+});
+writerConflictTest('writer conflict retains the submitted request and attachment across reload and copies them into a new draft', async ({ page, request }) => {
   const { config, revision } = await (await request.get('/api/config')).json();
   const first = config.agents.find((agent: {id: string}) => agent.id === 'first');
   expect(first).toBeDefined();
@@ -189,6 +205,24 @@ test('writer conflict retains the submitted request and attachment across reload
   await expect(page.getByText('Fixture reply: Retain my failed request', {exact:true})).toHaveCount(0);
   await page.getByRole('button', { name: '移除附件 keep-me.txt', exact: true }).click();
   await composer.fill('');
+  let supersededStarted!: () => void, supersededRelease!: () => void;
+  const supersededDownload = new Promise<void>(resolve => { supersededStarted = resolve; });
+  const finishSupersededDownload = new Promise<void>(resolve => { supersededRelease = resolve; });
+  await page.route(`**/api/conversations/${chat.id}/attachments/*?download=1`, async route => {
+    supersededStarted();
+    await finishSupersededDownload;
+    await route.continue();
+  }, { times: 1 });
+  await retryHere.click();
+  try {
+    await supersededDownload;
+    expect((await request.post('/__test__/writer-conflict-reply/'+chat.id+'/queued')).status()).toBe(204);
+    await expect(page.getByText('Queued continuation arrived during restore',{exact:true})).toBeVisible();
+    await expect(retryHere).toHaveCount(0);
+  } finally { supersededRelease(); }
+  await expect(message.getByRole('button', { name: '编辑消息', exact: true })).toBeEnabled();
+  await expect(composer).toHaveValue('');
+  await expect(page.locator('.composer-attachments')).toHaveCount(0);
   const sourceScope=encodeURIComponent(JSON.stringify({kind:'chat',conversationId:chat.id}));const originalDraft=(await(await request.get('/api/drafts/entry?scope='+sourceScope)).json()).draft;
   await message.hover();
   await message.getByRole('button', { name: '在新对话中使用此请求', exact: true }).click();

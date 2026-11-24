@@ -295,3 +295,16 @@ it('does not offer writer recovery without exact per-request proof',()=>{
  expect(recoverableWriterConflictDraft(groupChatTurns([event(1,'user',{text:'Internal task',task:{id:'t',kind:'return'},runId:'owner'}),fail({})]),'error')).toBeUndefined();
  expect(recoverableWriterConflictDraft(groupChatTurns([request,fail({}),event(3,'error',{code:'another_failure',runId:'owner'})]),'error')).toBeUndefined();
 });
+
+it('fails closed on a regrouped newer reply that may continue native work',()=>{
+ const events=[
+  event(1,'user',{text:'Draft recorded',runId:'writer-conflict'}),
+  event(2,'error',{runId:'writer-conflict',code:'native_thread_busy',nativeTurnSubmitted:false}),
+  event(3,'status',{status:'error'}),
+  event(4,'metadata',{agentMessage:{id:'one',direction:'reply',reply:'Late reply',replyState:'parked'}}),
+  event(5,'metadata',{sourceEventId:1,agentMessage:{id:'two',direction:'reply',reply:'New work',replyState:'queued'}}),
+ ];
+ const turns=groupChatTurns(events);
+ expect(turns.map(turn=>turn.events.map(e=>e.id))).toEqual([[1,2,3,5],[4]]);
+ expect(recoverableWriterConflictDraft(turns,'error')).toBeUndefined();
+});

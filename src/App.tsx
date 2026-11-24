@@ -1061,7 +1061,11 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     try { await copyText(content); setCopiedMessage(id); }
     catch { clearCopiedMessage(); setError(t("复制失败，请手动选择文本。")); }
   };
-  const reuseRequest = async (message: Pick<ChatMessage, 'text' | 'referenceItems'> & { attachments?: { id: string; name?: string; mimeType?: string }[] }, sameChat = false) => {
+  const writerConflictRestore = useRef<{key?:number;eligible:boolean}>({eligible:false});
+  const reuseRequest = async (message: Pick<ChatMessage, 'text' | 'referenceItems'> & { attachments?: { id: string; name?: string; mimeType?: string }[] }, sameChatKey?: number) => {
+    const sameChat = sameChatKey !== undefined;
+    const currentConflict = () => writerConflictRestore.current.eligible && writerConflictRestore.current.key === sameChatKey;
+    if (sameChat && !currentConflict()) return;
     if (pending || branchPending || navigationLocked || (sameChat && (busy || !selected || !composerDraft.loaded || existingComposerDraft))) return;
     const source = selected, view = navigationVersion.current;
     setBranchPending(true); setError("");
@@ -1075,6 +1079,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       if (selectedChat.current !== source || view !== navigationVersion.current) return;
       const restored = {text:message.text,files:attachments,references:message.referenceItems??[],missingAttachments:[]};
       if (sameChat) {
+        if (!currentConflict()) return;
         const draft = composerDraftRef.current;
         if (!draft.ready || draft.pending) return;
         // The user may have typed while saved attachments were being read.
@@ -1132,6 +1137,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     return { turn, run, replyText: run.answers.map(message => message.text).join("\n\n") };
   }), [turns]);
   const writerConflictDraft=useMemo(()=>recoverableWriterConflictDraft(turns,chat?.id===selected?chat.status:undefined),[turns,chat?.id,chat?.status,selected]);
+  writerConflictRestore.current = {key:writerConflictDraft,eligible:historyReady&&!busy&&!stopping&&!navigationLocked};
   const executionResults=useExecutionResults(chatActive&&auxiliaryReady&&chat?.id===selected&&agent?.systemRole==='mandala'?selected:'');
   const resultGroups=useMemo(()=>{
     const presented=new Set(turns.flatMap(turn=>turn.messages.flatMap(message=>message.source?.kind==='coordination'?message.source.receiptIds:[])));
@@ -1641,7 +1647,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               const recoverWriterRequest = (message: ChatMessage) => message.key === writerConflictDraft
                 ? <Button type="button" title={existingComposerDraft ? localize('请先保留或清空现有草稿', 'Save or clear the existing draft first') : undefined}
                     disabled={busy || pending || branchPending || navigationLocked || !composerDraft.loaded || existingComposerDraft}
-                    onClick={() => void reuseRequest(message, true)}>{localize('恢复到当前草稿', 'Restore draft here')}</Button> : null;
+                    onClick={() => void reuseRequest(message, message.key)}>{localize('恢复到当前草稿', 'Restore draft here')}</Button> : null;
               const canFork = !!checkpoint && !run.incomplete && !busy && !branchPending;
               const showReply = turn.messages.some(m=>m.kind!=="agent_message") && turn.events.some(event=>event.kind!=="user");
               const operationCards = <><AgentMessageCards messages={turn.messages.filter(message=>message.agentMessage?.direction!=='reply')} config={config} onOpen={openWorkspacePath}/><MandalaCoordinationCards config={config} events={turn.events} allEvents={events} onOpen={openWorkspacePath}/><OperationResults taskState={operationTasks} events={turn.events} allEvents={events} onOpen={openWorkspacePath}/></>;

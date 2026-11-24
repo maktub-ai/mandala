@@ -162,11 +162,15 @@ const server = createServer(async(req,res)=>{
   }
   if(await wikiFixture(req,res,home,store,manager.knowledgeBase))return;
   if(await skillFixture(req,res,home,store))return;
-  const conflictReply=/^\/__test__\/writer-conflict-reply\/([a-zA-Z0-9_-]+)$/.exec(req.url??'');
+  const conflictReply=/^\/__test__\/writer-conflict-reply\/([a-zA-Z0-9_-]+)(\/queued)?$/.exec(req.url??'');
   if(req.method==='POST'&&conflictReply){
     const chat=store.getConversation(conflictReply[1]);
     if(chat?.status!=='error'){res.writeHead(409);res.end();return;}
-    store.appendEvent(chat.id,'metadata',{agentMessage:{id:'fixture-conflict-helper',direction:'reply',reply:'Passive reply arrived after writer conflict',replyState:'parked'}});
+    const source=store.listEvents(chat.id,0).filter(event=>event.kind==='user').at(-1);
+    if(conflictReply[2]&&!source){res.writeHead(409);res.end();return;}
+    store.appendEvent(chat.id,'metadata',conflictReply[2]?{
+      sourceEventId:source!.id,agentMessage:{id:'fixture-queued-conflict-helper',direction:'reply',reply:'Queued continuation arrived during restore',replyState:'queued'},
+    }:{agentMessage:{id:'fixture-conflict-helper',direction:'reply',reply:'Passive reply arrived after writer conflict',replyState:'parked'}});
     res.writeHead(204);res.end();return;
   }
   if(req.method==='POST'&&req.url==='/__test__/message-finish'){
