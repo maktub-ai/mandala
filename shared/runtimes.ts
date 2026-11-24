@@ -14,7 +14,7 @@ export const runtimeCatalog = {
   dsh: { name: 'DSH', command: 'dsh', args: ['acp'], protocol: 'acp', docs: 'https://github.com/deepseek-ai/deepseek-harness' },
   antigravity: { name: 'Antigravity', command: 'agy', args: ['--print', '--output-format', 'stream-json'], protocol: 'stream', docs: 'https://antigravity.google/docs/getting-started?tab=cli' },
   grok: { name: 'Grok', command: 'grok', args: ['agent', '--no-leader', 'stdio'], protocol: 'acp', docs: 'https://docs.x.ai/build/cli/reference' },
-  hermes: { name: 'Hermes Agent', command: 'hermes', args: ['acp'], protocol: 'acp', docs: 'https://hermes-agent.nousresearch.com/docs/' },
+  hermes: { name: 'Hermes Agent', command: 'hermes', args: ['acp'], protocol: 'acp', docs: 'https://hermes-agent.nousresearch.com/docs/user-guide/features/acp' },
   openclaw: { name: 'OpenClaw', command: 'openclaw', args: ['acp'], protocol: 'acp', docs: 'https://docs.openclaw.ai/cli/acp' },
 } as const;
 export function isCli(value: unknown): value is Cli { return runtimeIds.includes(value as Cli); }

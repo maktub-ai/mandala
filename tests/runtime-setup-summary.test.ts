@@ -1,7 +1,8 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
-import { RuntimeProbeSummary } from '../src/RuntimeSetup';
+import RuntimeSetup, { RuntimeProbeSummary } from '../src/RuntimeSetup';
+import { renderChineseMarkup } from './helpers/render-ui';
 import type { CliStatus } from '../shared/types';
 
 const diagnostics = {
@@ -45,4 +46,23 @@ it.each([
  expect(html).toContain(label);
  expect(html).not.toContain('launcher was found');
  expect(html).not.toContain('native CLI started');
+});
+
+it.each([
+ ['hermes','https://hermes-agent.nousresearch.com/docs/user-guide/features/acp',
+  'Requires the Hermes ACP extra and a running Hermes Gateway with a configured model provider',
+  '需要 Hermes ACP 扩展，以及已配置模型服务且正在运行的 Hermes Gateway'],
+ ['openclaw','https://docs.openclaw.ai/cli/acp',
+  'Requires a configured, running OpenClaw Gateway',
+  '需要已配置并运行的 OpenClaw Gateway'],
+] as const)('shows %s prerequisites and direct official ACP docs without claiming readiness', (cli, docs, english, chinese) => {
+ const element=createElement(RuntimeSetup,{cli});
+ const en=renderToStaticMarkup(element), zh=renderChineseMarkup(element);
+ expect(en).toContain(english);
+ expect(zh).toContain(chinese);
+ for(const html of [en,zh]){
+  expect(html).toContain('href="'+docs+'"');
+  expect(html).not.toContain('Connection check passed');
+ }
+ if(cli==='openclaw')expect(en).not.toContain('Hermes ACP extra');
 });

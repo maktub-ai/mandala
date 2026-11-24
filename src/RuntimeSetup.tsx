@@ -34,7 +34,8 @@ export default function RuntimeSetup({cli,status}:{cli:Cli;status?:CliStatus|nul
   {(cli==='gemini'||cli==='pi')&&<small>{l('此执行端的协议模式由原生 CLI 提供，不需要单独安装适配器。','The native CLI provides this protocol mode; no separate adapter installation is required.')}</small>}
   <small>{setup.source}{setup.nodeMinimum&&<> · Node.js ≥ {setup.nodeMinimum}</>}
    {setup.windowsGitBash&&<> · {l('Windows 要求 Git Bash','Windows requires Git Bash')}</>}
-   {setup.method==='gateway'&&<> · {l('需要已配置并运行的原生 Gateway','Requires a configured, running native Gateway')}</>}
+   {cli==='hermes'&&<> · {l('需要 Hermes ACP 扩展，以及已配置模型服务且正在运行的 Hermes Gateway','Requires the Hermes ACP extra and a running Hermes Gateway with a configured model provider')}</>}
+   {cli==='openclaw'&&<> · {l('需要已配置并运行的 OpenClaw Gateway','Requires a configured, running OpenClaw Gateway')}</>}
   </small>
   <a href={runtime.docs} target="_blank" rel="noopener noreferrer">{l('官方安装说明','Official setup guide')}</a>
  </div>;
