@@ -26,3 +26,16 @@ it('admits only finite preflight requests, never a prompt or tool operation',()=
    expect(row.auth,row.cli).toBe(row.probe==='account'?'native-account-ready':'not-verified');
  }
 });
+
+it('covers one synthetic first-turn operation and exact approval scope for each transport',()=>{
+ const firstTurn={
+   account:'turn/start', rpc:'prompt', acp:'session/prompt', 'version-only':'stream-result', 'gateway-session':'session/prompt',
+ };
+ for(const row of cases) {
+   const fixture=(row as typeof row & {firstTurn?:{method:string;approval:boolean}}).firstTurn;
+   expect(fixture,row.cli).toEqual({
+     method:firstTurn[row.probe as keyof typeof firstTurn],
+     approval:['cursor','antigravity','dsh','hermes','openclaw'].includes(row.cli),
+   });
+ }
+});

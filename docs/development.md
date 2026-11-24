@@ -262,6 +262,22 @@ setup. Each negative case hides exactly one launcher while leaving the others
 in PATH; none should be launched as a fallback. No prompt is sent; this does not establish real
 provider login, model access, an initial task, or Windows behavior.
 
+Add `--synthetic-first-turn` to test one message through each packaged adapter.
+This enables only the fixed synthetic message and mock responses inside the same
+sandbox; the test verifies the reply is saved in the original conversation and
+that gated transports ask once before the fixture receives anything. The regular
+invocation remains prompt-free. A successful mock turn is protocol evidence, not
+a real provider turn.
+
+**Provisioning and readiness are distinct.** An installed CLI, a version response,
+an account check, or a Gateway handshake is never evidence that a real model task
+worked. For each runtime, use its official setup instructions in the CLI adapter
+settings. Claude Code and its separate ACP launcher are distinct; having the
+Claude executable does not make the ACP launcher present. The package QA does not
+install adapters, follow registry fallbacks, or authenticate providers. Do not
+report a real first turn until the selected runtime, account/Gateway and permitted
+model have been independently verified in that execution environment.
+
 Run `npm run release:check` before committing a release. It rejects tracked files that match ignore rules, including files committed before an ignore rule was added. Desktop packaging and the local service release run this check automatically. Review the staged diff and inspect packaged artifacts separately; this check does not scan credentials or Git history.
 
 A public source snapshot must be exported from a reviewed fixed commit into an independent repository without copying `.git`, old branches, tags or development evidence. Keep existing history private. Do not merge historical branches into the public repository. A repository rename does not remove its history.
