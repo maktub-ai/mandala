@@ -1,4 +1,7 @@
-import {createPublicKey, verify} from 'node:crypto';
+import {createHash, createPublicKey, verify} from 'node:crypto';
+import {constants} from 'node:fs';
+import {lstat, open, realpath} from 'node:fs/promises';
+import {basename, isAbsolute, normalize} from 'node:path';
 
 // Offline release metadata only: this module does not verify Authenticode and must
 // not be used as proof that an executable is safe to launch or an update is enabled.
@@ -42,4 +45,51 @@ export function verifyWindowsReceipt(bytes, signature, expected, pinnedReleaseKe
     throw Error('Invalid Windows installer receipt signature');
   }
   return true;
+}
+
+const sameFile = (first, other) => other.isFile() &&
+  first.dev === other.dev && first.ino === other.ino && first.size === other.size &&
+  first.mtimeNs === other.mtimeNs && first.ctimeNs === other.ctimeNs;
+
+/**
+ * Verify an already staged local installer against the authenticated receipt.
+ * The result is NOT launch authorization. A future native verifier must prove
+ * Authenticode/publisher/architecture of the exact same bytes at its own entry.
+ */
+export async function verifyWindowsInstallerBytes(path, bytes, signature, expected, pinnedReleaseKey, currentVersion) {
+  verifyWindowsReceipt(bytes, signature, expected, pinnedReleaseKey);
+  const {version, platform, arch, name, size, sha256, commit, publisherSpkiSha256} = JSON.parse(bytes.toString('utf8'));
+  if (typeof currentVersion !== 'string' || !versionPattern.test(currentVersion)) {
+    throw Error('Expected an installed stable Windows version');
+  }
+  const previous = currentVersion.split('.').map(Number);
+  const next = version.split('.').map(Number);
+  const difference = next.findIndex((value, index) => value !== previous[index]);
+  if (difference < 0 || next[difference] < previous[difference]) throw Error('Windows installer must be newer');
+  if (typeof path !== 'string' || !isAbsolute(path) || normalize(path) !== path || basename(path) !== name ||
+      await realpath(path) !== path) throw Error('Expected canonical Windows installer path');
+
+  const before = await lstat(path, {bigint: true});
+  if (!before.isFile()) throw Error('Expected a regular Windows installer file');
+  if (before.size !== BigInt(size)) throw Error('Windows installer size does not match the receipt');
+  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  try {
+    if (!sameFile(before, await handle.stat({bigint: true}))) throw Error('Windows installer changed before reading');
+    const hash = createHash('sha256');
+    const buffer = Buffer.alloc(64 * 1024);
+    let total = 0;
+    while (total <= size) {
+      const read = await handle.read(buffer, 0, Math.min(buffer.length, size - total + 1), total);
+      if (!read.bytesRead) break;
+      hash.update(buffer.subarray(0, read.bytesRead));
+      total += read.bytesRead;
+    }
+    if (total !== size) throw Error('Windows installer size changed during reading');
+    if (!sameFile(before, await handle.stat({bigint: true})) || !sameFile(before, await lstat(path, {bigint: true})) ||
+        await realpath(path) !== path) throw Error('Windows installer changed during reading');
+    if (hash.digest('hex') !== sha256) throw Error('Windows installer SHA-256 does not match the receipt');
+    return Object.freeze({sha256, size, commit, version, platform, arch, publisherSpkiSha256, authenticode: 'required'});
+  } finally {
+    await handle.close();
+  }
 }
