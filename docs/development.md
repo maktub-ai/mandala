@@ -233,6 +233,31 @@ Type `/` in the composer to search Skill, MCP and task references. Selected Skil
 
 The root `.gitignore` allowlists source directories and maintained documentation. Local audit reports, plans, runtime data, credentials and build output stay outside the source distribution. Preserve third-party licenses and reproducible tests.
 
+### macOS packaged launch conformance (opt-in)
+
+Run against a **trusted, already staged** and signed `Mandala.app` under
+`/private/tmp`, not the installed app or a downloaded file of unknown origin.
+Use the source SHA the package was built from; the test refuses an unexpected SHA,
+dirty build, invalid bundle signature, or non-matching platform/architecture.
+Signature verification checks staged bundle integrity only, not provenance,
+signer identity, or notarization.
+
+```sh
+runtime=/private/tmp/<staging>/Mandala.app/Contents/Resources/runtime
+"$runtime/bin/node" scripts/desktop-runtime-conformance.mjs "$runtime" <expected-40-character-source-sha>
+```
+
+The pilot starts the packaged backend with its bundled Node, a disposable local
+Mandala owner, a synthetic home, and an exact fixture-only PATH. It does not start
+the Electron UI or a login shell. An additional macOS QA sandbox permits only
+the staged Node and allowlisted shim programs, with network access scoped to
+loopback; if that profile is unavailable, the test fails rather than using the host
+environment. Each probe is checked against the launcher ledger and protocol
+allowlist. It covers Codex account presence, Claude ACP initialization, Cursor
+version output, Hermes Gateway session setup, and negative missing-command
+cases for Codex and Claude ACP. No prompt is sent; this does not establish real
+provider login, model access, an initial task, or Windows behavior.
+
 Run `npm run release:check` before committing a release. It rejects tracked files that match ignore rules, including files committed before an ignore rule was added. Desktop packaging and the local service release run this check automatically. Review the staged diff and inspect packaged artifacts separately; this check does not scan credentials or Git history.
 
 A public source snapshot must be exported from a reviewed fixed commit into an independent repository without copying `.git`, old branches, tags or development evidence. Keep existing history private. Do not merge historical branches into the public repository. A repository rename does not remove its history.
