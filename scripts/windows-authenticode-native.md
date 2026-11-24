@@ -31,3 +31,30 @@ signed release fixture, installed payload architecture independent of the
 NSIS bootstrap stub, and an at-use binding that keeps the same protected
 installer until the operating system opens it are still required before any
 automatic installation work.
+
+## Dormant desktop handoff contract
+
+Windows desktop builds still use the manual installer channel. No update
+feed, renderer input, environment override, or verification-probe result
+enables automatic installation. The controller can exercise a signed
+Windows source in synthetic tests; no packaged source is supplied. See
+`desktop/public-windows-update.cjs` and
+`node --test desktop/public-windows-update.test.mjs`.
+
+A packaged source needs a first-party Ed25519 release signing key and
+pinned Authenticode publisher SPKI, obtained independently of the offered
+installer. It must authenticate the version, architecture, commit,
+exact size and hash before handoff. The native verifier must independently
+hash and authenticate the open file, keep reparse-free ancestor and
+deny-write/delete file handles through the OS handoff, and fail closed
+when signer or revocation status is uncertain. The existing verification-only
+executable closes those handles and cannot perform this handoff.
+
+Before starting the installer, the normal app must obtain explicit consent,
+prevent new input, recheck unsaved changes, drain only when idle and acquire
+a fresh runtime home lease without taking over a competing runtime. The
+candidate exercises this ordering and recovery of the unchanged runtime on
+a known prelaunch failure. An uncertain handoff is not retried. Neither
+restart, installed build verification, nor rollback after the installer
+starts is proven. Keep the production feature disabled until a trusted
+release fixture, the exact native handoff and durable recovery are verified.

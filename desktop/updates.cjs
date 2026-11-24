@@ -65,13 +65,15 @@ async function checkForUpdate({ version, platform, arch, fetch = globalThis.fetc
 const memoryStore = () => { let saved = {}; return { read: () => saved, write: value => { saved = value; } }; };
 // Keeps the update state for the menu, the settings page and the background schedule.
 // mode: 'auto' (silent; notifies once per version), 'menu' (native dialogs), 'settings' (the page shows the result).
-function createUpdateController({ version, platform, arch, fetch, local, publicMac, installPublic = async () => false, readyToQuit = () => {}, store = memoryStore(), now = Date.now, isActive = () => true, showMessage, openExternal, notify = () => {}, onChange = () => {} }) {
+function createUpdateController({ version, platform, arch, fetch, local, publicMac, publicWindows, installPublic = async () => false, readyToQuit = () => {}, store = memoryStore(), now = Date.now, isActive = () => true, showMessage, openExternal, notify = () => {}, onChange = () => {} }) {
   let saved = {};
   try { const value = store.read(); if (value && typeof value === 'object') saved = value; } catch { /* Start fresh. */ }
   const supported = platform === 'darwin' || platform === 'win32';
-  const channel = !supported ? 'unsupported' : local ? 'local' : publicMac ? 'signed-mac' : 'installer';
+  const signed = local ? null : platform === 'darwin' ? publicMac : platform === 'win32' ? publicWindows : null;
+  const isSigned = update => !!signed && (platform === 'darwin' ? update?.publicMac === true : update?.publicWindows === true);
+  const channel = !supported ? 'unsupported' : local ? 'local' : signed ? platform === 'darwin' ? 'signed-mac' : 'signed-windows' : 'installer';
   const localInfo = build => build && { version: build.version, local: true };
-  const staged = localInfo(local?.ready()) ?? publicMac?.ready();
+  const staged = localInfo(local?.ready()) ?? signed?.ready();
   let state = { supported, channel, current: version, status: staged ? 'ready' : 'idle', update: staged ?? null, checkedAt: Number.isFinite(saved.checkedAt) ? saved.checkedAt : null, autoCheck: saved.autoCheck !== false, error: null };
   let pending = null;
   const persist = () => { try { store.write({ autoCheck: state.autoCheck, checkedAt: state.checkedAt, notified: saved.notified ?? null }); } catch { /* Convenience only. */ } };
@@ -79,7 +81,7 @@ function createUpdateController({ version, platform, arch, fetch, local, publicM
   const download = async () => {
     if (state.status !== 'available' || !isActive()) return;
     const { update } = state;
-    const source = update.publicMac ? publicMac : local;
+    const source = isSigned(update) ? signed : local;
     if (!source) return openExternal(update.url);
     set({ status: 'downloading' });
     try {
@@ -89,24 +91,29 @@ function createUpdateController({ version, platform, arch, fetch, local, publicM
       set({ status: 'available' });
       throw error;
     }
-    if (isActive() && !update.publicMac) await readyToQuit();
+    if (isActive() && !isSigned(update)) await readyToQuit();
   };
   const install = async () => {
-    if (state.status !== 'ready' || !state.update.publicMac || !isActive()) return;
+    if (state.status !== 'ready' || !isSigned(state.update) || !isActive()) return;
+    const update = state.update;
     set({ status: 'installing' });
-    try { await installPublic(); }
+    let handoff;
+    try { handoff = await installPublic(update); }
     finally {
-      const staged=publicMac?.ready();
-      set(staged ? {status:'ready',update:staged} : {status:'idle',update:null});
+      if (update.publicWindows && handoff === 'unknown') set({status:'error',update:null,error:'signed_handoff_unknown'});
+      else {
+        const staged=signed?.ready();
+        set(staged ? {status:'ready',update:staged} : {status:'idle',update:null});
+      }
     }
   };
   // One request at a time; callers that arrive meanwhile share its result.
   const refresh = () => pending ??= (async () => {
-    if (['ready','downloading','installing'].includes(state.status)) return;
+    if (state.error === 'signed_handoff_unknown' || ['ready','downloading','installing'].includes(state.status)) return;
     set({ status: 'checking', error: null });
     try {
       const installer = local ? null : await checkForUpdate({ version, platform, arch, fetch });
-      const update = local ? localInfo(local.check()) : (await publicMac?.check(installer)) ?? installer;
+      const update = local ? localInfo(local.check()) : (await signed?.check(installer)) ?? installer;
       set({ status: update ? 'available' : 'current', update, checkedAt: now() });
       persist();
     } catch (error) { set({ status: 'error', update: null, error: error?.name === 'PublicUpdateVerificationError' ? 'signed_verification' : 'release_unavailable' }); }
@@ -116,12 +123,12 @@ function createUpdateController({ version, platform, arch, fetch, local, publicM
     if (mode === 'auto') {
       if (status === 'available' && saved.notified !== update.version) { saved.notified = update.version; persist(); notify(update); }
     } else if (mode === 'menu') {
-      if (status === 'ready') { if (update.publicMac) await install(); else await readyToQuit(); }
+      if (status === 'ready') { if (isSigned(update)) await install(); else await readyToQuit(); }
       else if (status === 'downloading' || status === 'installing') return;
-      else if (status === 'error') await showMessage({ type: 'warning', title: 'Could not check for updates', message: state.error === 'signed_verification' ? 'Could not verify the signed update. The current app was not changed.' : 'Check your connection and try again later. You can keep using Mandala.', buttons: ['OK'] });
+      else if (status === 'error') await showMessage({ type: 'warning', title: 'Could not check for updates', message: state.error === 'signed_handoff_unknown' ? 'Mandala could not confirm that the installer opened. Check Windows before trying again.' : state.error === 'signed_verification' ? 'Could not verify the signed update. The current app was not changed.' : 'Check your connection and try again later. You can keep using Mandala.', buttons: ['OK'] });
       else if (status === 'available') {
-        const externalInstaller = !update.local && !update.publicMac;
-        const answer = await showMessage({ type: 'info', title: 'Mandala update available', message: `Mandala ${update.version} is available`, detail: update.publicMac ? 'Download and verify the signed update in Mandala. Installation is a separate step.' : local ? 'Download this local build in Mandala. Quit and reopen to apply it.' : 'Open the installer download in your browser. After downloading, use “Stop runtime and quit…” before installing the new version.', buttons: ['Later', externalInstaller ? 'Open installer download' : 'Download update'], defaultId: 0, cancelId: 0 });
+        const externalInstaller = !update.local && !isSigned(update);
+        const answer = await showMessage({ type: 'info', title: 'Mandala update available', message: `Mandala ${update.version} is available`, detail: isSigned(update) ? 'Download and verify the signed update in Mandala. Installation is a separate step.' : local ? 'Download this local build in Mandala. Quit and reopen to apply it.' : 'Open the installer download in your browser. After downloading, use “Stop runtime and quit…” before installing the new version.', buttons: ['Later', externalInstaller ? 'Open installer download' : 'Download update'], defaultId: 0, cancelId: 0 });
         if (answer.response === 1) {
           try { await download(); }
           catch { if (isActive()) await showMessage({ type: 'warning', title: 'Could not download the update', message: 'Check for updates again and retry.', buttons: ['OK'] }); }
