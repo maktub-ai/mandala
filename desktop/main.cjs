@@ -63,12 +63,14 @@ function upgradeCopy() {
     pending: '后台升级待完成',
     unknown: '无法确认旧版后台是否空闲。切换会停止当前的本地任务和终端。',
     busy: '后台仍有任务、终端或其他工作。可以继续使用，等工作结束后重新打开 Mandala 完成升级。',
+    unresolved: '有旧任务的执行结果仍未确认，无法判断后台能否安全退出。Mandala 保留原有记录，不会自动重发。可继续使用当前版本。',
     timeout: '旧后台仍在退出。请稍候重试。',
     later: '稍后', switch: '切换到新版', keepWorking: '继续使用', retry: '重试', quit: '退出',
   } : {
     pending: 'Runtime upgrade pending',
     unknown: 'Mandala cannot confirm that the previous runtime is idle. Switching stops its local tasks and terminals.',
     busy: 'The previous runtime still has active work. Keep working and reopen Mandala after it finishes to complete the upgrade.',
+    unresolved: 'Earlier work has no confirmed outcome, so Mandala cannot verify a safe restart. The records stay intact and will not be resent automatically. You can keep using your current version.',
     timeout: 'The previous runtime is still shutting down. Wait a moment, then try again.',
     later: 'Later', switch: 'Switch to New Version', keepWorking: 'Keep Working', retry: 'Try Again', quit: 'Quit',
   };
@@ -91,7 +93,7 @@ async function connectDesktopRuntime(options, copy) {
       const connected = await connectOrStartService({ ...options, confirmLegacy });
       if (finished || connected.upgradePending !== 'busy') return connected;
       const { response } = await dialog.showMessageBox({
-        type: 'info', message: copy.pending, detail: copy.busy,
+        type: 'info', message: copy.pending, detail: connected.upgradePendingReason === 'unresolved-native' ? copy.unresolved : copy.busy,
         buttons: [copy.keepWorking, copy.retry], defaultId: 0, cancelId: 0, noLink: true,
       });
       if (response !== 1) return connected;
@@ -450,7 +452,7 @@ async function start() {
       { label: 'Check for updates…', click: () => { void updates.check('menu'); } },
       { label: 'About Mandala', click: () => dialog.showMessageBox({ title: 'Mandala', message: `Mandala ${app.getVersion()}`, detail: local ? 'Local development build. Download updates in Mandala and quit to apply them.' : 'Local service and native CLI authentication stay on this computer. Availability of in-app updates depends on this release’s signing channel.' }) },
       ...(service.upgradePending ? [{ label: upgrade.pending, click: () => dialog.showMessageBox(window, {
-        type: 'info', message: upgrade.pending, detail: service.upgradePending === 'busy' ? upgrade.busy : upgrade.unknown,
+        type: 'info', message: upgrade.pending, detail: service.upgradePending === 'busy' ? service.upgradePendingReason === 'unresolved-native' ? upgrade.unresolved : upgrade.busy : upgrade.unknown,
       }) }] : []),
       { label: 'Stop runtime and quit…', click: stopRuntime },
       { type: 'separator' }, { label: 'Quit Mandala', accelerator: 'CmdOrCtrl+Q', click: quit }

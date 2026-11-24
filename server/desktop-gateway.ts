@@ -3,13 +3,13 @@ import { timingSafeEqual } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { writeFileSync, renameSync, existsSync, unlinkSync, mkdirSync, statSync, readFileSync } from 'node:fs';
 import { join, resolve, sep, extname } from 'node:path';
-import type { IdleStop } from '../desktop/service-discovery';
+import type { IdleStopResult } from '../desktop/service-discovery';
 import { readJsonBody } from './http-body';
 import { validateControlUrl } from './computer-connector';
 import { systemComputerName } from './computer-name';
 import { openDesktopAccounts, desktopPartition, validateDesktopLease, type DesktopLease } from './desktop-accounts';
 
-export type AccountWorkspace={origin:string;cookie:string;csrfToken:string;key:string;close:()=>Promise<void>;stopIfIdle?:()=>Promise<IdleStop>;exited?:Promise<void>};
+export type AccountWorkspace={origin:string;cookie:string;csrfToken:string;key:string;close:()=>Promise<void>;stopIfIdle?:()=>Promise<IdleStopResult>;exited?:Promise<void>};
 export function createDesktopGateway(options:{root:string;setupToken:string;controlOrigin:string;dist?:string;startWorkspace:(home:string,lease:DesktopLease)=>Promise<AccountWorkspace>;fetch?:typeof fetch}){
  const cloudOrigin=validateControlUrl(options.controlOrigin), accounts=openDesktopAccounts(options.root,cloudOrigin), request=options.fetch??fetch;
  const computerName=systemComputerName();
@@ -19,7 +19,7 @@ export function createDesktopGateway(options:{root:string;setupToken:string;cont
  let worker:AccountWorkspace|undefined,starting:Promise<AccountWorkspace>|undefined,changing=false,linking=false,stopped=false,epoch=0;
  const cleanupQueue:AccountWorkspace[]=[];let cleanup:Promise<void>|undefined;
  let checkingIdle = false, requests = 0, forwarding = 0;
- const reserveIdleShutdown = async (): Promise<IdleStop> => {
+ const reserveIdleShutdown = async (): Promise<IdleStopResult> => {
   if (stopped) return 'accepted';
   if (checkingIdle || requests || forwarding || starting || cleanup || changing || linking) return 'busy';
   if (cleanupQueue.length) return 'unknown';

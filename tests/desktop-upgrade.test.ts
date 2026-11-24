@@ -111,6 +111,7 @@ test('an active terminal defers the upgrade until it exits', async () => {
     writeBuild(newBuild);
     const pending = await connectOrStartService({ ...options, build: newBuild });
     expect(pending.upgradePending).toBe('busy');
+    expect(pending.upgradePendingReason).toBeUndefined();
     expect(pending.record.pid).toBe(first.record.pid);
     expect((await (await call(path)).json()).session).toMatchObject({ id: session.id, state: 'running' });
 
@@ -124,6 +125,61 @@ test('an active terminal defers the upgrade until it exits', async () => {
     if (running) await stopBackgroundService(running);
   }
 }, 30000);
+
+test('historical unresolved input defers upgrade without claiming active work or offering forced stop', async () => {
+  const { options, writeBuild } = fixture();
+  const accounts = openDesktopAccounts(dirname(options.home), options.env.MANDALA_ACCOUNT_ORIGIN);
+  const lease = accounts.activate({
+    user: { id: 'test', username: 'test', createdAt: new Date().toISOString() },
+    token: 'test', csrfToken: 'test', expiresAt: Date.now() + 120000,
+  }, false);
+  const profile = accounts.home(lease.user.id);
+  prepareDesktopHome(profile);
+  const initial = openStore(profile);
+  const { id } = initial.createConversation({ projectId: '', agentId: '', cwd: profile, cli: 'codex', model: null });
+  initial.close();
+  try {
+    const first = await connectOrStartService({ ...options, build: oldBuild });
+    const session = await fetch(first.origin + '/auth/session', { headers: { Cookie: 'mandala_desktop=' + lease.localToken } });
+    expect(session.status).toBe(200);
+    expect((await session.json()).user.username).toBe('test');
+    const state = openStore(profile);
+    try {
+      state.database.prepare("INSERT INTO task_user_inputs(id,owner_user_id,conversation_id,text,command_key,state,created_at) VALUES(?,?,?,?,?,'unknown',?)")
+        .run('synthetic-history',state.ownerUserId,id,'Unresolved historical input','synthetic-history-key','2020-01-01T00:00:00.000Z');
+      const before = state.database.prepare("SELECT * FROM task_user_inputs").all();
+      writeBuild(newBuild);
+      let forced = 0;
+      const pending = await connectOrStartService({ ...options, build: newBuild, confirmLegacy: async () => { forced++; return true; } });
+      expect(pending.upgradePending).toBe('busy');
+      expect(pending.upgradePendingReason).toBe('unresolved-native');
+      expect(pending.record.pid).toBe(first.record.pid);
+      expect(forced).toBe(0);
+      expect(state.database.prepare("SELECT * FROM task_user_inputs").all()).toEqual(before);
+      const terminalPath = '/api/conversations/' + id + '/terminal';
+      const headers = { Origin: first.origin, Cookie: 'mandala_desktop=' + lease.localToken, 'Content-Type': 'application/json' };
+      const terminal = await fetch(first.origin + terminalPath, { method: 'POST', headers, body: JSON.stringify({ cols: 80, rows: 24 }) });
+      expect(terminal.status).toBe(201);
+      const { session: shell } = await terminal.json();
+      try {
+        const activelyBusy = await connectOrStartService({ ...options, build: newBuild, confirmLegacy: async () => { forced++; return true; } });
+        expect(activelyBusy.upgradePending).toBe('busy');
+        expect(activelyBusy.upgradePendingReason).toBeUndefined();
+        expect(activelyBusy.record.pid).toBe(first.record.pid);
+        expect(forced).toBe(0);
+        expect((await (await fetch(first.origin + terminalPath, { headers })).json()).session)
+          .toMatchObject({ id: shell.id, state: 'running' });
+        expect(state.database.prepare("SELECT * FROM task_user_inputs").all()).toEqual(before);
+      } finally {
+        await fetch(first.origin + terminalPath, { method: 'DELETE', headers, body: JSON.stringify({ sessionId: shell.id }) });
+      }
+
+    } finally { state.close(); }
+  } finally {
+    const running = await connectService(options.home);
+    if (running) await stopBackgroundService(running); // only the synthetic fixture
+  }
+}, 20000);
 
 test('the gateway refuses new work while the workspace is deciding whether to stop', async () => {
   const root = mkdtempSync(join(tmpdir(), 'mandala-upgrade-admission-'));

@@ -60,8 +60,10 @@ export function readRuntimeBuild(runtime: string): RuntimeBuild | undefined {
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
 }
 export type IdleStop = 'accepted' | 'busy' | 'unknown';
-type ServiceControl = { build?: RuntimeBuild; stopIfIdle?: () => IdleStop | Promise<IdleStop> };
-type ServiceReply = { build?: RuntimeBuild; canStopIfIdle?: boolean; idleStop?: IdleStop };
+export type IdleBusyReason = 'unresolved-native';
+export type IdleStopResult = IdleStop | { idleStop: 'busy'; idleBusyReason: IdleBusyReason };
+type ServiceControl = { build?: RuntimeBuild; stopIfIdle?: () => IdleStopResult | Promise<IdleStopResult> };
+type ServiceReply = { build?: RuntimeBuild; canStopIfIdle?: boolean; idleStop?: IdleStop; idleBusyReason?: IdleBusyReason };
 type ServiceAction = 'probe' | 'stop' | 'stop-if-idle';
 const methods = { probe: 'GET', stop: 'POST', 'stop-if-idle': 'PUT' } as const;
 export const serviceControlPath = '/__mandala_runtime';
@@ -86,7 +88,7 @@ export function handleServiceControl(record: ServiceRecord, req: IncomingMessage
   };
   if (action === 'stop-if-idle') {
     void Promise.resolve().then(() => control?.stopIfIdle?.() ?? 'unknown').catch(() => 'unknown' as const).then(result => {
-      try { reply({ idleStop: result }); }
+      try { reply(typeof result === 'string' ? { idleStop: result } : result); }
       finally { if (result === 'accepted') stop(); }
     }).catch(() => res.destroy());
   } else {
@@ -109,5 +111,6 @@ export async function controlService(record: ServiceRecord, action: ServiceActio
   if (payload === null) return {};
   if (!verify('x-mandala-runtime-proof', `${signature}:${payload}`)) throw verificationError();
   const value = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as ServiceReply;
-  return { build: parseRuntimeBuild(value.build), canStopIfIdle: value.canStopIfIdle === true, idleStop: value.idleStop };
+  return { build: parseRuntimeBuild(value.build), canStopIfIdle: value.canStopIfIdle === true, idleStop: value.idleStop,
+    ...(value.idleStop === 'busy' && value.idleBusyReason === 'unresolved-native' ? { idleBusyReason: value.idleBusyReason } : {}) };
 }

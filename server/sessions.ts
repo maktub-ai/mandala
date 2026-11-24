@@ -163,6 +163,7 @@ export interface SessionManager {
   conversationApproval(id:string):Promise<{granted:boolean}>;
   revokeConversationApproval(id:string):void;
   hasActiveWork(): boolean;
+  hasUnresolvedNativeWork(): boolean;
   checkNativeBackgroundWork(): Promise<'idle' | 'busy' | 'unknown'>;
   close(): Promise<void>;
 }
@@ -2602,11 +2603,16 @@ export function createSessionManager(
         continuity.hasActiveWork() || progressMonitor.hasActiveWork() || skillLearning?.hasActiveWork() ||
         fileMaintenance.hasActiveWork() || knowledgeBase.hasActiveWork() || codeGraph.hasActiveWork() ||
         [...live.values()].some(runtime => runtime.preparing || runtime.invocation || runtime.stopping || runtime.approvals.size) ||
-        db.prepare("SELECT 1 FROM task_runs WHERE state IN ('queued','starting','running','approval','unknown') LIMIT 1").get() ||
-        db.prepare("SELECT 1 FROM task_user_inputs WHERE state IN ('queued','running','unknown') LIMIT 1").get() ||
-        db.prepare("SELECT 1 FROM task_directory_claims WHERE submitted=1 LIMIT 1").get() ||
-        db.prepare("SELECT 1 FROM task_native_uncertainty LIMIT 1").get() ||
+        db.prepare("SELECT 1 FROM task_runs WHERE state IN ('queued','starting','running','approval') LIMIT 1").get() ||
+        db.prepare("SELECT 1 FROM task_user_inputs WHERE state IN ('queued','running') LIMIT 1").get() ||
         db.prepare("SELECT 1 FROM conversations WHERE json_extract(data,'$.status') IN ('running','approval') LIMIT 1").get());
+    },
+    hasUnresolvedNativeWork() {
+      const db = store.database;
+      return !!(db.prepare("SELECT 1 FROM task_runs WHERE state='unknown' LIMIT 1").get() ||
+        db.prepare("SELECT 1 FROM task_user_inputs WHERE state='unknown' LIMIT 1").get() ||
+        db.prepare("SELECT 1 FROM task_directory_claims WHERE submitted=1 LIMIT 1").get() ||
+        db.prepare("SELECT 1 FROM task_native_uncertainty LIMIT 1").get());
     },
     async checkNativeBackgroundWork() {
       const threads = [...live].flatMap(([id, runtime]) => {

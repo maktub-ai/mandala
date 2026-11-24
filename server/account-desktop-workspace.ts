@@ -25,7 +25,10 @@ export async function startAccountWorkspace(profileHome:string,lease:DesktopLeas
   const record = readServiceRecord(profileHome);
   if (!record || record.pid !== service.child.pid || record.origin !== service.origin) return 'unknown' as const;
   if (!(await controlService(record, 'probe')).canStopIfIdle) return 'unknown' as const;
-  return (await controlService(record, 'stop-if-idle')).idleStop ?? 'unknown';
+  const decision = await controlService(record, 'stop-if-idle');
+  return decision.idleStop === 'busy' && decision.idleBusyReason
+    ? { idleStop: 'busy', idleBusyReason: decision.idleBusyReason } as const
+    : decision.idleStop ?? 'unknown';
  },
  async close(){if(existsSync(leaseFile))unlinkSync(leaseFile);await stopService(service.child);store.deleteSession(local.token);store.close();}};
  }catch(error){

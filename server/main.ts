@@ -1,5 +1,5 @@
 import { claimServiceHome } from './service-home-lock';
-import { claimServiceRecord, handleServiceControl, removeServiceRecord, type IdleStop } from '../desktop/service-discovery';
+import { claimServiceRecord, handleServiceControl, removeServiceRecord, type IdleStopResult } from '../desktop/service-discovery';
 import { productEnv, productHome } from "../cli/product-env.mjs";
 import { createMemoryRuntime } from "./memory-runtime";
 import { createServer } from "node:http";
@@ -92,13 +92,16 @@ server.removeAllListeners("request");
 let stopping = false, checkingIdle = false;
 const hasActiveWork = () => systemWork || systemTasks.hasActiveWork() || terminalService.running('').length ||
   automations.hasActiveWork() || telegram.hasActiveWork() || memoryRuntime.hasActiveWork() || ready.hasActiveWork() || manager.hasActiveWork();
-const stopIfIdle = async (): Promise<IdleStop> => {
+const unresolvedStop = { idleStop: 'busy', idleBusyReason: 'unresolved-native' } as const;
+const stopIfIdle = async (): Promise<IdleStopResult> => {
   if (stopping) return 'accepted';
   if (checkingIdle || hasActiveWork()) return 'busy';
+  if (manager.hasUnresolvedNativeWork()) return unresolvedStop;
   checkingIdle = true;
   try {
     const native = await manager.checkNativeBackgroundWork();
-    if (hasActiveWork()) return 'busy';
+    if (hasActiveWork() || native === 'busy') return 'busy';
+    if (manager.hasUnresolvedNativeWork()) return unresolvedStop;
     if (native !== 'idle') return native;
     // Close admission and stop the internal producers in this turn, before reporting acceptance.
     void stop();

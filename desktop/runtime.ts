@@ -8,7 +8,7 @@ import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { existsSync, readdirSync, statSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { readServiceRecord, serviceAlive, removeServiceRecord, controlService, ServiceStartingError, type RuntimeBuild, type ServiceRecord } from './service-discovery';
+import { readServiceRecord, serviceAlive, removeServiceRecord, controlService, ServiceStartingError, type IdleBusyReason, type RuntimeBuild, type ServiceRecord } from './service-discovery';
 import { windowsSystemBinary } from '../cli/windows-system.mjs';
 import { ownedPrivatePath, protectInvocationDirectory } from '../cli/private-path.mjs';
 import { productHome } from '../cli/product-env.mjs';
@@ -105,7 +105,7 @@ export async function forceStopService(child: ChildProcess): Promise<void> {
 
 export type BackgroundService = {
   origin: string; setupToken: string; home: string; record: ServiceRecord;
-  build?: RuntimeBuild; canStopIfIdle?: boolean; upgradePending?: 'busy' | 'confirmation';
+  build?: RuntimeBuild; canStopIfIdle?: boolean; upgradePending?: 'busy' | 'confirmation'; upgradePendingReason?: IdleBusyReason;
 };
 function sameBuild(expected: RuntimeBuild, actual?: RuntimeBuild): boolean {
   return expected.version === actual?.version && expected.commit === actual.commit;
@@ -144,9 +144,9 @@ export async function connectOrStartService(options: Parameters<typeof startServ
   }
   if (existing) {
     if (!options.build || sameBuild(options.build, existing.build)) return existing;
-    const result = await stopBackgroundServiceIfIdle(existing, options.shutdownTimeoutMs);
-    if (result === 'busy') return { ...existing, upgradePending: 'busy' };
-    if (result !== 'accepted') {
+    const result = await readStopIfIdle(existing, options.shutdownTimeoutMs);
+    if (result.idleStop === 'busy') return { ...existing, upgradePending: 'busy', upgradePendingReason: result.idleBusyReason };
+    if (result.idleStop !== 'accepted') {
       if (!await options.confirmLegacy?.(existing)) return { ...existing, upgradePending: 'confirmation' };
       await requestUpgradeStop(existing, 'stop');
       await waitForBackgroundShutdown(existing, options.shutdownTimeoutMs);
@@ -178,10 +178,13 @@ async function requestUpgradeStop(service: BackgroundService, action: 'stop' | '
     throw error;
   }
 }
-export async function stopBackgroundServiceIfIdle(service: BackgroundService, timeoutMs?: number) {
-  const result = service.canStopIfIdle ? (await requestUpgradeStop(service, 'stop-if-idle')).idleStop : 'unknown';
-  if (result === 'accepted') await waitForBackgroundShutdown(service, timeoutMs);
+async function readStopIfIdle(service: BackgroundService, timeoutMs?: number) {
+  const result = service.canStopIfIdle ? await requestUpgradeStop(service, 'stop-if-idle') : { idleStop: 'unknown' as const };
+  if (result.idleStop === 'accepted') await waitForBackgroundShutdown(service, timeoutMs);
   return result;
+}
+export async function stopBackgroundServiceIfIdle(service: BackgroundService, timeoutMs?: number) {
+  return (await readStopIfIdle(service, timeoutMs)).idleStop;
 }
 export async function stopBackgroundService(service: BackgroundService, timeoutMs?: number): Promise<void> {
   // A confirmation may stay open while the verified process finishes independently.
