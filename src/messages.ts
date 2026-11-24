@@ -16,6 +16,7 @@ export const english = {
   "Agent 默认继承此设置；保存后从下一次执行生效，当前执行和历史回答不变。": "Agents inherit this setting by default. Changes apply from the next execution; current executions and past answers stay unchanged.",
   "适用于此 Agent 的单聊和任务，保存后从下一次执行生效。当轮语言、格式和详略要求优先。": "Applies to this Agent's chats and tasks from the next execution after saving. Your language, format and detail requests take priority.",
   等待工作目录可用: "Waiting for workspace access",
+  "消息未发送到 Codex；原请求已保存。": "The message was not sent to Codex. The original request was saved.",
   "提交状态待确认；输入已保留。恢复连接后再次发送只核对本机记录，不会重发。请检查对话历史，确认未提交后再重新提出。": "Submission is unconfirmed; your input is kept. Sending again only checks local records and never resends. Check chat history and confirm it was not submitted before making a new request.",
   接收方排队中: "Recipient queued",
   接收方执行中: "Recipient running",

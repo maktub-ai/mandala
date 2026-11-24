@@ -71,3 +71,9 @@ describe('Codex mailbox preparation guidance',()=>{
   ]) expect(renderRun(data,false)).not.toContain('not sent to Codex');
  });
 });
+
+it('localizes the known-unsent queue receipt without implying a resend',()=>{
+ const text='消息未发送到 Codex；原请求已保存。';
+ expect(render(text)).toBe('<p>The message was not sent to Codex. The original request was saved.</p>');
+ expect(render(text,true)).toBe('<p>'+text+'</p>');
+});

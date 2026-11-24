@@ -1,3 +1,4 @@
+import { isCodexMailboxErrorCode } from '../shared/codex-mailbox-errors';
 import type { QueuedInput } from '../shared/tasks';
 export type SubmissionRecovery = { attempted?: boolean; stopConfirmed?: boolean; stopAttempted?: boolean; expectedExecutionId?:string; rejection?: Error };
 export async function submitChatInput(
@@ -8,7 +9,7 @@ export async function submitChatInput(
  const commandKey = (body as {commandKey?:string})?.commandKey;
  const uncertain = () => new Error('提交状态待确认；输入已保留。恢复连接后再次发送只核对本机记录，不会重发。请检查对话历史，确认未提交后再重新提出。');
  const confirmed = (input:QueuedInput|undefined) => {
-  if(input?.prestartFailure){
+  if(input?.state==='cancelled'&&isCodexMailboxErrorCode(input.prestartFailure?.code)){
    state.rejection=new Error('消息未发送到 Codex；原请求已保存。');
    throw state.rejection;
   }

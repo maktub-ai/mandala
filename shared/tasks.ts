@@ -1,3 +1,4 @@
+import type { CodexMailboxErrorCode } from './codex-mailbox-errors';
 import type { Conversation } from './types';
 import type {AgentMessageOrigin} from './agent-messages';
 import type { ManifestFile } from './assets';
@@ -34,17 +35,8 @@ export type RunRouting = { executionConversationId: string; mode: 'dedicated' | 
 export type QueuedInputSource = {kind:'coordination';receiptIds:string[]} | {kind:'schedule';automationId:string} | {kind:'idle'} | {kind:'telegram';requestId:string};
 export const isHumanInput = (input:{source?:unknown;agentMessage?:unknown;task?:unknown}) =>
  (input.source===undefined || (input.source as QueuedInputSource|null)?.kind==='telegram') && input.agentMessage===undefined && input.task===undefined;
-export const queuedPrestartMailboxCodes = [
- 'codex_mailbox_path_invalid',
- 'codex_mailbox_setup_failed',
- 'codex_mailbox_capability_unverified',
- 'codex_mailbox_permissions_unverified',
-] as const;
-export type QueuedPrestartMailboxCode = typeof queuedPrestartMailboxCodes[number];
-export const isQueuedPrestartMailboxCode = (code: unknown): code is QueuedPrestartMailboxCode =>
- typeof code === 'string' && queuedPrestartMailboxCodes.some(allowed=>allowed===code);
 export type QueueAdmission = 'starting' | 'connecting' | 'waiting' | 'remote_unavailable';
-export type QueuedInput = { admission?:QueueAdmission; source?:QueuedInputSource; waitingReason?:'directory'|'background'; agentMessage?:AgentMessageOrigin; commandKey?: string; unrecorded?: boolean; prestartFailure?: {code:QueuedPrestartMailboxCode}; id: string; conversationId: string; text: string; attachments?: string[]; references?: ComposerReferenceSelection[]; state: 'queued' | 'running' | 'completed' | 'cancelled' | 'unknown'; createdAt: string };
+export type QueuedInput = { admission?:QueueAdmission; source?:QueuedInputSource; waitingReason?:'directory'|'background'; agentMessage?:AgentMessageOrigin; commandKey?: string; unrecorded?: boolean; prestartFailure?: {code:CodexMailboxErrorCode}; id: string; conversationId: string; text: string; attachments?: string[]; references?: ComposerReferenceSelection[]; state: 'queued' | 'running' | 'completed' | 'cancelled' | 'unknown'; createdAt: string };
 export type ExecutionMonitor = { lastCheckedAt?: string; nativeState?: 'running'|'succeeded'|'failed'|'unknown'|'unreachable'; lastProgressAt: string | null; reason: 'queued'|'directory'|'approval'|'unknown'|'run_failed'|'interrupted'|'host_offline'|null; attention: boolean };
 export type Run = {
  monitor?: ExecutionMonitor;

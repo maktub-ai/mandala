@@ -342,3 +342,39 @@ test.each(['identity','occupancy','submitted','unknown'] as const)('receipt spli
  expect(f.store.database.prepare('SELECT input_id FROM task_receipt_inputs WHERE input_id=?').all(input.id)).toHaveLength(2);
  expect(f.scheduler.enqueueReceiptInput(f.chat.id,result)).toBeNull();
 });
+
+test('prestart failure never takes over an invocation, system input or mismatched conversation',()=>{
+ const f=setup(), code='codex_mailbox_setup_failed';
+ const input=f.scheduler.enqueueUserInput(f.chat.id,'Test only','native-proof');
+ expect(f.scheduler.takeNext(f.chat.id)).toMatchObject({input:{id:input.id}});
+ expect(f.store.transaction(()=>f.scheduler.failPrestartMailboxInput(input.id,'unrelated',code))).toBe(false);
+ expect(f.store.transaction(()=>f.scheduler.failPrestartMailboxInput(input.id,f.chat.id,'generic_failure'))).toBe(false);
+ f.scheduler.bindInputInvocation(input.id,'invocation','synthetic-session',null);
+ expect(f.store.transaction(()=>f.scheduler.failPrestartMailboxInput(input.id,f.chat.id,code))).toBe(false);
+ expect(f.scheduler.listUserInputs(f.chat.id)[0]).not.toHaveProperty('prestartFailure');
+ f.scheduler.completeUserInput(input.id);
+ const system=f.scheduler.enqueueSystemInput(f.chat.id,'Test automation','system-proof',{kind:'schedule',automationId:'synthetic'});
+ expect(f.scheduler.takeNext(f.chat.id)).toMatchObject({input:{id:system.id}});
+ expect(f.store.transaction(()=>f.scheduler.failPrestartMailboxInput(system.id,f.chat.id,code))).toBe(false);
+ expect(f.scheduler.listUserInputs(f.chat.id).at(-1)).toMatchObject({id:system.id,state:'running'});
+});
+
+test('adding the prestart failure column preserves older rows, indexes and references',()=>{
+ const f=setup(), code='codex_mailbox_setup_failed',db=f.store.database;
+ db.exec("ALTER TABLE task_user_inputs DROP COLUMN prestart_failure_code");
+ db.prepare("DELETE FROM schema_migrations WHERE key='chat_input_003_prestart_failure'").run();
+ const first=f.scheduler.enqueueUserInput(f.chat.id,'Existing draft','legacy-queue-1');
+ const second=f.scheduler.enqueueUserInput(f.chat.id,'Existing draft 2','legacy-queue-2');
+ const rowPoints=()=>db.prepare('SELECT rowid,id,state,text FROM task_user_inputs ORDER BY rowid').all();
+ const snapshot=rowPoints();
+ const upgraded=createTaskScheduler(f.store,f.tasks,{principal:p});
+ expect(rowPoints()).toEqual(snapshot);
+ expect(upgraded.takeNext(f.chat.id)).toMatchObject({input:{id:first.id}});
+ expect(f.store.transaction(()=>upgraded.failPrestartMailboxInput(first.id,f.chat.id,code))).toBe(true);
+ expect(upgraded.takeNext(f.chat.id)).toMatchObject({input:{id:second.id}});
+ // The older worker only selects queued rows, and the older submission
+ // consumer already treats a physical cancelled receipt as not executed.
+ expect(db.prepare("SELECT state FROM task_user_inputs WHERE id=?").get(first.id)?.state).toBe('cancelled');
+ expect(createTaskScheduler(f.store,f.tasks,{principal:p}).listUserInputs(f.chat.id)[0]).toMatchObject({state:'cancelled',prestartFailure:{code}});
+ expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+});

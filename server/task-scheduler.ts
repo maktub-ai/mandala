@@ -1,8 +1,9 @@
+import { codexMailboxErrors, isCodexMailboxErrorCode } from '../shared/codex-mailbox-errors';
 import { randomUUID } from 'node:crypto';
 import type { Store } from './store';
 import { hasUnprovenNativeOccupancy, retainNativeOccupancy } from './task-recovery';
 import type { createTasks } from './tasks';
-import { isHumanInput, isQueuedPrestartMailboxCode, queuedPrestartMailboxCodes, type QueuedInput, type Receipt, type Run, type RunRouting, type Task } from '../shared/tasks';
+import { isHumanInput, type QueuedInput, type Receipt, type Run, type RunRouting, type Task } from '../shared/tasks';
 import { DomainError, type Principal } from '../shared/workspace-contracts';
 import type { ComposerReferenceSelection } from '../shared/composer-references';
 import { validateComposerReferenceSelections } from './composer-references';
@@ -68,7 +69,7 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
   const key='chat_input_003_prestart_failure';
   if(db.prepare('SELECT key FROM schema_migrations WHERE key=?').get(key))return;
   db.exec(`ALTER TABLE task_user_inputs ADD COLUMN prestart_failure_code TEXT
-   CHECK(prestart_failure_code IS NULL OR (state='cancelled' AND prestart_failure_code IN (${queuedPrestartMailboxCodes.map(code=>`'${code}'`).join(',')})))`);
+   CHECK(prestart_failure_code IS NULL OR (state='cancelled' AND prestart_failure_code IN (${Object.keys(codexMailboxErrors).map(code=>`'${code}'`).join(',')})))`);
   db.prepare('INSERT INTO schema_migrations VALUES (?,?)').run(key, new Date().toISOString());
  });
  db.exec('CREATE TABLE IF NOT EXISTS task_receipt_inputs(receipt_id TEXT PRIMARY KEY REFERENCES task_receipts(id),input_id TEXT NOT NULL REFERENCES task_user_inputs(id))');
@@ -87,7 +88,7 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
   if (!store.getConversation(id)) fail('conversation_not_found', 404);
   if (db.prepare('SELECT id FROM task_user_inputs WHERE conversation_id=? AND owner_user_id<>? LIMIT 1').get(id, principal.userId)) fail('forbidden', 403);
  };
- const inputRow = (r: Record<string, unknown>): QueuedInput => ({ ...(r.source?{source:JSON.parse(r.source as string)}:{}), ...(options.inputMetadata?.(r.id as string)?{agentMessage:options.inputMetadata!(r.id as string)}:{}), commandKey: r.command_key as string, id: r.id as string, conversationId: r.conversation_id as string, text: r.text as string, state: r.state as QueuedInput['state'], createdAt: r.created_at as string, ...(r.state==='cancelled' && isQueuedPrestartMailboxCode(r.prestart_failure_code)?{prestartFailure:{code:r.prestart_failure_code}}:{}), ...(r.unrecorded ? { unrecorded: true } : {}), ...(r.attachments !== "[]" ? { attachments: JSON.parse(r.attachments as string) } : {}), ...(r.reference_selections !== "[]" ? { references: JSON.parse(r.reference_selections as string) } : {}) });
+ const inputRow = (r: Record<string, unknown>): QueuedInput => ({ ...(r.source?{source:JSON.parse(r.source as string)}:{}), ...(options.inputMetadata?.(r.id as string)?{agentMessage:options.inputMetadata!(r.id as string)}:{}), commandKey: r.command_key as string, id: r.id as string, conversationId: r.conversation_id as string, text: r.text as string, state: r.state as QueuedInput['state'], createdAt: r.created_at as string, ...(r.state==='cancelled' && isCodexMailboxErrorCode(r.prestart_failure_code)?{prestartFailure:{code:r.prestart_failure_code}}:{}), ...(r.unrecorded ? { unrecorded: true } : {}), ...(r.attachments !== "[]" ? { attachments: JSON.parse(r.attachments as string) } : {}), ...(r.reference_selections !== "[]" ? { references: JSON.parse(r.reference_selections as string) } : {}) });
  const loadInput = (id: string) => {
   const row = db.prepare('SELECT * FROM task_user_inputs WHERE id=?').get(id);
   if (!row) return fail('input_not_found', 404);
@@ -318,7 +319,7 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
   // matching visible error, and release of only its unsubmitted claim.
   failPrestartMailboxInput(id:string, conversationId:string, code:unknown):boolean {
    root();
-   if(!db.isTransaction||!isQueuedPrestartMailboxCode(code))return false;
+   if(!db.isTransaction||!isCodexMailboxErrorCode(code))return false;
    const input=loadInput(id);
    if(input.conversationId!==conversationId||input.state!=='running'||input.source||!isHumanInput(input))return false;
    if(db.prepare('SELECT 1 FROM task_receipt_inputs WHERE input_id=?').get(id))return false;

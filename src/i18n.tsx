@@ -16,6 +16,7 @@ function translate(language: Language, message: Message, values: Values = {}, pa
 }
 
 const errors: Record<string, Message> = {
+  "消息未发送到 Codex；原请求已保存。": "消息未发送到 Codex；原请求已保存。",
   "提交状态待确认；输入已保留。恢复连接后再次发送只核对本机记录，不会重发。请检查对话历史，确认未提交后再重新提出。": "提交状态待确认；输入已保留。恢复连接后再次发送只核对本机记录，不会重发。请检查对话历史，确认未提交后再重新提出。",
   "No completed reply to fork": "请在一轮回答完整结束后创建对话分支。",
   "invalid repository URL": "请输入有效的 HTTPS 或 SSH 仓库地址。",
