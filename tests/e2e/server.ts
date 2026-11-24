@@ -27,7 +27,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { createRpcClient } from "../../server/rpc";
-import { connectCodex } from "../../server/codex";
+import { codexMailboxFailure, connectCodex } from "../../server/codex";
 import { readConfig, writeConfig } from "../../server/config";
 import { openStore } from "../../server/store";
 import { migrateWorkspace } from "../../server/workspace-migrations";
@@ -54,6 +54,8 @@ const manager = createSessionManager(
   store,
   async () => (await readConfig(home)).config,
   async (options) => {
+    if (options.extraArgs?.includes('--fixture-mailbox-setup-failed'))
+      throw codexMailboxFailure('codex_mailbox_setup_failed');
     const client = await connectCodex(
       createRpcClient(
         spawn(process.execPath, ["tests/fixtures/fake-cli.mjs", "--chat", "--state", join(home, "native-threads.json"), ...(options.extraArgs ?? [])], {
