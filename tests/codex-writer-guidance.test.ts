@@ -1,6 +1,9 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import TurnProcess from '../src/TurnProcess';
+import { groupChatTurns } from '../src/chatTurns';
+import type { DisplayEvent } from '../shared/types';
 import { useLanguage } from '../src/i18n';
 import { renderChineseMarkup } from './helpers/render-ui';
 
@@ -33,4 +36,38 @@ describe('Codex writer conflict guidance', () => {
     expect(render(unknown)).toBe('<p>' + unknown + '</p>');
     expect(render(unknown, true)).toBe('<p>' + unknown + '</p>');
   });
+});
+
+describe('Codex mailbox preparation guidance',()=>{
+ const renderRun=(data:Record<string,unknown>,chinese:boolean)=>{
+  const events:DisplayEvent[]=[
+    {id:1,conversationId:'chat',kind:'user',data:{runId:'run',text:'Draft text'},createdAt:'2026-11-24T00:00:00Z'},
+    {id:2,conversationId:'chat',kind:'error',data:{runId:'run',message:'Untrusted raw native detail',...data},createdAt:'2026-11-24T00:00:01Z'},
+    {id:3,conversationId:'chat',kind:'status',data:{runId:'run',status:'error'},createdAt:'2026-11-24T00:00:02Z'},
+  ];
+  const element=React.createElement(TurnProcess,{turn:groupChatTurns(events)[0],onInspect(){}});
+  return chinese ? renderChineseMarkup(element) : renderToStaticMarkup(element);
+ };
+ it.each([
+  ['codex_mailbox_path_invalid', 'private mailbox directory', '专用通信目录'],
+  ['codex_mailbox_setup_failed', 'Windows sandbox', 'Windows 沙箱'],
+  ['codex_mailbox_capability_unverified', 'Codex capability', 'Codex 访问身份'],
+  ['codex_mailbox_permissions_unverified', 'mailbox permissions', '通信目录权限'],
+ ])('localizes safe and actionable guidance for %s',(code,enStage,zhStage)=>{
+  const en=renderRun({code,nativeTurnSubmitted:false},false), zh=renderRun({code,nativeTurnSubmitted:false},true);
+  expect(en).toContain(enStage);
+  expect(en).toContain('not sent to Codex');
+  expect(en).toContain('review the saved request');
+  expect(zh).toContain(zhStage);
+  expect(zh).toContain('消息未发送到 Codex');
+  expect(zh).toContain('检查已保存的请求');
+  for(const display of [en,zh]) expect(display).not.toContain('Untrusted raw native detail');
+ });
+ it('does not assert non-submission on an unknown or potentially submitted turn',()=>{
+  for(const data of [
+   {code:'codex_mailbox_setup_failed',nativeTurnSubmitted:true},
+   {code:'codex_mailbox_setup_failed'},
+   {code:'codex_mailbox_unknown',nativeTurnSubmitted:false},
+  ]) expect(renderRun(data,false)).not.toContain('not sent to Codex');
+ });
 });

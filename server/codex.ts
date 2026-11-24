@@ -1,3 +1,4 @@
+import { codexMailboxErrors, isCodexMailboxErrorCode, type CodexMailboxErrorCode } from '../shared/codex-mailbox-errors';
 import type { TurnOptions } from "../shared/chat-input";
 import type { RunIdentity } from '../shared/tasks';
 import { spawn } from "./native-spawn";
@@ -13,16 +14,9 @@ import {DomainError} from '../shared/workspace-contracts';
 import { windowsSystemBinary } from '../cli/windows-system.mjs';
 import { codexMailboxSid, ownedPrivatePath } from '../cli/private-path.mjs';
 
-const mailboxErrors = {
-  codex_mailbox_path_invalid: "Mandala could not open the private mailbox directory for Codex.",
-  codex_mailbox_setup_failed: "Codex could not prepare its Windows sandbox for the private Mandala mailbox.",
-  codex_mailbox_capability_unverified: "Mandala could not verify the Codex capability for this private mailbox.",
-  codex_mailbox_permissions_unverified: "Mandala could not verify the private Codex mailbox permissions.",
-} as const;
-type MailboxErrorCode = keyof typeof mailboxErrors;
-const mailboxError = (code: MailboxErrorCode) => new DomainError(code, 500, mailboxErrors[code]);
+const mailboxError = (code: CodexMailboxErrorCode) => new DomainError(code, 500, codexMailboxErrors[code]);
 export function codexMailboxFailure(code: unknown): DomainError | undefined {
-  return typeof code === "string" && Object.hasOwn(mailboxErrors, code) ? mailboxError(code as MailboxErrorCode) : undefined;
+  return isCodexMailboxErrorCode(code) ? mailboxError(code) : undefined;
 }
 
 let mailboxPreparations = Promise.resolve();

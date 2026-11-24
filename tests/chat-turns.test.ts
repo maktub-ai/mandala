@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { groupChatTurns, mergeChatEvents, recoverableWriterConflictDraft } from "../src/chatTurns";
+import { groupChatTurns, mergeChatEvents, recoverableUnsubmittedDraft } from "../src/chatTurns";
 import { summarizeOperations } from "../src/execution";
 import type { DisplayEvent } from "../shared/types";
 
@@ -280,20 +280,20 @@ it('restores the exact unsubmitted Codex request past passive Agent replies',()=
   event(5,'metadata',{agentMessage:{id:'two',direction:'reply',reply:'Other late reply',replyState:'parked'}}),
  ];
  expect(groupChatTurns(events)).toHaveLength(3);
- expect(recoverableWriterConflictDraft(groupChatTurns(events),'error')).toBe(1);
- expect(recoverableWriterConflictDraft(groupChatTurns(events),'running')).toBeUndefined();
- expect(recoverableWriterConflictDraft(groupChatTurns([...events,event(6,'user',{text:'New native input',runId:'next'})]),'error')).toBeUndefined();
- expect(recoverableWriterConflictDraft(groupChatTurns([...events,event(6,'metadata',{execution:'started',runId:'next'})]),'error')).toBeUndefined();
- expect(recoverableWriterConflictDraft(groupChatTurns([...events,event(6,'status',{status:'running'})]),'error')).toBeUndefined();
- expect(recoverableWriterConflictDraft(groupChatTurns([...events,event(6,'metadata',{agentMessage:{id:'scheduled',direction:'reply',reply:'Pending continuation',replyState:'queued'}})]),'error')).toBeUndefined();
+ expect(recoverableUnsubmittedDraft(groupChatTurns(events),'error')).toBe(1);
+ expect(recoverableUnsubmittedDraft(groupChatTurns(events),'running')).toBeUndefined();
+ expect(recoverableUnsubmittedDraft(groupChatTurns([...events,event(6,'user',{text:'New native input',runId:'next'})]),'error')).toBeUndefined();
+ expect(recoverableUnsubmittedDraft(groupChatTurns([...events,event(6,'metadata',{execution:'started',runId:'next'})]),'error')).toBeUndefined();
+ expect(recoverableUnsubmittedDraft(groupChatTurns([...events,event(6,'status',{status:'running'})]),'error')).toBeUndefined();
+ expect(recoverableUnsubmittedDraft(groupChatTurns([...events,event(6,'metadata',{agentMessage:{id:'scheduled',direction:'reply',reply:'Pending continuation',replyState:'queued'}})]),'error')).toBeUndefined();
 });
 it('does not offer writer recovery without exact per-request proof',()=>{
  const request=event(1,'user',{text:'Only this request',runId:'owner'});
  const fail=(data:Record<string,unknown>)=>event(2,'error',{code:'native_thread_busy',runId:'owner',nativeTurnSubmitted:false,...data});
  for(const error of [fail({runId:'different'}),fail({runId:undefined}),fail({nativeTurnSubmitted:undefined}),fail({nativeTurnSubmitted:true}),fail({code:'unexpected'})])
-  expect(recoverableWriterConflictDraft(groupChatTurns([request,error]),'error')).toBeUndefined();
- expect(recoverableWriterConflictDraft(groupChatTurns([event(1,'user',{text:'Internal task',task:{id:'t',kind:'return'},runId:'owner'}),fail({})]),'error')).toBeUndefined();
- expect(recoverableWriterConflictDraft(groupChatTurns([request,fail({}),event(3,'error',{code:'another_failure',runId:'owner'})]),'error')).toBeUndefined();
+  expect(recoverableUnsubmittedDraft(groupChatTurns([request,error]),'error')).toBeUndefined();
+ expect(recoverableUnsubmittedDraft(groupChatTurns([event(1,'user',{text:'Internal task',task:{id:'t',kind:'return'},runId:'owner'}),fail({})]),'error')).toBeUndefined();
+ expect(recoverableUnsubmittedDraft(groupChatTurns([request,fail({}),event(3,'error',{code:'another_failure',runId:'owner'})]),'error')).toBeUndefined();
 });
 
 it('fails closed on a regrouped newer reply that may continue native work',()=>{
@@ -306,5 +306,35 @@ it('fails closed on a regrouped newer reply that may continue native work',()=>{
  ];
  const turns=groupChatTurns(events);
  expect(turns.map(turn=>turn.events.map(e=>e.id))).toEqual([[1,2,3,5],[4]]);
- expect(recoverableWriterConflictDraft(turns,'error')).toBeUndefined();
+ expect(recoverableUnsubmittedDraft(turns,'error')).toBeUndefined();
+});
+
+it.each([
+ 'codex_mailbox_path_invalid',
+ 'codex_mailbox_setup_failed',
+ 'codex_mailbox_capability_unverified',
+ 'codex_mailbox_permissions_unverified',
+])('offers a same-chat draft for latest direct input on known unsubmitted %s', (code) => {
+ const request=event(1,'user',{text:'Preserve my exact request',runId:'direct'});
+ const failure=event(2,'error',{code,nativeTurnSubmitted:false,runId:'direct'});
+ const result=[request,failure,event(3,'status',{status:'error'})];
+ expect(recoverableUnsubmittedDraft(groupChatTurns(result),'error')).toBe(request.id);
+ expect(recoverableUnsubmittedDraft(groupChatTurns([...result,event(4,'user',{text:'Newer request',runId:'next'})]),'error')).toBeUndefined();
+});
+
+it('does not offer mailbox draft recovery for scheduled, queued, worker, or uncertain input',()=>{
+ const request=(data:Record<string,unknown>={})=>event(1,'user',{text:'Keep prior request',runId:'direct',...data});
+ const failure=(data:Record<string,unknown>={})=>event(2,'error',{code:'codex_mailbox_setup_failed',nativeTurnSubmitted:false,runId:'direct',...data});
+ for(const item of [
+   request({queuedInputId:'existing-queue-row'}),
+   request({source:{kind:'schedule',automationId:'auto'}}),
+   request({source:{kind:'coordination',receiptIds:['receipt']}}),
+   request({source:{kind:'telegram'}}),
+   request({task:{id:'t',kind:'dispatch'}}),
+   request({agentMessage:{id:'handoff',direction:'request'}}),
+ ]) expect(recoverableUnsubmittedDraft(groupChatTurns([item,failure()]),'error')).toBeUndefined();
+ for(const error of [
+   failure({queuedInputId:'existing-queue-row'}), failure({nativeTurnSubmitted:undefined}),
+   failure({nativeTurnSubmitted:true}), failure({runId:'other'}), failure({code:'codex_mailbox_unknown'}),
+ ]) expect(recoverableUnsubmittedDraft(groupChatTurns([request(),error]),'error')).toBeUndefined();
 });

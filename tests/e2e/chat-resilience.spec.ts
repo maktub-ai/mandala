@@ -348,3 +348,36 @@ test('different file bytes with identical metadata survive draft hydration',asyn
  await expect(page.getByText('Fixture reply: Keep the accepted early file',{exact:true})).toBeVisible();const id=new URL(page.url()).searchParams.get('conversation')!;const inputs=await(await request.get('/api/conversations/'+id+'/queue')).json();expect(inputs).toHaveLength(1);expect(inputs[0].attachments).toHaveLength(2);
  const bytes=await Promise.all(inputs[0].attachments.map(async(attachment:string)=>(await request.get('/api/conversations/'+id+'/attachments/'+attachment+'?download=1')).text()));expect(bytes).toEqual(['AAAA','BBBB']);
 });
+
+
+writerConflictTest('recover a proven unsubmitted direct mailbox request without replacing or sending a draft', async ({ page, request }) => {
+  const { config, revision } = await (await request.get('/api/config')).json();
+  const first = config.agents.find((agent: {id: string}) => agent.id === 'first');
+  first.runtime = { codex: { args: ['--fixture-mailbox-setup-failed'] } };
+  const configured = await request.put('/api/config', { data: { config, revision } });
+  expect(configured.ok(), await configured.text()).toBe(true);
+  const chat = await (await request.post('/api/conversations', { data: { projectId: 'resilience', agentId: 'first' } })).json();
+  const failed = await request.post(`/api/conversations/${chat.id}/messages`, { data: { text: 'Please retain this direct request' } });
+  expect(failed.status()).toBe(500);
+
+  const submissions: string[]=[];
+  await page.route(`**/api/conversations/${chat.id}/**`, route=>{
+    if(route.request().method()==='POST' && /\/(?:queue|messages|continue)$/.test(new URL(route.request().url()).pathname)){
+      submissions.push(route.request().url());
+      return route.abort();
+    }
+    return route.continue();
+  });
+  await page.goto(`/?project=resilience&conversation=${chat.id}`);
+  await expect(page.getByRole('alert').filter({hasText:'消息未发送到 Codex'})).toContainText('Windows 沙箱');
+  const composer = page.getByRole('textbox', { name: '消息', exact: true });
+  const restore = page.getByRole('button', { name: '恢复到当前草稿', exact: true });
+  await composer.fill('An existing new draft');
+  await expect(restore).toBeDisabled();
+  await expect(composer).toHaveValue('An existing new draft');
+  await composer.fill('');
+  await restore.click();
+  await expect(composer).toHaveValue('Please retain this direct request');
+  expect(new URL(page.url()).searchParams.get('conversation')).toBe(chat.id);
+  expect(submissions).toEqual([]);
+});

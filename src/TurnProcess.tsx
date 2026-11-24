@@ -13,7 +13,15 @@ import Dialog from "./Dialog";
 import Icon from "./ui/Icon";
 import "./observability.css";
 import {reasoningTitle,type ActivityTimelineItem} from "./activity-presentation";
+import {codexMailboxErrors,unsubmittedCodexMailboxCode} from "../shared/codex-mailbox-errors";
 import {nativeQuestions, readQuestionAnswerDisplay} from "../shared/questions";
+
+const mailboxErrorChinese: Record<keyof typeof codexMailboxErrors, string> = {
+ codex_mailbox_path_invalid: 'Mandala 无法打开 Codex 的专用通信目录。',
+ codex_mailbox_setup_failed: 'Codex 未能为 Mandala 的专用通信目录准备 Windows 沙箱。',
+ codex_mailbox_capability_unverified: 'Mandala 无法验证此专用通信目录的 Codex 访问身份。',
+ codex_mailbox_permissions_unverified: 'Mandala 无法验证 Codex 专用通信目录权限。',
+};
 
 const running = (status: string) => ["running", "inProgress", "approval"].includes(status);
 const failed = (status: string) => ["failed", "error", "declined", "blocked"].includes(status);
@@ -89,6 +97,14 @@ export default function TurnProcess({turn,run:providedRun,onInspect,approvals=[]
  const showIncompleteError=run.incomplete&&!run.userStopped;
  const status=connecting?localize(`正在连接执行机器 ${machineLabel}…`,`Connecting to ${machineLabel}…`):run.status==='queued'?t(run.queueReason==='directory'?'等待目录释放':run.queueReason==='concurrency'?'等待执行名额':'等待执行'):run.status==='approval'?t('等待审批'):active?t(current?'正在执行的操作':nativeAccepted||latestReport||run.progress.length||run.reasoning.length||run.answers.length?'正在生成回复':'正在启动执行端'):run.userStopped?localize('本轮已停止','Stopped this turn'):showIncompleteError?t('本轮未完成'):run.answers.length?localize('本轮已回复','Replied this turn'):t('本轮结束');
  const quietTime=run.lastActivityAt===undefined?0:Math.max(0,now-run.lastActivityAt);
+ const renderRunError=(message:{key:number;text:string})=>{
+  const code=unsubmittedCodexMailboxCode(turn.events.find(event=>event.kind==='error'&&event.id===message.key)?.data);
+  if(!code)return errorText(message.text);
+  return localize(
+   mailboxErrorChinese[code]+' 消息未发送到 Codex。排除故障后，请检查已保存的请求。',
+   codexMailboxErrors[code]+' The message was not sent to Codex. Please review the saved request after the issue is resolved.',
+  );
+ };
  const visible=showHistory?run.activityTimeline:run.activityTimeline.filter(entry=>entry.kind==='error'||entry.kind==='approval'&&liveApprovals.has(entry.approval.request.id)||entry.kind==='operation'&&['interrupted','unknown'].includes(entry.operation.status));
  return <section className="turn-process" aria-label={t('执行过程')} onClick={event=>{if((event.target as HTMLElement).closest('summary'))onInspect();}}>
   <div className="turn-process-row"><Button type="button" className="turn-process-toggle" variant="ghost" aria-label={t(showHistory?'收起本轮过程':'展开本轮过程')} aria-expanded={showHistory} aria-controls={'run-'+turn.key} onClick={()=>{onInspect();setExpanded(!showHistory);}}>
@@ -122,7 +138,7 @@ export default function TurnProcess({turn,run:providedRun,onInspect,approvals=[]
      entry.kind==='operation'?<ExecutionTrace events={turn.events.filter(event=>entry.operation.eventIds.includes(event.id))} lazy/>:
      entry.kind==='message'?<div className="run-commentary" data-source={run.output.some(message=>message.key===entry.message.key)?'output':'commentary'}><span className="run-commentary-label" aria-hidden="true"><span className="progress-dot" data-live={active&&entry.key===run.activityTimeline.filter(item=>item.kind==='message').at(-1)?.key||undefined}/></span><MarkdownMessage text={entry.message.text} streaming={active}/></div>:
      entry.kind==='reasoning'||entry.kind==='reasoningGroup'?<ReasoningActivity entry={entry} events={turn.events}/>:
-     entry.kind==='error'?<p className="run-event-error" role="alert"><Icon name="error" size={14}/>{errorText(entry.message.text)}</p>:
+     entry.kind==='error'?<p className="run-event-error" role="alert"><Icon name="error" size={14}/>{renderRunError(entry.message)}</p>:
      !entry.approval.decision&&renderApproval&&liveApprovals.has(entry.approval.request.id)?renderApproval(liveApprovals.get(entry.approval.request.id)!):<ApprovalHistory approval={entry.approval.state==='pending'&&!liveApprovals.has(entry.approval.request.id)?{...entry.approval,state:'unknown'}:entry.approval} events={turn.events}/>}
    </li>)}</ol>
   </div>
