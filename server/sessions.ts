@@ -1840,12 +1840,14 @@ export function createSessionManager(
       const catalogId='catalog-'+randomUUID();
       let client: CodexClient | undefined;
       const diag:NonNullable<CliStatus['diagnostics']>={host:context?.executionLocation?'remote':'local',executable:'not-verified',probe:'failed',auth:'not-verified'};
+      let stage:NonNullable<CliStatus['diagnostics']>['failureStage']='configuration';
       const withDetails=(value:CliStatus):CliStatus=> explain?{...value,diagnostics:diag}:value;
       try {
         const options=runtimeOptions(cli,context,config,scope);
         if(explain&&diag.host==='local'){
           Object.assign(diag,diagnoseRuntimePrerequisites(cli,{...process.env,...options.env}));
         }
+        stage='launch';
         client = await startClient(cli,{
           cwd,
           model:config.chatDefaults?.[cli]?.model,
@@ -1856,6 +1858,7 @@ export function createSessionManager(
           onExit() {},
           ...(cli === "omp" ? { ephemeral: true } : {}),
         },context,catalogId,config);
+        stage='probe';
         const {nativeAccountPresent,capabilityIssue,...value}=await client.getStatus(explain);
         if(explain&&capabilityIssue){diag.capabilityIssue=capabilityIssue;diag.probe='acp';}
         if(explain&&value.status!=='unavailable'){
@@ -1863,8 +1866,10 @@ export function createSessionManager(
           if(cli==='codex')diag.auth=nativeAccountPresent?'native-account-ready':value.status==='login-required'?'login-required':'not-verified';
           else if(value.status==='login-required')diag.auth='configuration-required';
         }
+        if(explain&&value.status==='unavailable'&&!capabilityIssue)diag.failureStage=stage;
         return withDetails(value);
       } catch {
+        if(explain)diag.failureStage=stage;
           return withDetails({ status: "unavailable", version: null });
       } finally {
         await client?.close();

@@ -191,6 +191,7 @@ export type CliStatus = {
     standaloneClaude?: boolean;
     requiredDependency?: 'claude-override-unavailable';
     capabilityIssue?: 'durable-resume-unsupported';
+    failureStage?: 'configuration' | 'launch' | 'probe';
   };
 };
 

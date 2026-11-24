@@ -6,12 +6,13 @@ import { join } from 'node:path';
 import { openStore } from '../server/store';
 import { createSessionManager } from '../server/sessions';
 import type { Config } from '../shared/types';
-const native = vi.hoisted(()=>({launches:[] as any[],turns:[] as any[]}));
-vi.mock('../server/acp',()=>({startAcp:async(cli:string,o:any)=>{native.launches.push({cli,...o});return {
- getStatus:async()=>({status:'ready',version:'synthetic'}),listModels:async()=>[{id:'synthetic',label:'Synthetic'}],startThread:async()=> 'acp-session',resumeThread:async()=>{},
+import {runtimeIds} from '../shared/runtimes';
+const native = vi.hoisted(()=>({launches:[] as any[],turns:[] as any[],fail:null as null|'launch'|'probe'}));
+vi.mock('../server/acp',()=>({startAcp:async(cli:string,o:any)=>{native.launches.push({cli,...o});if(native.fail==='launch')throw new Error('DO_NOT_EXPOSE');return {
+ getStatus:async()=>{if(native.fail==='probe')throw new Error('DO_NOT_EXPOSE');return {status:'ready',version:'synthetic'};},listModels:async()=>[{id:'synthetic',label:'Synthetic'}],startThread:async()=> 'acp-session',resumeThread:async()=>{},
  startTurn:async(...args:any[])=>{native.turns.push(args);return 'acp-turn';},close(){},replyApproval(){},interrupt:async()=>{},
 };}}));
-afterEach(()=>{vi.unstubAllEnvs();native.launches=[];native.turns=[];});
+afterEach(()=>{vi.unstubAllEnvs();native.launches=[];native.turns=[];native.fail=null;});
 it.each(['claude','gemini','opencode','codebuddy','kimi','dsh','grok'] as const)('applies %s default environment/approval to actual ACP sends and probes, and Agent override on resume',async(cli)=>{
  const home=await mkdtemp(join(tmpdir(),'mana-runtime-acp-'));const store=openStore(home);
  const config:Config={version:2,runtimes:[cli],projects:[],agents:[{id:'a',name:'A',instructions:'Synthetic',defaultCli:cli,models:{},mcp:[],skills:[]}],runtimeDefaults:{[cli]:{env:{SERVICE:'${ACP_SOURCE}'},approvalMode:'auto'}}};
@@ -76,5 +77,31 @@ it('labels an ACP handshake as protocol evidence, not provider authentication', 
   expect(details).toMatchObject({status:'ready',version:'synthetic',diagnostics:{host:'local',probe:'acp',auth:'not-verified'}});
   expect(Object.keys(details.diagnostics!).sort()).toEqual(['auth','executable','host','probe']);
   expect(await manager.getCliStatus(undefined,'gemini')).toEqual({status:'ready',version:'synthetic'});
+ }finally{await manager.close();store.close();await rm(home,{recursive:true,force:true});}
+});
+
+it('reports unavailable setup before any native launcher for all 14 registered CLIs',async()=>{
+ const home=await mkdtemp(join(tmpdir(),'mana-runtime-failure-')), store=openStore(home);
+ const config:Config={version:2,runtimes:[...runtimeIds],projects:[],agents:[],runtimeDefaults:Object.fromEntries(runtimeIds.map(cli=>[cli,{gateway:'unavailable'}]))};
+ const manager=createSessionManager(store,async()=>config,undefined,undefined,home);
+ try{
+  for(const cli of runtimeIds){
+   const status=await manager.getCliStatus(undefined,cli,undefined,'runtime',true);
+   expect(status,cli).toMatchObject({status:'unavailable',diagnostics:{failureStage:'configuration',executable:'not-verified',auth:'not-verified'}});
+   expect(await manager.getCliStatus(undefined,cli)).toEqual({status:'unavailable',version:null});
+  }
+  expect(native.launches).toHaveLength(0);
+ }finally{await manager.close();store.close();await rm(home,{recursive:true,force:true});}
+});
+it.each(['launch','probe'] as const)('returns only a safe diagnostic for native %s failure',async stage=>{
+ const home=await mkdtemp(join(tmpdir(),'mana-runtime-failure-')), store=openStore(home);
+ const config:Config={version:2,runtimes:['gemini'],projects:[],agents:[]};
+ const manager=createSessionManager(store,async()=>config,undefined,undefined,home);
+ try{
+  native.fail=stage;
+  const status=await manager.getCliStatus(undefined,'gemini',undefined,'runtime',true);
+  expect(status).toMatchObject({status:'unavailable',diagnostics:{failureStage:stage,auth:'not-verified'}});
+  expect(JSON.stringify(status)).not.toContain('DO_NOT_EXPOSE');
+  expect(native.turns).toHaveLength(0);
  }finally{await manager.close();store.close();await rm(home,{recursive:true,force:true});}
 });

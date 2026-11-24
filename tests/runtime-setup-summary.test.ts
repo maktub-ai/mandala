@@ -34,3 +34,14 @@ it('explains the actionable Claude override without showing a configured path',(
  expect(html).toContain('bundled executable');
  expect(html).not.toContain('adapter is not runnable');
 });
+
+it.each([
+ ['configuration','Runtime settings prevented the check'],
+ ['launch','Could not start the native CLI'],
+ ['probe','The native CLI started, but its readiness check failed'],
+] as const)('shows an actionable and precise explanation for %s', (failureStage,label)=>{
+ const status={status:'unavailable',version:null,diagnostics:{host:'local',executable:'not-verified',probe:'failed',auth:'not-verified',failureStage}} satisfies CliStatus;
+ const html=renderToStaticMarkup(createElement(RuntimeProbeSummary,{status}));
+ expect(html).toContain(label);
+ expect(html).not.toContain('launcher was found');
+});
