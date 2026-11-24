@@ -247,15 +247,19 @@ runtime=/private/tmp/<staging>/Mandala.app/Contents/Resources/runtime
 "$runtime/bin/node" scripts/desktop-runtime-conformance.mjs "$runtime" <expected-40-character-source-sha>
 ```
 
-The pilot starts the packaged backend with its bundled Node, a disposable local
+The matrix starts the packaged backend with its bundled Node, a disposable local
 Mandala owner, a synthetic home, and an exact fixture-only PATH. It does not start
 the Electron UI or a login shell. An additional macOS QA sandbox permits only
 the staged Node and allowlisted shim programs, with network access scoped to
 loopback; if that profile is unavailable, the test fails rather than using the host
 environment. Each probe is checked against the launcher ledger and protocol
-allowlist. It covers Codex account presence, Claude ACP initialization, Cursor
-version output, Hermes Gateway session setup, and negative missing-command
-cases for Codex and Claude ACP. No prompt is sent; this does not establish real
+allowlist. A test keeps launcher IDs, commands and catalog arguments aligned
+with all 14 advertised runtimes. Evidence covers Codex account presence; OMP
+and Pi RPC state (including mocked Pi permission-extension registration);
+Claude, Gemini, OpenCode, CodeBuddy, Kimi, DSH and Grok ACP initialization;
+Cursor and Antigravity version output; and Hermes and OpenClaw Gateway session
+setup. Each negative case hides exactly one launcher while leaving the others
+in PATH; none should be launched as a fallback. No prompt is sent; this does not establish real
 provider login, model access, an initial task, or Windows behavior.
 
 Run `npm run release:check` before committing a release. It rejects tracked files that match ignore rules, including files committed before an ignore rule was added. Desktop packaging and the local service release run this check automatically. Review the staged diff and inspect packaged artifacts separately; this check does not scan credentials or Git history.

@@ -3,63 +3,71 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, constants } from 'node:fs';
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
+import cases from './desktop-runtime-conformance-cases.json' with { type:'json' };
 
 const script = fileURLToPath(import.meta.url);
-const cases = [
-  { cli:'codex', command:'codex', args:['app-server','--stdio'], probe:'account',
-    auth:'native-account-ready', version:'9.8.1', methods:['initialize','initialized','account/read'] },
-  { cli:'claude', command:'claude-agent-acp', args:[], probe:'acp',
-    auth:'not-verified', version:'9.8.2', methods:['initialize'] },
-  { cli:'cursor', command:'agent', args:['--version'], probe:'version-only',
-    auth:'not-verified', version:'9.8.3', methods:[] },
-  { cli:'hermes', command:'hermes', args:['acp'], probe:'gateway-session',
-    auth:'not-verified', version:'9.8.4', methods:['initialize','session/new'], optionalMethods:['session/load'] },
-];
 const guard = 'claude';
 const deny = ['EPERM','EACCES'];
 
-function shim(name, ledger, fixtureRoot) {
+function shim(name, ledger, fixtureRoot, runtime) {
   const record = event => appendFileSync(ledger, JSON.stringify({ name, event })+'\n');
-  const bad = () => { record('unexpected'); process.exit(88); };
+  const bad = (stage='rpc') => { record('unexpected-'+stage); process.exit(88); };
   const row = cases.find(item => item.command === name);
   record('launch');
   const args = process.argv.slice(5);
   if (!row || process.env.HOME !== join(fixtureRoot,'user') ||
       process.env.PATH !== join(fixtureRoot,'bin') ||
-      Object.keys(process.env).some(name => /^(OPENAI_|ANTHROPIC_|CLAUDE_CONFIG_DIR|HTTPS?_PROXY|ALL_PROXY|NODE_OPTIONS|NODE_PATH)/i.test(name))) bad();
-  if (row.cli !== 'codex' && row.cli !== 'cursor' && ['--version','--help'].includes(args.at(-1)) &&
-      (args.length === 1 || JSON.stringify(args.slice(0,-1)) === JSON.stringify(row.args))) {
+      !process.cwd().startsWith(join(fixtureRoot,'scratch','mana-catalog-')) ||
+      Object.keys(process.env).some(name => /^(OPENAI_|ANTHROPIC_|CLAUDE_CONFIG_DIR|HTTPS?_PROXY|ALL_PROXY|NODE_OPTIONS|NODE_PATH)/i.test(name))) bad('isolation');
+  const exact=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
+  const expectedArgs=row.args.map(arg=>arg.replace('$scratch-cwd',process.cwd()).replace('$pi-extension',join(runtime,'server','pi-permission-extension.mjs')));
+  const acp=row.probe==='acp'||row.probe==='gateway-session';
+  if (acp && ['--version','--help'].includes(args.at(-1)) &&
+      (args.length === 1 || exact(args.slice(0,-1),expectedArgs))) {
     record(args.at(-1));
     process.stdout.write(row.version+'\n');
     return;
   }
-  if (JSON.stringify(args) !== JSON.stringify(row.args)) bad();
-  if (row.cli === 'cursor') { record('version'); process.stdout.write(row.version+'\n'); return; }
+  if (row.cli==='openclaw') {
+    if (exact(args,['config','get','gateway.remote.url','--json'])) { record('local-config'); process.stdout.write('null\n'); return; }
+    if (exact(args,['models','list','--json'])) { record('model-catalog'); process.stdout.write('{"models":[{"key":"fixture/model","tags":["default"]}]}\n'); return; }
+  }
+  if (!exact(args,expectedArgs)) bad('argv');
+  if (row.probe==='version-only') { record('version'); process.stdout.write(row.version+'\n'); return; }
+  if (row.cli==='omp') process.stdout.write('{"type":"ready"}\n');
 
   const sessionId = 'synthetic-gateway-session';
   const reader = createInterface({input:process.stdin});
   reader.on('line', line => {
     let request;
     try { request = JSON.parse(line); } catch { return bad(); }
-    const {id, method, params} = request;
+    const {id, params} = request;
+    const method=row.probe==='rpc'?request.type:request.method;
     // The fixture never sends a prompt, and fails if the package tries one.
     if (!row.methods.includes(method) && !row.optionalMethods?.includes(method)) return bad();
     record(method);
     if (id === undefined && method === 'initialized') return;
     let result;
+    if (row.probe==='rpc') {
+      if(typeof id!=='string')return bad();
+      const data=method==='get_state'?{sessionFile:join(process.cwd(),'fixture-session'),model:{id:'synthetic',provider:'fixture'}}:
+        {commands:[{name:'mandala-permission-gate',source:'extension',sourceInfo:{path:join(runtime,'server','pi-permission-extension.mjs')}}]};
+      process.stdout.write(JSON.stringify({type:'response',id,success:true,data})+'\n');
+      return;
+    }
     if (row.cli === 'codex') {
       if(method === 'initialize') result={userAgent:'fixture/'+row.version};
       if(method === 'account/read' && params?.refreshToken === false) result={requiresOpenaiAuth:true,account:{type:'chatgpt'}};
     } else {
-      if(method === 'initialize') result={protocolVersion:1,agentInfo:{name:'fixture',version:row.version},agentCapabilities:{loadSession:true}};
+      if(method === 'initialize') result={protocolVersion:1,agentInfo:{name:'fixture',version:row.version},agentCapabilities:row.cli==='openclaw'?{sessionCapabilities:{resume:{}}}:{loadSession:true}};
       if(method === 'session/new' && params?.mcpServers?.length === 0) result={sessionId};
-      if(method === 'session/load' && params?.sessionId === sessionId && params?.mcpServers?.length === 0) result={};
+      if(['session/load','session/resume'].includes(method) && params?.sessionId === sessionId && params?.mcpServers?.length === 0) result={};
     }
     if (!result || id === undefined) return bad();
     process.stdout.write(JSON.stringify({...row.cli==='codex'?{}:{jsonrpc:'2.0'},id,result})+'\n');
@@ -110,29 +118,35 @@ async function worker(runtime, root, node, build) {
     for (const row of cases) {
       const previous=(await rows()).length;
       const value=await statusOf(row.cli);
-      assert.equal(value.status,'ready',row.cli+' synthetic readiness failed');
+      const entries=(await rows()).slice(previous);
+      assert.equal(value.status,'ready',row.cli+' synthetic readiness failed ('+value.diagnostics?.failureStage+'; '+entries.map(item=>item.event).join(',')+')');
       assert.equal(value.version,row.version);
       assert.equal(value.diagnostics.probe,row.probe);
       assert.equal(value.diagnostics.auth,row.auth);
       assert.equal(value.diagnostics.executable,'executable');
-      const entries=(await rows()).slice(previous);
-      assert(entries.length>0 && entries.every(item=>item.name===row.command&&item.event!=='unexpected'),row.cli+' used a wrong launcher or method');
+      assert(entries.length>0 && entries.every(item=>item.name===row.command&&!item.event.startsWith('unexpected-')),row.cli+' used a wrong launcher or method');
       assert(entries.some(item=>item.event==='launch'));
       for(const method of row.methods)assert(entries.some(item=>item.event===method),row.cli+' omitted '+method);
-      if(row.cli==='cursor')assert(entries.some(item=>item.event==='version'));
+      if(row.probe==='rpc')assert.equal(entries.filter(item=>item.event==='get_state').length,2,row.cli+' must start and probe independently');
+      if(row.probe==='version-only')assert(entries.some(item=>item.event==='version'));
+      if(row.cli==='openclaw') for(const method of ['local-config','model-catalog'])assert(entries.some(item=>item.event===method),row.cli+' omitted '+method);
       evidence.push({cli:row.cli,probe:row.probe,observed:[...new Set(entries.map(item=>item.event))]});
     }
     const missing=[];
-    for(const cli of ['codex','claude']){
-      const {command}=cases.find(item=>item.cli===cli);
+    for(const {cli,command} of cases){
       const count=(await rows()).length;
-      await rm(join(root,'bin',command));
-      const value=await statusOf(cli);
-      assert.equal(value.status,'unavailable');
-      assert.equal(value.diagnostics.executable,'missing');
-      if(cli==='claude')assert.equal(value.diagnostics.standaloneClaude,true);
-      assert.equal((await rows()).length,count,'Missing starter ran another command');
-      missing.push(cli);
+      const exactLauncher=join(root,'bin',command), hidden=join(root,'missing-'+command);
+      // Remove only the launcher under test. Every other mock stays available
+      // so an accidental cross-runtime fallback is also observed.
+      await rename(exactLauncher,hidden);
+      try {
+        const value=await statusOf(cli);
+        assert.equal(value.status,'unavailable',cli+' unexpectedly passed without its launcher');
+        assert.equal(value.diagnostics.executable,'missing');
+        if(cli==='claude')assert.equal(value.diagnostics.standaloneClaude,true);
+        assert.equal((await rows()).length,count,cli+' missing starter ran another command');
+        missing.push(cli);
+      } finally { await rename(hidden,exactLauncher); }
     }
     service.send({type:'mandala:stop'});
     let timer;
@@ -161,6 +175,7 @@ async function run(path, expectedCommit) {
   assert.equal(verified.status,0,'Staged package signature verification failed');
   const node=join(runtime,'bin','node');
   const metadata=await lstat(node);
+  assert((await lstat(join(runtime,'server','pi-permission-extension.mjs'))).isFile(),'Missing packaged Pi permission extension');
   assert(metadata.isFile() && !metadata.isSymbolicLink(),'Unexpected Node binary layout');
   const root=await realpath(await mkdtemp('/private/tmp/mandala-conformance-'));
   try{
@@ -174,6 +189,7 @@ async function run(path, expectedCommit) {
       await writeFile(file,'#!/usr/bin/env node\n'+
         'process.argv.splice(2,0,"--shim",'+JSON.stringify(name)+','+JSON.stringify(ledger)+');\n'+
         'process.env.MANDALA_QA_TEST_ROOT='+JSON.stringify(root)+';\n'+
+        'process.env.MANDALA_QA_TEST_RUNTIME='+JSON.stringify(runtime)+';\n'+
         'void import('+JSON.stringify(script)+');\n',{mode:0o700,flag:'wx'});
     }
     // Byte copy the staged Node into PATH; chmod never touches the package.
@@ -193,7 +209,7 @@ async function run(path, expectedCommit) {
     // IPC disconnect and its desktop lifecycle shuts down.
     const result=spawnSync('/usr/bin/sandbox-exec',['-p',profile,node,script,'--worker',runtime,root,node,expectedCommit],{
       cwd:root,env:{HOME:user,PATH:bin,TMPDIR:scratch,LANG:'C',NO_PROXY:'*',MANDALA_HOME:home,MANDALA_PORT:'0',MANDALA_DESKTOP:'1'},
-      encoding:'utf8',timeout:240000,maxBuffer:256*1024,
+      encoding:'utf8',timeout:(2*cases.length+4)*18000+45000,maxBuffer:256*1024,
     });
     assert.equal(result.status,0,result.stderr||result.error?.message||'Conformance exited without evidence');
     return JSON.parse(result.stdout);
@@ -202,7 +218,7 @@ async function run(path, expectedCommit) {
 
 const [, , mode, ...args]=process.argv;
 if(mode==='--shim'){
-  shim(args[0],args[1],process.env.MANDALA_QA_TEST_ROOT);
+  shim(args[0],args[1],process.env.MANDALA_QA_TEST_ROOT,process.env.MANDALA_QA_TEST_RUNTIME);
 }else if(mode==='--worker'){
   const [runtime,root,node,expectedCommit]=args;
   // Do not permit direct invocation: the worker itself verifies the exec sandbox.
