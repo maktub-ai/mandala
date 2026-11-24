@@ -1,6 +1,6 @@
 import {spawnSync} from 'node:child_process';
 import {test,expect,afterEach,vi} from 'vitest';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdirSync,mkdtempSync,realpathSync,rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {openStore} from '../server/store';
@@ -13,18 +13,23 @@ import type {Config} from '../shared/types';
 import type {RunIdentity} from '../shared/tasks';
 import type {CodexClient,CodexOptions} from '../server/codex';
 const clean:(()=>void)[]=[];afterEach(()=>clean.splice(0).forEach(f=>f()));
-const config:Config={version:2,projects:[{id:'p',name:'P',cwd:'/tmp',agentIds:['a'],mcp:[],skills:[],resources:[]}],agents:[{id:'a',name:'A',defaultCli:'codex',models:{},instructions:'',mcp:[],skills:[]}]};
+function fixtureConfig(home:string):Config {
+ const workspace=join(home,'workspace');mkdirSync(workspace);
+ return {version:2,projects:[{id:'p',name:'P',cwd:realpathSync(workspace),agentIds:['a'],mcp:[],skills:[],resources:[]}],agents:[{id:'a',name:'A',defaultCli:'codex',models:{},instructions:'',mcp:[],skills:[]}]};
+}
+const denyOmp=async()=>{throw new Error('Task recovery fixture must not start OMP');};
 function setup(cli:'codex'|'omp'='codex'){
- const home=mkdtempSync(join(tmpdir(),'mana-recovery-'));const store=openStore(home);let outcome='unknown',callbacks:CodexOptions;const starts:string[]=[],nativeCalls:{method:string;id:string}[]=[],inspections:RunIdentity[]=[];
+ const home=mkdtempSync(join(tmpdir(),'mana-recovery-')),config=fixtureConfig(home),store=openStore(home);let outcome='unknown',callbacks:CodexOptions;const starts:string[]=[],nativeCalls:{method:string;id:string}[]=[],inspections:RunIdentity[]=[];
  const factory=async(options:CodexOptions):Promise<CodexClient>=>{callbacks=options;return {getStatus:async()=>({status:'ready',version:'fake'}),listModels:async()=>[],startThread:async()=>{const id=store.listConversations().some(c=>c.nativeId==='session')?'fresh-session':'session';nativeCalls.push({method:'startThread',id});return id;},resumeThread:async(id)=>{nativeCalls.push({method:'resumeThread',id});},startTurn:async(_,text)=>{starts.push(text);return 'new-turn';},interrupt:async()=>{},replyApproval(){},close(){},inspectInvocation:async(identity)=>{inspections.push(identity);return outcome as any;}};};
- let manager=createSessionManager(store,async()=>config,factory,undefined,home);
+ const ompFactory=vi.fn(denyOmp);
+ let manager=createSessionManager(store,async()=>config,factory,ompFactory,home);
  const tasks=createTasks(store,{resolve:()=>({agentId:'a',projectId:'p',hostId:'local',input:'fixed input',sourceVersions:[],requiredOutputAssetIds:[],effectiveCapabilities:[],nativeVisibility:'partial'})});
  const c=store.createConversation({projectId:'p',agentId:'a',cli,model:null});
  const task=tasks.createTask({userId:'local'},{goal:'goal',criteria:[],acceptance:'delivery',projectId:'p',assigneeAgentId:'a'},'create');
  const prepared=tasks.prepareStart({userId:'local'},task.id,task.revision,'start');
  const run=store.transaction(()=>prepared.commit({executionConversationId:c.id,mode:'dedicated',destinationConversationId:null}));
  clean.push(()=>{manager.close();store.close();rmSync(home,{recursive:true,force:true});});
- return{home,store,tasks,c,task,run,starts,nativeCalls,inspections,exit:(reason:string)=>callbacks.onExit(reason),setOutcome:(s:string)=>{outcome=s;},restart:()=>{manager.close();manager=createSessionManager(store,async()=>config,factory,undefined,home);return manager;},get manager(){return manager;}};
+ return{home,store,tasks,c,task,run,starts,nativeCalls,inspections,ompFactory,exit:(reason:string)=>callbacks.onExit(reason),setOutcome:(s:string)=>{outcome=s;},restart:()=>{manager.close();manager=createSessionManager(store,async()=>config,factory,ompFactory,home);return manager;},get manager(){return manager;}};
 }
 test('restart dispatches persisted queued Run once with its fixed input',async()=>{const f=setup();await f.restart().reconcileRuns('local');await vi.waitFor(()=>expect(f.starts).toEqual(['fixed input']));});
 test('shutdown marks a submitted Run unknown without inventing terminal success or retrying it',async()=>{
@@ -70,21 +75,21 @@ test('uncertain input dismissal preserves native occupancy and following queued 
  const m=f.restart();await m.reconcileRuns('local');expect(f.starts).toEqual([]);m.resolveUnknownInput(one.id,'dismiss','dismiss-one');await new Promise(r=>setImmediate(r));expect(f.starts).toEqual([]);expect(m.listUserInputs(f.c.id)).toMatchObject([{id:one.id,state:'cancelled'},{id:two.id,state:'queued'}]);expect(f.store.getConversation(f.c.id)?.status).toBe('interrupted');
 });
 test('actual subprocess crash after native send with no response never repeats the action',async()=>{
- const home=mkdtempSync(join(tmpdir(),'mana-crash-start-'));
+ const home=mkdtempSync(join(tmpdir(),'mana-crash-start-')),config=fixtureConfig(home);
  const code=`import {openStore} from './server/store.ts';import {createSessionManager} from './server/sessions.ts';import {createTasks} from './server/tasks.ts';import {writeFileSync} from 'node:fs';
  const home=process.env.OPEN_MANA_HOME,store=openStore(home),config=${JSON.stringify(config)};
  const factory=async()=>({getStatus:async()=>({status:'ready',version:'fixture'}),listModels:async()=>[],startThread:async()=> 'native-session',resumeThread:async()=>{},startTurn:async()=>{writeFileSync(home+'/sent','once');process.exit(17);},interrupt:async()=>{},replyApproval(){},close(){}});
- const m=createSessionManager(store,async()=>config,factory,undefined,home);const tasks=createTasks(store,{resolve:()=>({agentId:'a',projectId:'p',hostId:'local',input:'action',sourceVersions:[],requiredOutputAssetIds:[],effectiveCapabilities:[],nativeVisibility:'partial'})});
+ const m=createSessionManager(store,async()=>config,factory,async()=>{throw Error('Unexpected OMP launch in crash child');},home);const tasks=createTasks(store,{resolve:()=>({agentId:'a',projectId:'p',hostId:'local',input:'action',sourceVersions:[],requiredOutputAssetIds:[],effectiveCapabilities:[],nativeVisibility:'partial'})});
  const c=store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null}),p={userId:'local'};const t=tasks.createTask(p,{goal:'goal',criteria:[],acceptance:'delivery',projectId:'p',assigneeAgentId:'a'},'new');const prepared=tasks.prepareStart(p,t.id,1,'start');store.transaction(()=>prepared.commit({executionConversationId:c.id,mode:'dedicated',destinationConversationId:null}));await m.reconcileRuns('local');`;
  const result=spawnSync(process.execPath,['--import','tsx','--input-type=module','-e',code],{cwd:process.cwd(),env:{...process.env,OPEN_MANA_HOME:home},encoding:'utf8',timeout:10000});
  expect(result.status,result.stderr).toBe(17);
- const store=openStore(home);let starts=0;const m=createSessionManager(store,async()=>config,async()=>{starts++;throw Error('No replay');},undefined,home);
+ const store=openStore(home);let starts=0;const m=createSessionManager(store,async()=>config,async()=>{starts++;throw Error('No replay');},denyOmp,home);
  try{await m.reconcileRuns('local');expect(store.database.prepare('SELECT state FROM task_runs').get()!.state).toBe('unknown');expect(starts).toBe(0);}finally{m.close();store.close();rmSync(home,{recursive:true,force:true});}
 });
 test('actual subprocess crash after publish repairs original output projection and receipt',async()=>{
- const home=mkdtempSync(join(tmpdir(),'mana-crash-artifact-'));
- const code=`import {openStore} from './server/store.ts';import {createSessionManager} from './server/sessions.ts';import {createTasks} from './server/tasks.ts';import {createAssets} from './server/assets.ts';import {createAssetFiles} from './server/asset-files.ts';import {createRunArtifacts} from './server/run-artifacts.ts';import {writeFileSync} from 'node:fs';
- const home=process.env.OPEN_MANA_HOME,store=openStore(home),config=${JSON.stringify(config)};const m=createSessionManager(store,async()=>config,undefined,undefined,home),files=createAssetFiles(home),assets=createAssets(store,files);
+ const home=mkdtempSync(join(tmpdir(),'mana-crash-artifact-')),config=fixtureConfig(home);
+ const code=`import {openStore} from './server/store.ts';import {createTasks} from './server/tasks.ts';import {createAssets} from './server/assets.ts';import {createAssetFiles} from './server/asset-files.ts';import {createRunArtifacts} from './server/run-artifacts.ts';import {writeFileSync} from 'node:fs';
+ const home=process.env.OPEN_MANA_HOME,store=openStore(home),files=createAssetFiles(home),assets=createAssets(store,files);
  const tasks=createTasks(store,{assets,resolve:()=>({agentId:'a',projectId:'p',hostId:'local',input:'action',sourceVersions:[],requiredOutputAssetIds:[],effectiveCapabilities:[],nativeVisibility:'partial'})}),p={userId:'local'};
  const c=store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null}),t=tasks.createTask(p,{goal:'goal',criteria:[],acceptance:'delivery',projectId:'p',assigneeAgentId:'a'},'new');const prepared=tasks.prepareStart(p,t.id,1,'start'),run=store.transaction(()=>prepared.commit({executionConversationId:c.id,mode:'dedicated',destinationConversationId:null}));tasks.bindRunIdentity({runId:run.id,hostId:'local',nativeSessionId:'session',nativeTurnId:'turn'});
  writeFileSync(home+'/output.txt','synthetic report');const tools=createRunArtifacts({store,files,assets,principal:{...p,agentId:'a',runId:run.id},outputRoot:home,sourceVersions:[],assertActive(){}});
@@ -92,7 +97,7 @@ test('actual subprocess crash after publish repairs original output projection a
  const result=spawnSync(process.execPath,['--import','tsx','--input-type=module','-e',code],{cwd:process.cwd(),env:{...process.env,OPEN_MANA_HOME:home},encoding:'utf8',timeout:10000});expect(result.status,result.stderr).toBe(19);
  const store=openStore(home),original=store.database.prepare('SELECT id FROM asset_versions').get()!.id;
  let starts=0;const factory=async()=>({inspectInvocation:async()=> 'succeeded',close(){},startTurn:async()=>{starts++;return 'no';}} as unknown as CodexClient);
- const m=createSessionManager(store,async()=>config,factory,undefined,home);
+ const m=createSessionManager(store,async()=>config,factory,denyOmp,home);
  try{expect(store.database.prepare('SELECT COUNT(*) n FROM run_artifact_commands').get()!.n).toBe(0);await m.reconcileRuns('local');expect(store.database.prepare('SELECT COUNT(*) n FROM asset_versions').get()!.n).toBe(1);const receipt=store.database.prepare('SELECT artifact_versions FROM task_receipts').get()!;expect(JSON.parse(receipt.artifact_versions as string)[0].versionId).toBe(original);const command=store.database.prepare('SELECT result FROM run_artifact_commands').get()!;expect(JSON.parse(command.result as string).version.id).toBe(original);expect(starts).toBe(0);}finally{m.close();store.close();rmSync(home,{recursive:true,force:true});}
 });
 test.each([false,true])('restart reconstructs same-task origin continuation only at current epoch (stopped=%s)',async(stopped)=>{
@@ -109,7 +114,7 @@ test('an old terminal Run cannot release a newer uncorrelated interrupted invoca
  f.store.appendEvent(f.c.id,'metadata',{execution:'started',runId:'new-ordinary-invocation'});f.store.updateConversation(f.c.id,{status:'running',nativeId:'session',turnId:'old-turn'});f.manager.enqueueUserInput(f.c.id,'wait for uncertain native','fresh');
  await f.restart().reconcileRuns('local');expect(f.starts).toEqual([]);expect(f.store.getConversation(f.c.id)?.status).toBe('interrupted');
 });
-test('OMP local generation identity is unsupported and stays unknown without a native call',async()=>{const f=setup('omp');f.tasks.bindRunIdentity({runId:f.run.id,hostId:'local',nativeSessionId:'omp-session',nativeTurnId:'local-generation-turn'});f.setOutcome('succeeded');const result=await f.restart().reconcileRuns('local');expect(result.unknown).toBe(1);expect(f.tasks.getRun({userId:'local'},f.run.id).state).toBe('unknown');expect(f.starts).toEqual([]);});
+test('OMP local generation identity is unsupported and stays unknown without a native call',async()=>{const f=setup('omp');f.tasks.bindRunIdentity({runId:f.run.id,hostId:'local',nativeSessionId:'omp-session',nativeTurnId:'local-generation-turn'});f.setOutcome('succeeded');const result=await f.restart().reconcileRuns('local');expect(result.unknown).toBe(1);expect(f.tasks.getRun({userId:'local'},f.run.id).state).toBe('unknown');expect(f.starts).toEqual([]);expect(f.ompFactory).not.toHaveBeenCalled();});
 test('F2 retry of old failed Task preserves newer unrelated invocation occupancy',async()=>{
  const f=setup(),p={userId:'local'},identity={runId:f.run.id,hostId:'local',nativeSessionId:'session',nativeTurnId:'old-turn'};f.tasks.bindRunIdentity(identity);f.tasks.applyRunEvent({...identity,eventKey:'terminal:old',outcome:'failed',summary:'failed old task',artifactVersions:[]});f.store.appendEvent(f.c.id,'metadata',{execution:'started',runId:'newer-native'});f.store.updateConversation(f.c.id,{status:'running',nativeId:'session',turnId:'newer-turn'});const m=f.restart();await m.reconcileRuns('local');const current=f.tasks.getTask(p,f.task.id),retry=await m.retryTask(current.id,current.revision,'retry-old');
  expect(f.store.getConversation(f.c.id)).toMatchObject({status:'interrupted',nativeId:'session',turnId:'newer-turn'});expect(retry.routing?.executionConversationId).not.toBe(f.c.id);await vi.waitFor(()=>expect(f.starts).toHaveLength(1));expect(f.store.getConversation(f.c.id)?.turnId).toBe('newer-turn');expect(f.nativeCalls).toEqual([{method:'startThread',id:'fresh-session'}]);expect(f.store.getConversation(retry.routing!.executionConversationId)?.nativeId).toBe('fresh-session');
