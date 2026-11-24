@@ -43,14 +43,14 @@ it('does not auto-suggest a runtime from a transport/version probe alone',async(
  expect(canSuggestRuntime({status:'ready',version:'fixture',diagnostics:{host:'local',executable:'executable',probe:'account',auth:'native-account-ready'}})).toBe(true);
 });
 
-it('checks every exact registered launcher and only demands a separate Claude executable when explicitly configured',async()=>{
+it('checks each vendor launcher and honors the explicit Claude executable selection',async()=>{
  const {runtimeCatalog,runtimeIds}=await import('../shared/runtimes');
  const {diagnoseRuntimePrerequisites}=await import('../server/native-spawn');
  const x=await fixture(),folder=x.env.PATH;
  for(const id of runtimeIds) {
   const command=runtimeCatalog[id].command;
   expect(diagnoseRuntimePrerequisites(id,x.env)).toMatchObject({executable:'missing'});
-  const path=join(folder,command+(process.platform==='win32'?'.cmd':''));
+  const path=join(folder,command+(process.platform==='win32'?(id==='claude'?'.exe':'.cmd'):''));
   await writeFile(path,'never executed',{mode:0o755});
   expect(diagnoseRuntimePrerequisites(id,x.env)).toMatchObject({executable:'executable'});
  }

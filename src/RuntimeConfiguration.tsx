@@ -2,7 +2,7 @@ import RuntimeSetup,{RuntimeProbeSummary} from './RuntimeSetup';
 import Button from './ui/Button';
 import { useEffect, useRef, useState } from 'react';
 import type { Cli, CliStatus, Config, ModelChoice, RuntimeConfig } from '../shared/types';
-import { enabledRuntimes, isCli, runtimeCatalog, runtimeIds, runtimeLabel } from '../shared/runtimes';
+import {runtimeCapabilities, enabledRuntimes, isCli, runtimeCatalog, runtimeIds, runtimeLabel } from '../shared/runtimes';
 import RuntimeSettingsEditor from './RuntimeSettingsEditor';
 import RuntimeIcon from './ui/RuntimeIcon';
 import Select from './ui/Select';
@@ -57,6 +57,8 @@ export default function RuntimeConfiguration({ config, savedConfig, onDraftChang
   };
   const invalidEnv = cli && Object.entries(value[cli]?.env ?? {}).some(([key, ref]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || !/^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(ref));
   const defaults = cli ? chatDefaults[cli] : undefined;
+  const capabilities = cli ? runtimeCapabilities(cli) : undefined;
+  const displayedVersion = status?.diagnostics?.nativeVersion ?? status?.version;
   const selectedModel = models.find(model => model.id === (defaults?.model || models.find(item => item.isDefault)?.id));
   return <section className="runtime-configuration" aria-label={localize((adding?'新增 CLI':'配置 CLI'), (adding?'Add CLI':'Configure CLI'))}>
     <Button type="button" disabled={pending} onClick={() => onNavigate('/settings/runtimes')}><Icon name="arrowLeft" size={16}/>{localize('返回 CLI 接入', 'Back to CLI adapters')}</Button>
@@ -64,13 +66,13 @@ export default function RuntimeConfiguration({ config, savedConfig, onDraftChang
     {adding && (available.length ? <label>{localize('选择 CLI', 'Choose CLI')}<Select ariaLabel={localize('选择 CLI', 'Choose CLI')} value={cli ?? ''} disabled={pending} searchable={false}
       options={available.map(item => ({value:item,label:runtimeLabel(item),icon:<RuntimeIcon cli={item}/>}))} onChange={item => setCli(item as Cli)}/></label> : <p>{localize('所有支持的 CLI 均已启用。', 'All supported CLI adapters are enabled.')}</p>)}
     {cli && <>
-      <div role="status" className="runtime-connection-status">{!status ? t('正在检测…') : status.status === 'ready' ? (localize('CLI 可启动', 'CLI can launch')) : status.status === 'login-required' ? (localize('CLI 要求登录', 'CLI requires login')) : (localize('CLI 不可用', 'CLI unavailable'))}{status?.version && <code>{status.version}</code>}</div>
+      <div role="status" className="runtime-connection-status">{!status ? t('正在检测…') : status.status === 'ready' ? (localize('CLI 可启动', 'CLI can launch')) : status.status === 'login-required' ? (localize('CLI 要求登录', 'CLI requires login')) : (localize('CLI 不可用', 'CLI unavailable'))}{displayedVersion && <code>{displayedVersion}</code>}</div>
       {status && (status.status === 'ready' ? <RuntimeProbeSummary status={status}/> : <RuntimeSetup cli={cli} status={status}/>)}
       {status && status.status !== 'ready' && !status.diagnostics && <p className="field-hint">{localize('检查原生 CLI 安装和认证后重新检测。', 'Check the native CLI installation and authentication, then detect again.')}</p>}
       {probeError && <p role="status" className="form-error">{errorText(probeError)}</p>}
-      {(cli==='cursor'||cli==='antigravity')&&<p className="field-hint">{localize('工具权限按整轮授权；不支持逐工具审批或会话级 MCP 绑定。', 'Tool permission applies to an entire turn. Per-tool approvals and isolated session MCP bindings are unavailable.')}</p>}
+      {(capabilities?.probe==='version-only')&&<p className="field-hint">{localize('工具权限按整轮授权；不支持逐工具审批或会话级 MCP 绑定。', 'Tool permission applies to an entire turn. Per-tool approvals and isolated session MCP bindings are unavailable.')}</p>}
       {cli==='dsh'&&<p className="field-hint">{localize('DSH 工具权限按整轮授权；本轮内的单个工具不会再次请求审批。', 'DSH tool permission applies to an entire turn; individual tools do not prompt again.')}</p>}
-      {(cli==='hermes'||cli==='openclaw')&&<p className="field-hint">{localize('原生 Gateway 执行任务；工具按整轮授权。Gateway、工作目录和 Mandala 业务 CLI 必须位于所选执行机器；远端机器请使用 SSH 执行。停用仅关闭适配连接，不停止原生 Gateway。不用于标题、记忆等受限系统任务。', 'Tasks run in the native Gateway with whole-turn tool approval. The Gateway, working directory and Mandala business CLI must share the selected execution machine; use SSH execution for another machine. Disabling closes the adapter only, preserving the native Gateway. Restricted system tasks are unavailable.')}</p>}
+      {capabilities?.gateway&&<p className="field-hint">{localize('原生 Gateway 执行任务；工具按整轮授权。Gateway、工作目录和 Mandala 业务 CLI 必须位于所选执行机器；远端机器请使用 SSH 执行。停用仅关闭适配连接，不停止原生 Gateway。不用于标题、记忆等受限系统任务。', 'Tasks run in the native Gateway with whole-turn tool approval. The Gateway, working directory and Mandala business CLI must share the selected execution machine; use SSH execution for another machine. Disabling closes the adapter only, preserving the native Gateway. Restricted system tasks are unavailable.')}</p>}
       {cli==='hermes'&&<p className="field-hint">{localize('会话级 MCP 绑定暂不可用：当前原生 Gateway 恢复时无法可靠清空旧绑定。请在原生 Gateway 管理 MCP。', 'Session MCP bindings are unavailable: the current native Gateway cannot reliably clear old bindings on resume. Manage MCP in the native Gateway.')}</p>}
       {cli==='openclaw'&&<p className="field-hint">{localize('不支持会话级 MCP 绑定；存在绑定时会在发送前拒绝。模型使用原生 Gateway 默认值，请在原生设置中更改后新建对话。', 'Session MCP bindings are unsupported and are rejected before dispatch. The model uses the native Gateway default; change it natively and start a new chat.')}</p>}
       {cli==='pi'&&<p className="field-hint">{localize('Pi 工具接入 Mandala 审批；原生 Pi 不支持 MCP 绑定。', 'Pi tools use Mandala approvals. Native Pi does not support MCP bindings.')}</p>}

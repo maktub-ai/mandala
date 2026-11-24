@@ -6,7 +6,7 @@ import type {ExecutionMachine,McpServer,Skill,RuntimeConfig,Cli} from '../shared
 import {skillResources} from '../shared/skills';
 import {runtimeCatalog,runtimeIds} from '../shared/runtimes';
 import {SSH_FRAME_LIMIT,SSH_TRANSFER_LIMIT,SSH_PROTOCOL_VERSION,type SshFrame,type SshEvent,type SshProbe,type SshSkill} from '../shared/ssh-execution';
-import type {CodexClient,CodexOptions} from './codex';
+import type { ExecutionClient, RuntimeOptions } from './execution-client';
 import type {OmpOptions} from './omp';
 import type {BusinessCliRuntime} from './business-cli-runtime';
 import {readBoundedFile,safeRelativePath,safeSshId} from './ssh-service';
@@ -16,7 +16,7 @@ import {isRemoteAbsolutePath} from '../shared/execution-machines';
 type Invoke=(data:{command:string;args:Record<string,unknown>;commandKey:string})=>Promise<unknown>;
 export interface SshExecution{
  request<T=any>(method:string,params:any):Promise<T>;
- start(cli:Cli,options:CodexOptions|OmpOptions,runtimePolicy?:RuntimeConfig,attachOnly?:boolean):Promise<CodexClient>;
+ start(cli:Cli,options:RuntimeOptions|OmpOptions,runtimePolicy?:RuntimeConfig,attachOnly?:boolean):Promise<ExecutionClient>;
  prepareBusiness(invocationId:string,onInvoke:Invoke):Promise<BusinessCliRuntime & {outputRoot:string}>;
  prepareCapabilities(conversationId:string,mcp:McpServer[],skills:Skill[],instructions:string):Promise<string>;
  uploadAttachment(path:string,id:string):Promise<string>;
@@ -76,7 +76,7 @@ export class SshRpcConnection implements SshConnection{
 }
 
 export function createSshExecution(connection:SshConnection,conversationId:string):SshExecution{
- const listeners=new Map<string,CodexOptions>();const invokes=new Map<string,Invoke>();const businessResults=new Map<string,Promise<{result?:unknown;error?:{message:string;code?:string;status?:number}}>>();
+ const listeners=new Map<string,RuntimeOptions>();const invokes=new Map<string,Invoke>();const businessResults=new Map<string,Promise<{result?:unknown;error?:{message:string;code?:string;status?:number}}>>();
  const unboundBusiness:SshEvent[]=[];const unboundRuntime:SshEvent[]=[];
  const handleBusiness=(event:SshEvent)=>{
   const {callId,invocationId,data}=event.payload;const invoke=invokes.get(invocationId);
@@ -98,7 +98,7 @@ export function createSshExecution(connection:SshConnection,conversationId:strin
    for(const method of methods)client[method]=(...args:unknown[])=>{
     const result=connection.request('runtime.call',{runtimeId,method,args});if(method==='replyApproval'){void result.catch(error=>onExit(`SSH approval reply failed: ${error.message}`));return;}return result;
    };
-   return client as CodexClient;
+   return client as ExecutionClient;
   },
   async prepareBusiness(invocationId,onInvoke){
    safeSshId(invocationId);invokes.set(invocationId,onInvoke);const runtime=await connection.request<Omit<BusinessCliRuntime,'dispose'> & {outputRoot:string}>('business.prepare',{invocationId,runtimeId:conversationId});

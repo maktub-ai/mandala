@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Config, DisplayEvent, SystemTaskConfig } from "../shared/types";
 import { enabledRuntimes } from "../shared/runtimes";
-import { startCodex, type CodexClient } from "./codex";
+import type { ExecutionClient } from './execution-client';
+import { startCodex } from './codex';
 import { startOmp } from "./omp";
 import { startNativeRuntime } from "./native-runtime";
 import { systemRuntime } from "./runtime";
@@ -41,7 +42,7 @@ const failureMessage = (error: SystemTaskFailure) => error.code === "source-repl
 
 export const nativeGenerate: SystemGenerator = async (config, prompt, signal, usage) => {
   const cwd = await mkdtemp(join(tmpdir(), "mana-system-"));
-  let client: CodexClient | undefined, settled = false, text = "", stage = "startup";
+  let client: ExecutionClient | undefined, settled = false, text = "", stage = "startup";
   let failure: SystemTaskFailure | undefined;
   let resolve!: (value: string) => void, reject!: (error: Error) => void;
   const result = new Promise<string>((yes, no) => { resolve = yes; reject = no; });

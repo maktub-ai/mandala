@@ -6,7 +6,7 @@ import { readFile, cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import type { CodexClient, CodexOptions } from "./codex";
+import type { ExecutionClient, RuntimeOptions } from './execution-client';
 import type { McpServer, Skill, ApprovalMode } from "../shared/types";
 import { bindLocalCatalogLauncher, runtimeError } from "./runtime";
 import { createRpcClient } from "./rpc";
@@ -54,7 +54,7 @@ export async function prepareCapabilityRuntime(home: string, conversationId: str
   return root;
 }
 
-export type OmpOptions = CodexOptions & {
+export type OmpOptions = RuntimeOptions & {
   validateHandoff?: () => void | Promise<void>;
   resume?: string;
   instructions?: string;
@@ -65,7 +65,7 @@ export type OmpOptions = CodexOptions & {
   approvalMode?: ApprovalMode;
 };
 
-export async function startOmp(options: OmpOptions): Promise<CodexClient> {
+export async function startOmp(options: OmpOptions): Promise<ExecutionClient> {
   const args = ["--mode=rpc", `--cwd=${options.cwd}`, `--approval-mode=${options.approvalMode === "auto" ? "yolo" : options.approvalMode === "strict" ? "always-ask" : "write"}`];
   if (options.ephemeral) args.push("--no-session");
   if (options.resume) args.push(`--resume=${options.resume}`);

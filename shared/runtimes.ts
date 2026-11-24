@@ -1,10 +1,10 @@
-import type { Cli, Config, RuntimeConfig } from "./types";
+import type { Cli, CliStatus, Config, RuntimeConfig } from "./types";
 
 export const runtimeIds = ['codex', 'omp', 'claude', 'gemini', 'opencode', 'codebuddy', 'pi', 'cursor', 'kimi', 'dsh', 'antigravity', 'grok', 'hermes', 'openclaw'] as const;
 export const runtimeCatalog = {
   codex: { name: 'Codex', command: 'codex', args: ['app-server'], protocol: 'native', docs: 'https://developers.openai.com/codex/cli/' },
   omp: { name: 'OMP', command: 'omp', args: ['--mode=rpc'], protocol: 'native', docs: 'https://github.com/can1357/oh-my-pi' },
-  claude: { name: 'Claude Code', command: 'claude-agent-acp', args: [], docs: 'https://github.com/agentclientprotocol/claude-agent-acp', protocol: 'acp' },
+  claude: { name: 'Claude Code', command: 'claude', args: [], docs: 'https://code.claude.com/docs/en/setup', protocol: 'acp' },
   gemini: { name: 'Gemini CLI', command: 'gemini', args: ['--acp'], docs: 'https://geminicli.com/docs/cli/acp-mode/', protocol: 'acp' },
   opencode: { name: 'OpenCode', command: 'opencode', args: ['acp'], docs: 'https://opencode.ai/docs/acp/', protocol: 'acp' },
   codebuddy: { name: 'CodeBuddy', command: 'codebuddy', args: ['--acp'], protocol: 'acp', docs: 'https://www.codebuddy.ai/docs/cli/cli-reference' },
@@ -21,6 +21,19 @@ export function isCli(value: unknown): value is Cli { return runtimeIds.includes
 export function runtimeLabel(cli: Cli): string { return runtimeCatalog[cli].name; }
 // A system transformation requires native tools to be disabled before launch.
 export function supportsSystemTasks(cli:Cli):boolean { return ['codex','omp','claude','gemini','opencode','codebuddy','pi'].includes(cli); }
+export function runtimeCapabilities(cli: Cli) {
+  const protocol = runtimeCatalog[cli].protocol;
+  const gateway = cli === 'hermes' || cli === 'openclaw';
+  const probe: Exclude<NonNullable<CliStatus['diagnostics']>['probe'], 'failed'> =
+    cli === 'codex' ? 'account' : gateway ? 'gateway-session' : protocol === 'stream' ? 'version-only'
+      : protocol === 'acp' ? 'acp' : 'rpc';
+  return {
+    probe,
+    gateway,
+    toolApproval: protocol === 'stream' || gateway || cli === 'dsh' ? 'turn' : 'tool',
+    sessionMcp: protocol !== 'stream' && !gateway && cli !== 'pi',
+  } as const;
+}
 export function enabledRuntimes(config: Pick<Config, "runtimes"> & Partial<Pick<Config, "agents" | "system">>): Cli[] {
   // Missing legacy registration retains saved executor choices, never vendor defaults.
   return [...(config.runtimes ?? new Set([...(config.agents ?? []).filter(a => !a.archivedAt).map(a => a.defaultCli), ...(config.system ? [...(config.system.cli ? [config.system.cli] : []), ...Object.values(config.system.tasks ?? {}).map(task => task.cli)] : [])]))];
@@ -44,7 +57,7 @@ type OfficialRuntimeSetup = { method:'vendor'|'npm'|'native-release'|'gateway'; 
 export const officialRuntimeSetup:Record<Cli,OfficialRuntimeSetup> = {
   codex:{method:'native-release',source:'OpenAI Codex CLI'},
   omp:{method:'native-release',source:'Oh My Pi releases'},
-  claude:{method:'vendor',source:'claude-agent-acp'},
+  claude:{method:'vendor',source:'Claude Code'},
   gemini:{method:'npm',source:'@google/gemini-cli'},
   opencode:{method:'native-release',source:'OpenCode standalone'},
   codebuddy:{method:'npm',source:'@tencent-ai/codebuddy-code',nodeMinimum:'18.20'},

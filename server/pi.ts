@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import type { CodexClient, CodexOptions } from './codex';
+import type { ExecutionClient, RuntimeOptions } from './execution-client';
 import type { ApprovalMode, McpServer } from '../shared/types';
 import type { TurnOptions } from '../shared/chat-input';
 import { canApproveAcpLocally } from './approval-policy';
@@ -16,7 +16,7 @@ const noMcp = (mcp?: McpServer[]) => {
   if (mcp?.length) throw new Error('Pi native RPC does not support MCP servers');
 };
 
-export async function startPi(options: CodexOptions): Promise<CodexClient> {
+export async function startPi(options: RuntimeOptions): Promise<ExecutionClient> {
   if (options.extraArgs?.length) throw new Error('Pi runtime arguments are managed by Mandala');
   const extensionPath = fileURLToPath(new URL('./pi-permission-extension.mjs', import.meta.url));
   const args = ['--mode', 'rpc', '--no-extensions'];

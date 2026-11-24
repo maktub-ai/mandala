@@ -3,10 +3,11 @@ import {constants} from 'node:fs';
 import {lstat,mkdir,open,realpath,writeFile,rm} from 'node:fs/promises';
 import {join,dirname,basename,isAbsolute,relative,sep} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
-import {startCodex,type CodexClient,type CodexOptions} from './codex';
+import type { ExecutionClient, RuntimeOptions } from './execution-client';
+import { startCodex } from './codex';
 import {startOmp,prepareCapabilityRuntime,type OmpOptions} from './omp';
 import {startNativeRuntime} from './native-runtime';
-import {resolveRuntime} from './runtime';
+import {bindLocalCatalogLauncher,resolveRuntime} from './runtime';
 import {createBusinessCliRuntime,type BusinessCliRuntime} from './business-cli-runtime';
 import {conversationEnvironment,listConversationWorkspace,readConversationWorkspaceFile} from './conversation-workspace';
 import {readLocalFilePreview,resolveConversationLocalFiles,localFilePath} from './local-files';
@@ -18,8 +19,11 @@ import {skillResources} from '../shared/skills';
 import type {Cli,Skill} from '../shared/types';
 import {SSH_TRANSFER_LIMIT,type SshRequest,type SshEvent,type SshSkill} from '../shared/ssh-execution';
 
-export type RemoteFactory=(cli:Cli,options:OmpOptions)=>Promise<CodexClient>;
-export const startSshRuntime:RemoteFactory=(cli,options)=>cli==='codex'?startCodex(options):cli==='omp'?startOmp(options):startNativeRuntime(cli,options);
+export type RemoteFactory=(cli:Cli,options:OmpOptions)=>Promise<ExecutionClient>;
+export const startSshRuntime:RemoteFactory=(cli,options)=>{
+ const bound={...options,[bindLocalCatalogLauncher]:true as const};
+ return cli==='codex'?startCodex(bound):cli==='omp'?startOmp(bound):startNativeRuntime(cli,bound);
+};
 const allowedMethods=new Set(['inspectContext','compactThread','getStatus','requiresRuntimeReload','assertReloadable','inspectInvocation','listModels','startThread','resumeThread','forkThread','setSkillRoots','listMcpStatus','listSkills','prepareTurn','startTurn','interrupt','replyApproval']);
 export function safeSshId(value:unknown):string{if(typeof value!=='string'||!/^[A-Za-z0-9_-]{1,160}$/.test(value))throw new Error('Invalid remote identifier');return value;}
 export function safeRelativePath(value:unknown):string{if(typeof value!=='string'||!value||value.length>4096||isAbsolute(value)||/[\\\x00-\x1f]/.test(value)||value.split('/').some(p=>!p||p==='.'||p==='..'))throw new Error('Invalid relative path');return value;}
@@ -38,7 +42,7 @@ function decodeData(data:unknown){if(typeof data!=='string'||data.length>Math.ce
 /** Lives in a detached daemon. A socket going away never closes a native client. */
 export class SshService extends EventEmitter{
  private requests=new Map<string,{signature:string;result:Promise<unknown>}>();
- private clients=new Map<string,Promise<CodexClient>>();
+ private clients=new Map<string,Promise<ExecutionClient>>();
  private subscriptions=new Map<string,number>();
  private starts=new Map<string,Promise<any>>();
  private runtimeStates=new Map<string,{signature:string;busy:boolean;nativeId?:string;retired:boolean;startSequence:number;lastActivity:number}>();

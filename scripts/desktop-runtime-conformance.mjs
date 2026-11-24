@@ -9,10 +9,12 @@ import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
+import { createHash } from 'node:crypto';
+import bridge from './claude-bridge/manifest.json' with { type:'json' };
 import cases from './desktop-runtime-conformance-cases.json' with { type:'json' };
 
 const script = fileURLToPath(import.meta.url);
-const guard = 'claude';
+const guard = 'claude-agent-acp';
 const deny = ['EPERM','EACCES'];
 
 const fixtureInput='Mandala synthetic package first-turn fixture';
@@ -20,6 +22,38 @@ const fixtureAnswer=cli=>'Synthetic package result for '+cli;
 const streamId='89d89771-5861-4e5c-ab40-d97fde6b1f91';
 const approvedMethods=new Set(['config/read','thread/start','thread/read','thread/backgroundTerminals/list','mcpServerStatus/list','skills/list','get_available_commands','session/new','session/load','session/resume']);
 const isInput=text=>typeof text==='string'&&(text===fixtureInput||text.endsWith('\n\n'+fixtureInput));
+
+function claudeFixture(row, args, canPrompt, record, bad) {
+  const emit = value => process.stdout.write(JSON.stringify(value)+'\n');
+  if (args.length===1 && args[0]==='--version') {
+    record('--version'); process.stdout.write(row.nativeVersion+' (Claude Code)\n'); return;
+  }
+  if (args.join(' ')==='auth status --json') {
+    record('auth-status'); emit({loggedIn:true,authMethod:'fixture'}); return;
+  }
+  const sessionId=args.find(arg=>arg.startsWith('--session-id='))?.slice('--session-id='.length);
+  if (!sessionId || !args.includes('--input-format') || !args.includes('--permission-mode=default') ||
+      args.some(arg=>arg.startsWith('--mcp-config')||arg.startsWith('--allow-dangerously-skip-permissions'))) return bad('claude-argv');
+  createInterface({input:process.stdin}).on('line',line=>{
+    let request;
+    try { request=JSON.parse(line); } catch { return bad('claude-json'); }
+    if (request.type==='control_request' && ['initialize','get_settings','get_context_usage','interrupt'].includes(request.request?.subtype)) {
+      record('sdk/'+request.request.subtype);
+      emit({type:'control_response',response:{subtype:'success',request_id:request.request_id,
+        response:{models:[],commands:[],account:{},mcp_servers_applied:true}}});
+      return;
+    }
+    if (request.type!=='user' || !canPrompt || !request.message?.content?.some(block=>isInput(block.text))) return bad('claude-request');
+    record('sdk/user');
+    const answer=fixtureAnswer(row.cli), usage={input_tokens:1,output_tokens:1};
+    emit({type:'assistant',session_id:sessionId,parent_tool_use_id:null,uuid:streamId,
+      message:{id:'msg_fixture',type:'message',role:'assistant',model:'claude-sonnet-4-6',
+        content:[{type:'text',text:answer}],stop_reason:'end_turn',stop_sequence:null,usage}});
+    emit({type:'result',subtype:'success',session_id:sessionId,uuid:streamId,result:answer,
+      stop_reason:'end_turn',total_cost_usd:0,duration_ms:1,duration_api_ms:1,is_error:false,
+      num_turns:1,usage,modelUsage:{},permission_denials:[]});
+  });
+}
 
 function shim(name, ledger, fixtureRoot, runtime, firstTurn) {
   const record = event => appendFileSync(ledger, JSON.stringify({ name, event })+'\n');
@@ -30,10 +64,12 @@ function shim(name, ledger, fixtureRoot, runtime, firstTurn) {
   if (!row || process.env.HOME !== join(fixtureRoot,'user') ||
       process.env.PATH !== join(fixtureRoot,'bin') ||
       !(process.cwd().startsWith(join(fixtureRoot,'scratch','mana-catalog-')) || firstTurn&&process.cwd()===join(fixtureRoot,'scratch','turn-'+row?.cli)) ||
-      Object.keys(process.env).some(name => /^(OPENAI_|ANTHROPIC_|CLAUDE_CONFIG_DIR|HTTPS?_PROXY|ALL_PROXY|NODE_OPTIONS|NODE_PATH)/i.test(name))) bad('isolation');
+      Object.entries(process.env).some(([name,value]) => value && /^(OPENAI_|ANTHROPIC_|CLAUDE_CONFIG_DIR|HTTPS?_PROXY|ALL_PROXY|NODE_OPTIONS|NODE_PATH)/i.test(name))) bad('isolation');
   const exact=(left,right)=>JSON.stringify(left)===JSON.stringify(right);
   const expectedArgs=row.args.map(arg=>arg.replace('$scratch-cwd',process.cwd()).replace('$pi-extension',join(runtime,'server','pi-permission-extension.mjs')));
   const acp=row.probe==='acp'||row.probe==='gateway-session';
+  const turn=firstTurn&&process.cwd()===join(fixtureRoot,'scratch','turn-'+row.cli);
+  if (row.cli==='claude') return claudeFixture(row,args,turn,record,bad);
   if (acp && ['--version','--help'].includes(args.at(-1)) &&
       (args.length === 1 || exact(args.slice(0,-1),expectedArgs))) {
     record(args.at(-1));
@@ -44,7 +80,6 @@ function shim(name, ledger, fixtureRoot, runtime, firstTurn) {
     if (exact(args,['config','get','gateway.remote.url','--json'])) { record('local-config'); process.stdout.write('null\n'); return; }
     if (exact(args,['models','list','--json'])) { record('model-catalog'); process.stdout.write('{"models":[{"key":"fixture/model","tags":["default"]}]}\n'); return; }
   }
-  const turn=firstTurn&&process.cwd()===join(fixtureRoot,'scratch','turn-'+row.cli);
   const answer=fixtureAnswer(row.cli), emit=value=>process.stdout.write(JSON.stringify(value)+'\n');
   if(turn&&row.probe==='version-only'){
     if(row.cli==='cursor'&&exact(args,['create-chat'])){record('create-chat');process.stdout.write(streamId+'\n');return;}
@@ -168,6 +203,7 @@ async function worker(runtime, root, node, build, firstTurn) {
       const entries=(await rows()).slice(previous);
       assert.equal(value.status,'ready',row.cli+' synthetic readiness failed ('+value.diagnostics?.failureStage+'; '+entries.map(item=>item.event).join(',')+')');
       assert.equal(value.version,row.version);
+      if(row.cli==='claude')assert.equal(value.diagnostics.nativeVersion,row.nativeVersion);
       assert.equal(value.diagnostics.probe,row.probe);
       assert.equal(value.diagnostics.auth,row.auth);
       assert.equal(value.diagnostics.executable,'executable');
@@ -177,6 +213,13 @@ async function worker(runtime, root, node, build, firstTurn) {
       if(row.probe==='rpc')assert.equal(entries.filter(item=>item.event==='get_state').length,2,row.cli+' must start and probe independently');
       if(row.probe==='version-only')assert(entries.some(item=>item.event==='version'));
       if(row.cli==='openclaw') for(const method of ['local-config','model-catalog'])assert(entries.some(item=>item.event===method),row.cli+' omitted '+method);
+      if(row.cli==='claude'){
+        const models=await api('/api/models?scope=runtime&cli=claude',{headers});
+        assert.equal(models.status,200);
+        const modelTrace=(await rows()).slice(previous+entries.length);
+        assert(modelTrace.some(item=>item.event==='sdk/initialize'));
+        assert(modelTrace.every(item=>item.name==='claude'&&item.event!=='sdk/user'&&!item.event.startsWith('unexpected-')));
+      }
       evidence.push({cli:row.cli,probe:row.probe,observed:[...new Set(entries.map(item=>item.event))]});
     }
     const syntheticFirstTurns=[];
@@ -253,7 +296,6 @@ async function worker(runtime, root, node, build, firstTurn) {
         const value=await statusOf(cli);
         assert.equal(value.status,'unavailable',cli+' unexpectedly passed without its launcher');
         assert.equal(value.diagnostics.executable,'missing');
-        if(cli==='claude')assert.equal(value.diagnostics.standaloneClaude,true);
         assert.equal((await rows()).length,count,cli+' missing starter ran another command');
         missing.push(cli);
       } finally { await rename(hidden,exactLauncher); }
@@ -286,6 +328,10 @@ async function run(path, expectedCommit, firstTurn) {
   const node=join(runtime,'bin','node');
   const metadata=await lstat(node);
   assert((await lstat(join(runtime,'server','pi-permission-extension.mjs'))).isFile(),'Missing packaged Pi permission extension');
+  const bridgeFile=join(runtime,'server','ssh-runner',bridge.entry);
+  assert((await lstat(bridgeFile)).isFile(),'Missing packaged Claude bridge');
+  assert.equal(createHash('sha256').update(await readFile(bridgeFile)).digest('hex'),bridge.sha256);
+  assert((await lstat(join(runtime,'server','ssh-runner',bridge.notices))).isFile(),'Missing packaged Claude bridge notices');
   assert(metadata.isFile() && !metadata.isSymbolicLink(),'Unexpected Node binary layout');
   const root=await realpath(await mkdtemp('/private/tmp/mandala-conformance-'));
   try{

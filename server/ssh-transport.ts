@@ -2,6 +2,7 @@ import {spawn} from 'node:child_process';
 import {readFile} from 'node:fs/promises';
 import {isValidSshHost} from '../shared/execution-machines';
 import {createHash} from 'node:crypto';
+import bridge from '../scripts/claude-bridge/manifest.json';
 
 export const shellQuote=(value:string)=>"'"+value.replaceAll("'","'\\''")+"'";
 export function sshArgs(host:string,command:string):string[]{
@@ -23,13 +24,15 @@ export async function runSsh(host:string,command:string,input=''):Promise<string
 // Both desktop packaging and local development install these same standalone bundles and their permission extension.
 export async function sshBundleFiles(){
  const directories=[new URL('./ssh-runner/',import.meta.url),new URL('../release/ssh-runner/',import.meta.url)];
- for(const directory of directories){try{return {runner:await readFile(new URL('ssh-runner.mjs',directory)),cli:await readFile(new URL('mandala.mjs',directory)),extension:await readFile(new URL('pi-permission-extension.mjs',directory))};}catch{}}
+ for(const directory of directories){try{return {runner:await readFile(new URL('ssh-runner.mjs',directory)),cli:await readFile(new URL('mandala.mjs',directory)),extension:await readFile(new URL('pi-permission-extension.mjs',directory)),claude:await readFile(new URL(bridge.entry,directory)),notices:await readFile(new URL(bridge.notices,directory))};}catch{}}
  throw new Error('SSH service bundle unavailable; run node scripts/build-ssh-runner.mjs');
 }
 export async function installSshService(host:string):Promise<string>{
- const {runner,cli,extension}=await sshBundleFiles();const version=createHash('sha256').update(runner).update(cli).update(extension).digest('hex').slice(0,24);
+ const {runner,cli,extension,claude,notices}=await sshBundleFiles();
+ if(createHash('sha256').update(claude).digest('hex')!==bridge.sha256)throw new Error('SSH Claude bridge failed integrity verification');
+ const version=createHash('sha256').update(runner).update(cli).update(extension).update(claude).update(notices).digest('hex').slice(0,24);
  // Send source via stdin, never interpolate source or local environment into a remote shell.
- const install=`const fs=require('node:fs'),p=require('node:path'),os=require('node:os');const v=process.versions.node.split('.').map(Number);if(process.platform!=='linux'||v[0]<22||v[0]===22&&(v[1]<23||v[1]===23&&v[2]<2))throw Error('Linux and Node >=22.23.2 required');const root=p.join(os.homedir(),'.mandala-execution');fs.mkdirSync(root,{recursive:true,mode:448});let st=fs.lstatSync(root);if(!st.isDirectory()||st.isSymbolicLink()||st.uid!==process.getuid()||(st.mode&63))throw Error('Unsafe execution directory');const dir=p.join(root,${JSON.stringify(version)});fs.mkdirSync(dir,{mode:448,recursive:true});if(fs.lstatSync(dir).isSymbolicLink())throw Error('Unsafe bundle directory');for(const [name,data]of Object.entries(${JSON.stringify({'ssh-runner.mjs':runner.toString('base64'),'mandala.mjs':cli.toString('base64'),'pi-permission-extension.mjs':extension.toString('base64')})})){const target=p.join(dir,name);if(fs.existsSync(target)){if(fs.lstatSync(target).isSymbolicLink()||fs.readFileSync(target,'base64')!==data)throw Error('Bundle collision');}else fs.writeFileSync(target,Buffer.from(data,'base64'),{mode:384,flag:'wx'});}process.stdout.write(dir);`;
+ const install=`const fs=require('node:fs'),p=require('node:path'),os=require('node:os');const v=process.versions.node.split('.').map(Number);if(process.platform!=='linux'||v[0]<22||v[0]===22&&(v[1]<23||v[1]===23&&v[2]<2))throw Error('Linux and Node >=22.23.2 required');const root=p.join(os.homedir(),'.mandala-execution');fs.mkdirSync(root,{recursive:true,mode:448});let st=fs.lstatSync(root);if(!st.isDirectory()||st.isSymbolicLink()||st.uid!==process.getuid()||(st.mode&63))throw Error('Unsafe execution directory');const dir=p.join(root,${JSON.stringify(version)});fs.mkdirSync(dir,{mode:448,recursive:true});if(fs.lstatSync(dir).isSymbolicLink())throw Error('Unsafe bundle directory');for(const [name,data]of Object.entries(${JSON.stringify({'ssh-runner.mjs':runner.toString('base64'),'mandala.mjs':cli.toString('base64'),'pi-permission-extension.mjs':extension.toString('base64'),[bridge.entry]:claude.toString('base64'),[bridge.notices]:notices.toString('base64')})})){const target=p.join(dir,name);if(fs.existsSync(target)){if(fs.lstatSync(target).isSymbolicLink()||fs.readFileSync(target,'base64')!==data)throw Error('Bundle collision');}else fs.writeFileSync(target,Buffer.from(data,'base64'),{mode:384,flag:'wx'});}process.stdout.write(dir);`;
  const result=(await runSsh(host,'node',install)).trim();
  if(!result.startsWith('/')||/[\r\n\0]/.test(result))throw new Error('Invalid SSH service installation path');
  return result;

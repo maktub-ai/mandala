@@ -1,6 +1,6 @@
 import {isHumanInput,type QueuedInput} from '../shared/tasks';
 import type {MandalaContextMaintenance} from '../shared/types';
-import type {CodexClient} from './codex';
+import type { ExecutionClient } from './execution-client';
 import type {RpcMessage} from './rpc';
 import type {Store} from './store';
 import {mandalaContextBoundary,mandalaContinuity} from './mandala';
@@ -8,7 +8,7 @@ import {mandalaContextBoundary,mandalaContinuity} from './mandala';
 // Maintenance has its own durable identity. It never owns a business Run or advances the ACL cutoff.
 export function createMandalaContinuity(options:{store:Store;closed:()=>boolean;busy:(id:string)=>boolean;
  lock:(id:string)=>void;unlock:(id:string)=>void;inputs:(id:string)=>QueuedInput[];authorize:(id:string)=>void;
- goals:(id:string)=>{id:string;goal:string;state:string}[];client:(id:string)=>Promise<{client:Pick<CodexClient,'inspectContext'|'compactThread'>;release:()=>Promise<void>}>;
+ goals:(id:string)=>{id:string;goal:string;state:string}[];client:(id:string)=>Promise<{client:Pick<ExecutionClient,'inspectContext'|'compactThread'>;release:()=>Promise<void>}>;
  retire:(id:string)=>Promise<void>;wake:(id:string)=>void}) {
  const {store}=options;
  const fenced=new Set<string>();

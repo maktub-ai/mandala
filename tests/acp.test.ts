@@ -51,7 +51,7 @@ it('preserves legacy ACP model catalogs and selects models using their native me
  }finally{await client.close();}
 });
 it('uses session/resume for agents such as DSH without the legacy loadSession capability',async()=>{
- const {client,sessions}=await fixture(false,false,undefined,undefined,true);
+ const {client,sessions}=await fixture(false,false,undefined,undefined,true,false,false,'dsh');
  try{
   await client.startThread({cwd:fixtureCwd,instructions:'Current instructions'});
   await client.resumeThread('persisted-dsh-session',[],'Updated instructions');

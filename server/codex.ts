@@ -1,13 +1,13 @@
 import { codexMailboxErrors, isCodexMailboxErrorCode, type CodexMailboxErrorCode } from '../shared/codex-mailbox-errors';
 import type { TurnOptions } from "../shared/chat-input";
-import type { RunIdentity } from '../shared/tasks';
+import type { ExecutionClient, RuntimeOptions } from './execution-client';
 import { spawn } from "./native-spawn";
 import { createHash } from "node:crypto";
 import { lstat, mkdtemp } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createRpcClient, RpcResponseError } from "./rpc";
-import type { CliStatus, ModelChoice, McpServer, ApprovalMode } from "../shared/types";
+import type { McpServer, ApprovalMode, ModelChoice } from "../shared/types";
 import type { RpcClient, RpcMessage } from "./rpc";
 import { bindLocalCatalogLauncher, runtimeError, validateRuntimeArgs } from "./runtime";
 import {DomainError} from '../shared/workspace-contracts';
@@ -98,52 +98,10 @@ const omitPermissionNulls = (value: unknown): unknown => {
     .filter(([, item]) => item !== null && item !== undefined).map(([key, item]) => [key, omitPermissionNulls(item)]));
   return value;
 };
-export type CodexOptions = {
-  signal?: AbortSignal;
-  cwd: string;
-  extraArgs?: string[];
-  fullAccess?: boolean;
-  safeSystem?: boolean;
-  model?: string;
-  gateway?: 'native' | 'unavailable';
-  /** Internal opt-in set only by the local catalog session manager. */
-  [bindLocalCatalogLauncher]?: true;
-  env?: Record<string, string>;
-  onEvent: (event: RpcMessage) => void;
-  onApproval: (request: RpcMessage) => void;
-  onExit: (reason: string) => void;
-};
-export interface CodexClient {
-  inspectContext?(nativeId:string):Promise<{settled:boolean;completedCompactions?:string[]}>;
-  compactThread?(nativeId:string):Promise<'started'|'completed'|'noop'|'unsupported'>;
-  getStatus(explain?:boolean): Promise<CliStatus & {nativeAccountPresent?:boolean;capabilityIssue?:NonNullable<CliStatus['diagnostics']>['capabilityIssue']}>;
-  requiresRuntimeReload?(runtimeMailboxPath?:string):Promise<boolean>;
-  assertReloadable?(nativeId:string):Promise<void>;
-  inspectInvocation?(identity: RunIdentity): Promise<"running" | "succeeded" | "failed" | "unknown">;
-  listModels(): Promise<ModelChoice[]>;
-  startThread(options: {
-    cwd: string;
-    instructions: string;
-    model?: string;
-    mcp?: McpServer[];
-    ephemeral?: boolean;
-    safeSystem?: boolean;
-    runtimeWorkspaceRoots?: string[];
-    runtimeMailboxPath?: string;
-  }): Promise<string>;
-  resumeThread(nativeId: string, mcp?: McpServer[], instructions?: string, model?: string, runtimeWorkspaceRoots?: string[], runtimeMailboxPath?: string): Promise<void>;
-  forkThread?(nativeId: string, userTexts: string[], beforeIndex: number, model?: string): Promise<string>;
-  setSkillRoots?(roots: string[]): Promise<void>;
-  listMcpStatus?(nativeId: string): Promise<Record<string, string | null>>;
-  listSkills?(cwd: string): Promise<{ name: string; path: string }[]>;
-  prepareTurn?(nativeId: string, options?: TurnOptions): Promise<void>;
-  startTurn(nativeId: string, text: string, approvalMode?: ApprovalMode, runtimeWorkspaceRoots?: string[], options?: TurnOptions): Promise<string>;
-  interrupt(nativeId: string, turnId: string): Promise<void>;
-  replyApproval(id: string | number, result: unknown): void;
-  close(): void | Promise<void>;
-}
+export type { ExecutionClient as CodexClient, RuntimeOptions as CodexOptions } from './execution-client';
+
 export async function connectCodex(rpc: RpcClient, cwd?: string, fullAccess = true, onUsageEvent: (event:RpcMessage)=>void = ()=>{},
-  prepareMailbox?: MailboxPreparer): Promise<CodexClient> {
+  prepareMailbox?: MailboxPreparer): Promise<ExecutionClient> {
   let version: string | null = null;
   try {
     const initialized = await rpc.request("initialize", {
@@ -381,7 +339,7 @@ function codexMcp(servers: McpServer[]) {
       : { url: server.url },
   ]));
 }
-export async function startCodex(options: CodexOptions): Promise<CodexClient> {
+export async function startCodex(options: RuntimeOptions): Promise<ExecutionClient> {
   const extraArgs = options.extraArgs ?? [];
   validateRuntimeArgs("codex", extraArgs);
   const profileArgs: string[] = [], serverArgs: string[] = [];

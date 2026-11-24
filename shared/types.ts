@@ -188,10 +188,10 @@ export type CliStatus = {
     executable: 'missing' | 'broken' | 'blocked' | 'executable' | 'not-verified';
     probe: 'failed' | 'version-only' | 'rpc' | 'acp' | 'account' | 'gateway-session';
     auth: 'not-verified' | 'login-required' | 'native-account-ready' | 'configuration-required';
-    standaloneClaude?: boolean;
-    requiredDependency?: 'claude-override-unavailable';
+    requiredDependency?: 'claude-override-unavailable' | 'claude-bridge-missing' | 'claude-bridge-integrity' | 'claude-version-incompatible' | 'claude-version-probe-failed';
+    nativeVersion?: string;
     capabilityIssue?: 'durable-resume-unsupported';
-    failureStage?: 'configuration' | 'launch' | 'probe';
+    failureStage?: 'configuration' | 'launch' | 'handshake' | 'gateway' | 'probe';
   };
 };
 

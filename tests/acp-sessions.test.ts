@@ -161,6 +161,19 @@ it('rejects an ACP permission while native stop confirmation is pending',async()
 });
 
 
+it('keeps the native turn unresolved when an ACP runtime does not confirm Stop', async () => {
+ const f=await approvalFixture();
+ try {
+  f.request();
+  await f.manager.stop(f.chat.id);
+  expect(f.replies).toEqual([]);
+  expect(f.store.getConversation(f.chat.id)).toMatchObject({status:'interrupted',turnId:'turn-1'});
+  const events=f.store.listEvents(f.chat.id,0);
+  expect(events.some(event=>event.kind==='metadata'&&(event.data as {reason?:string}).reason==='stop_requested')).toBe(true);
+  expect(events.some(event=>event.kind==='error'&&(event.data as {code?:string}).code==='native_stop_unconfirmed')).toBe(true);
+ } finally {await f.close();}
+}, 7000);
+
 it('rejects an ACP permission received before the native start response binds a different turn',async()=>{
  const f=await approvalFixture('stale-turn');
  try{
