@@ -1307,11 +1307,17 @@ export function createSessionManager(
       revokeBusinessCli(current);
       const failureInputId = current.queuedInputId;
       const prestartQueueCode = nativeThreadBusy ? 'native_thread_busy' : mailboxFailure?.code;
+      // Keep recall diagnostics before the terminal unsent event so draft recovery sees it last.
+      const reportFailedRecall = () => {
+        if (memoryTrace && !memoryLoaded) appendEvent(id, "metadata", { ...memoryTrace, status: "failed",
+          message: memoryReadFailed ? error.message : "CLI did not acknowledge memory instructions; retry this turn." });
+      };
       const failedQueueInput = !!(prestartQueueCode && failureInputId && !task && !messageOrigin && !inputSource &&
         owner.kind==='input' && owner.id===failureInputId && current.runId===invocationId &&
         store.transaction(()=>{
           if(!scheduler.failPrestartInput(failureInputId,id,prestartQueueCode))return false;
           resources.releaseUnsubmitted('input',failureInputId);
+          reportFailedRecall();
           appendEvent(id,'error',{message:error.message,queuedInputId:failureInputId,code:prestartQueueCode,nativeTurnSubmitted:false});
           return true;
         }));
@@ -1320,10 +1326,11 @@ export function createSessionManager(
         if(!failedQueueInput)resources.releaseUnsubmitted(owner.kind,owner.id);
         queueMicrotask(()=>{void wakeDirectories();});
       }
-      if (memoryTrace && !memoryLoaded) appendEvent(id, "metadata", { ...memoryTrace, status: "failed",
-        message: memoryReadFailed ? error.message : "CLI did not acknowledge memory instructions; retry this turn." });
-      if(!failedQueueInput)appendEvent(id, "error", { message: error.message, nativeTurnSubmitted: turnSubmitted,
-        ...(reloadBlocked?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy'}:mailboxFailure?{code:mailboxFailure.code}:{}) });
+      if (!failedQueueInput) {
+        reportFailedRecall();
+        appendEvent(id, "error", { message: error.message, nativeTurnSubmitted: turnSubmitted,
+          ...(reloadBlocked?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy'}:mailboxFailure?{code:mailboxFailure.code}:{}) });
+      }
       if (current.queuedInputId && !turnSubmitted && error instanceof DomainError && ["reference_changed", "invalid_references"].includes(error.code)) {
         scheduler.rejectUnsubmittedInput(current.queuedInputId);
         current.queuedInputId = undefined;

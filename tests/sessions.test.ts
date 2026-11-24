@@ -2009,12 +2009,14 @@ it.each(['getCliStatus','listModels'] as const)('%s reads runtime settings witho
 
 it.each(['direct','queued'] as const)('preserves the same native thread without replay until a human retries a %s writer-conflict request',async mode=>{
  await manager.close();
+ const memory = await createKnowledge(home, {kind:'memory',scope:'global',level:'L4',status:'active',
+   title:'Writer conflict test convention',content:'Synthetic memory convention.'},config);
  const nativeId='fixture-original-native-thread';
  let held=true;
  manager=createSessionManager(store,async()=>config,async o=>({
   ...await factory(o),
   resumeThread:async id=>{ resumed.push(id); if(held)throw new DomainError('native_thread_busy',409,'Codex conversation is open in another client'); },
- }));
+ }),undefined,home);
  const chat=await manager.create('p','a');
  store.updateConversation(chat.id,{nativeId});
  const text='Synthetic repeat only after manual release';
@@ -2030,6 +2032,9 @@ it.each(['direct','queued'] as const)('preserves the same native thread without 
  expect(resumed).toEqual([nativeId]);
  const events=store.listEvents(chat.id,0);
  expect(events.filter(e=>e.kind==='error')).toEqual([expect.objectContaining({data:expect.objectContaining({code:'native_thread_busy',nativeTurnSubmitted:false,...(inputId?{queuedInputId:inputId}:{})})})]);
+ const failedRecall=events.find(e=>e.kind==='metadata'&&(e.data as {status?:string}).status==='failed'&&'memoryRecall' in (e.data as object));
+ expect(failedRecall?.data).toMatchObject({count:1,entryIds:[memory.id]});
+ expect(failedRecall!.id).toBeLessThan(events.find(e=>e.kind==='error')!.id);
  const saved=events.filter(e=>e.kind==='user');
  expect(saved).toHaveLength(1);
  expect(recoverableUnsubmittedDraft(groupChatTurns(events),'error')).toBe(saved[0].id);
