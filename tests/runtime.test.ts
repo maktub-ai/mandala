@@ -2,9 +2,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import { configuredRuntime, resolveRuntime, runtimeSignature, validateRuntimeArgs, validateRuntimeEnv } from "../server/runtime";
 import { startCodex } from "../server/codex";
 import { startOmp } from "../server/omp";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { createElement } from "react";
 import { renderChineseMarkup } from "./helpers/render-ui";
 import RuntimeSettingsEditor from "../src/RuntimeSettingsEditor";
@@ -12,7 +13,18 @@ import { openStore } from "../server/store";
 import { createSessionManager } from "../server/sessions";
 import type { Config } from "../shared/types";
 
-afterEach(() => vi.unstubAllEnvs());
+// All runtime launches in this file are confined to fixtures registered by the test.
+const fixtures = vi.hoisted(() => new Map<string, { command: string; file: string }>());
+vi.mock("../server/native-spawn", async importOriginal => ({
+  ...await importOriginal<typeof import("../server/native-spawn")>(),
+  spawn: (command: string, args: string[], options: Parameters<typeof import("../server/native-spawn").spawn>[2]) => {
+    const fixture = typeof options.cwd === "string" ? fixtures.get(options.cwd) : undefined;
+    if (!fixture || fixture.command !== command) throw new Error("Test blocked an unexpected native CLI spawn");
+    return spawn(process.execPath, [fixture.file, ...args], options);
+  },
+}));
+
+afterEach(() => { fixtures.clear(); vi.unstubAllEnvs(); });
 
 it("explains Agent parameters by default without presenting Project override rules", () => {
   const markup = renderChineseMarkup(createElement(RuntimeSettingsEditor, { onChange() {} }));
@@ -101,14 +113,11 @@ it("does not expose a reserved argument value in its validation error", () => {
 });
 it.each(["codex", "omp"] as const)("surfaces %s native parser errors without retaining resolved environment values", async (cli) => {
   const dir = await mkdtemp(join(tmpdir(), "mana-parser-error-"));
-  const executable = join(dir, cli);
-  await writeFile(executable, `#!/usr/bin/env node
-process.stderr.write("Unknown option: --unexpected-native-option; " + process.env.MANA_TEST_VALUE);
+  const executable = join(dir, cli + "-fixture.cjs");
+  await writeFile(executable, `process.stderr.write("Unknown option: --unexpected-native-option; " + process.env.MANA_TEST_VALUE);
 process.exit(2);
 `);
-  await chmod(executable, 0o700);
-  const previousPath = process.env.PATH;
-  process.env.PATH = dir + ":" + previousPath;
+  fixtures.set(dir, { command: cli, file: executable });
   const exits: string[] = [];
   try {
     let message = "";
@@ -120,7 +129,6 @@ process.exit(2);
     expect(message).not.toContain("synthetic-private-value");
     expect(exits.join("\n")).not.toContain("synthetic-private-value");
   } finally {
-    process.env.PATH = previousPath;
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -129,11 +137,11 @@ process.exit(2);
 it.each(["codex", "omp"] as const)("passes each Agent's %s runtime unchanged when switching Projects", async (cli) => {
   const dir = await mkdtemp(join(tmpdir(), "mana-agent-runtime-"));
   const capture = join(dir, "launches.jsonl");
-  const executable = join(dir, cli);
+  const executable = join(dir, cli + "-fixture.cjs");
   const captureSource = `require("node:fs").appendFileSync(${JSON.stringify(capture)}, JSON.stringify({
     args: process.argv.slice(2), owner: process.env.MEMORY_OWNER, shared: process.env.SHARED,
     inherited: process.env.MANA_RUNTIME_INHERITED }) + "\\n");`;
-  const protocol = cli === "codex" ? `import(${JSON.stringify(resolve("tests/fixtures/fake-cli.mjs"))});` : `
+  const protocol = cli === "codex" ? `import(${JSON.stringify(new URL("./fixtures/fake-cli.mjs", import.meta.url).href)});` : `
     const { createInterface } = require("node:readline");
     const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
     send({ type: "ready" });
@@ -141,11 +149,9 @@ it.each(["codex", "omp"] as const)("passes each Agent's %s runtime unchanged whe
       const request = JSON.parse(line);
       send({ type: "response", id: request.id, success: true, data: { sessionFile: "runtime-fixture-session" } });
     });`;
-  await writeFile(executable, `#!/usr/bin/env node
-${captureSource}
+  await writeFile(executable, `${captureSource}
 ${protocol}`);
-  await chmod(executable, 0o700);
-  vi.stubEnv("PATH", dir + ":" + process.env.PATH);
+  fixtures.set(dir, { command: cli, file: executable });
   vi.stubEnv("MANA_OWNER_A", "synthetic-owner-a");
   vi.stubEnv("MANA_OWNER_B", "synthetic-owner-b");
   vi.stubEnv("MANA_AGENT_SHARED", "agent-value");
@@ -165,6 +171,7 @@ ${protocol}`);
     for (const [projectId, agentId] of [["base", "a"], ["base", "b"], ["override", "a"]]) {
       // Independent runtime probes must not compete for one still-active workspace write claim.
       const chat = await manager.create(projectId, agentId, undefined, cli, { workspaceId: null });
+      fixtures.set(join(dir, "workspaces", "conversations", chat.id), { command: cli, file: executable });
       await manager.send(chat.id, "Synthetic parameter verification");
     }
     const launches = (await readFile(capture, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
@@ -180,9 +187,12 @@ ${protocol}`);
     expect(config.agents[0].runtime?.[cli]?.env?.MEMORY_OWNER).toBe("${MANA_OWNER_A}");
     expect(runtimeSignature(cli, config.agents[0].runtime)).not.toContain("synthetic-owner-a");
   } finally {
-    manager.close();
-    store.close();
-    await rm(dir, { recursive: true, force: true });
+    try {
+      await manager.close();
+    } finally {
+      try { store.close(); }
+      finally { await rm(dir, { recursive: true, force: true }); }
+    }
   }
 });
 
