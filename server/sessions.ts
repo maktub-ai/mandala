@@ -234,7 +234,7 @@ export function createSessionManager(
   const conversationApprovals = createConversationApprovals(store);
   initializeAsyncQuestions(store);
   const queuePumps = new Set<Promise<void>>();
-  const queueStarts = new Set<string>();
+  const queueStarts = new Map<string,string>();
   const backgroundSends = new Map<string,{inputId:string;timer:ReturnType<typeof setTimeout>}>();
   const queuedSendPending = (id:string) => queueStarts.has(id)||backgroundSends.has(id);
   const queuedSendUnavailable = (id:string,inputId='') => queuedSendPending(id) ||
@@ -346,6 +346,8 @@ export function createSessionManager(
   ompFactory = options=>initialize(()=>originalOmpFactory(options));
   const factory = (cli: Cli) => cli === "codex" ? clientFactory : cli === "omp" ? ompFactory : (options: CodexOptions) => initialize(() => startNativeRuntime(cli, options));
   const remoteExecutions = new Map<string,Promise<SshExecution>>();
+  // A presentation-only preflight phase; the scheduler remains the source of durable state.
+  const queueRemoteAdmission = new Map<string,'connecting'|'remote_unavailable'>();
   const remoteFor = (context:ReturnType<typeof conversationContext>,id:string):Promise<SshExecution|undefined> => {
     const location=context.executionLocation;
     if(!location)return Promise.resolve(undefined);
@@ -1362,8 +1364,10 @@ export function createSessionManager(
       return;
     }
     let remote:SshExecution|undefined;
+    if(context.executionLocation && (!remoteExecutions.has(id) || queueRemoteAdmission.has(id)))queueRemoteAdmission.set(id,'connecting');
     try{remote=await remoteFor(context,id);if(remote){const directory=await remote.request<{isDirectory:boolean;realpath:string}>('fs.stat',{path:context.project.cwd});if(!directory.isDirectory)throw new Error('Remote working directory is unavailable');context.project.cwd=directory.realpath;}}
-    catch(error){if(!closed){const message=error instanceof Error?error.message:'Remote execution unavailable';const last=store.listEvents(id,0).filter(event=>event.kind==='error').at(-1);if((last?.data as {code?:string;message?:string})?.code!=='remote_unavailable'||(last?.data as {message?:string})?.message!==message)store.appendEvent(id,'error',{code:'remote_unavailable',message});}return;}
+    catch(error){if(!closed){queueRemoteAdmission.set(id,'remote_unavailable');const message=error instanceof Error?error.message:'Remote execution unavailable';const last=store.listEvents(id,0).filter(event=>event.kind==='error').at(-1);if((last?.data as {code?:string;message?:string})?.code!=='remote_unavailable'||(last?.data as {message?:string})?.message!==message)store.appendEvent(id,'error',{code:'remote_unavailable',message});}return;}
+    queueRemoteAdmission.delete(id);
     if(!remote&&(chat(id).purpose==='mandala-background'||!context.workspace&&!chat(id).cwd))await mkdir(context.project.cwd,{recursive:true}).catch(error=>{if(!closed)throw error;});
     if(closed)return;
     const extra=(await Promise.all(context.project.resources.filter(r=>r.kind==='local').map(async r=>{if(remote){const value=await remote.request<{isDirectory:boolean;realpath:string}>('fs.stat',{path:r.location}).catch(()=>null);return value?.isDirectory?value.realpath:null;}return (await stat(r.location).catch(()=>null))?.isDirectory()?r.location:null;}))).filter((p):p is string=>!!p);
@@ -2055,7 +2059,7 @@ export function createSessionManager(
       if(attachments.length)attachmentAssets.accept(root,id,attachments,input.id,{agentId:c.agentId||undefined,projectId:c.projectId||undefined});
       store.appendEvent(id,"metadata",{queuedInputId:input.id,state:input.state});
       setImmediate(() => { if (!closed) void pump(id); });
-      return input;
+      return manager.listUserInputs(id).find(row=>row.id===input.id) ?? input;
     },
     enqueueTelegramInput(id,text,requestId,attachments) {
       const c=chat(id);
@@ -2099,7 +2103,7 @@ export function createSessionManager(
       if(input.state!=='queued')return; // A retry acknowledges this same accepted message without interrupting newer work.
       if(backgroundSends.get(id)?.inputId===inputId)return;
       if(queuedSendUnavailable(id,inputId))throw new DomainError('conversation_busy',409,'A queued message is already being started');
-      queueStarts.add(id);
+      queueStarts.set(id,inputId);
       try {
         const attachments=await loadAttachments(home,id,input.attachments??[]);
         input=read();if(!input||input.state!=='queued')return;
@@ -2138,10 +2142,21 @@ export function createSessionManager(
     listUserInputs: id => {
       const waiting=new Set(store.database.prepare("SELECT w.owner_id FROM task_directory_waits w JOIN task_user_inputs i ON i.id=w.owner_id WHERE w.kind='input' AND i.conversation_id=?").all(id).map(row=>row.owner_id));
       const background=backgroundSends.get(id)?.inputId;
-      return scheduler.listUserInputs(id).map(input=>{
+      const inputs=scheduler.listUserInputs(id);
+      const c=chat(id), active=live.get(id), explicit=queueStarts.get(id);
+      const oldTurn=active?.preparing||active?.invocation||c.status==='running'||c.status==='approval'||hasUnprovenNativeOccupancy(store,id);
+      const head=explicit
+        ? oldTurn||closed||continuity.blocked(id)||branching.has(id) ? undefined : explicit
+        : c.status==='idle'&&!closed ? scheduler.peekNextUserInput(id)?.id : undefined;
+      const remoteAdmission=c.executionLocation
+        ? queueRemoteAdmission.get(id) ?? (!remoteExecutions.has(id)?'connecting':undefined)
+        : undefined;
+      return inputs.map(input=>{
         if(input.state!=='queued')return input;
-        if(input.id===background)return {...input,waitingReason:'background' as const};
-        return waiting.has(input.id)?{...input,waitingReason:'directory' as const}:input;
+        if(input.id===background)return {...input,waitingReason:'background',admission:'waiting'};
+        if(waiting.has(input.id))return {...input,waitingReason:'directory',admission:'waiting'};
+        if(input.id!==head)return {...input,admission:'waiting'};
+        return {...input,admission:remoteAdmission ?? 'starting'};
       });
     },
     cancelUserInput: id => {
@@ -2655,6 +2670,7 @@ export function createSessionManager(
       live.clear();
       for(const connection of remoteExecutions.values())void connection.then(remote=>remote.close()).catch(()=>{});
       remoteExecutions.clear();
+      queueRemoteAdmission.clear();
       // Failed factories report through their send; still await their cancellation/cleanup.
       closing=Promise.allSettled([codeGraph.close(),knowledgeBase.close(),fileMaintenance.close(),...stops,continuity.close(),...queuePumps,...[...initializations].map(p=>p.catch(()=>{}))]).then(results=>{const failure=results.find(r=>r.status==='rejected');if(failure?.status==='rejected')throw failure.reason;});
       return closing;

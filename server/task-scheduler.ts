@@ -86,6 +86,11 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
   return inputRow(row);
  };
  const busy = (id: string) => Boolean(options.isConversationBusy?.(id) || hasUnprovenNativeOccupancy(store,id));
+ const nextUserInput=(conversationId:string)=>{
+  const eligible=db.prepare("SELECT * FROM task_user_inputs WHERE conversation_id=? AND state='queued' ORDER BY rowid").all(conversationId)
+    .map(inputRow).filter(input=>options.inputEligible?.(input)!==false);
+  return eligible.find(isHumanInput) ?? eligible[0];
+ };
  const userPending = (id: string) => Boolean(db.prepare("SELECT id FROM task_user_inputs WHERE conversation_id=? AND state IN ('queued','running','unknown') LIMIT 1").get(id));
  const event = (type: string, id: string, payload: unknown) => store.enqueueOutbox({ type, aggregateId: id, aggregateRevision: 1, causationId: id, payload });
  const validateRoute = (route: RunRouting, task: Pick<Task,'assigneeAgentId'|'projectId'>) => {
@@ -320,13 +325,16 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
     return prepared.commit(validateRoute(options.routeTask!(task), {assigneeAgentId:execution?.agentId??task.assigneeAgentId,projectId:execution&&Object.hasOwn(execution,'projectId')?execution.projectId??null:task.projectId}));
    });
   },
+  peekNextUserInput(conversationId:string):QueuedInput|undefined {
+   root(); conversation(conversationId);
+   return busy(conversationId)?undefined:nextUserInput(conversationId);
+  },
   takeNext(conversationId: string): ScheduledWork | null {
    root(); conversation(conversationId);
    const work = store.transaction<ScheduledWork | null>(() => {
     if (busy(conversationId)) return null;
-    const inputs = db.prepare("SELECT * FROM task_user_inputs WHERE conversation_id=? AND state='queued' ORDER BY rowid").all(conversationId).filter(r=>options.inputEligible?.(inputRow(r))!==false);
-    const input = inputs.find(r=>isHumanInput(inputRow(r))) ?? inputs[0];
-    if (input) { loadInput(input.id as string); if(options.tryClaimDirectory&&!options.tryClaimDirectory({kind:'input',input:loadInput(input.id as string)}))return null; db.prepare("UPDATE task_user_inputs SET state='running' WHERE id=?").run(input.id as string); return { kind: 'input', input: loadInput(input.id as string) }; }
+    const input = nextUserInput(conversationId);
+    if (input) { loadInput(input.id); if(options.tryClaimDirectory&&!options.tryClaimDirectory({kind:'input',input:loadInput(input.id)}))return null; db.prepare("UPDATE task_user_inputs SET state='running' WHERE id=?").run(input.id); return { kind: 'input', input: loadInput(input.id) }; }
     const row = db.prepare("SELECT id FROM task_runs WHERE json_extract(routing,'$.executionConversationId')=? AND state='queued' ORDER BY rowid LIMIT 1").get(conversationId);
     if (!row) return null;
     const run = tasks.getRun(principal, row.id as string), task = tasks.getTask(principal, run.taskId);

@@ -190,3 +190,71 @@ test('a remote fork releases its separate native writer before the branch resume
   expect(mocked.connect.mock.calls.some(call=>call[1].conversationId.startsWith('fork-'))).toBe(true);
   expect(held).toBe(false);
 });
+
+test('App queue receipts distinguish a cold connection from real waiting', async () => {
+  const chat = await manager.create('p','a',undefined,'codex',{workspaceId:'remote'});
+  let connect!: (value: typeof remote) => void;
+  mocked.connect.mockImplementationOnce(()=>new Promise(resolve=>connect=resolve));
+  const first=manager.enqueueUserInput(chat.id,'First','app-first');
+  try{
+    expect(first).toMatchObject({state:'queued',admission:'connecting'});
+    await vi.waitFor(()=>expect(mocked.connect).toHaveBeenCalledTimes(1));
+    expect(manager.listUserInputs(chat.id)).toMatchObject([{id:first.id,state:'queued',admission:'connecting'}]);
+  }finally{connect?.(remote);}
+  await vi.waitFor(()=>expect(native.startTurn).toHaveBeenCalledTimes(1));
+  const second=manager.enqueueUserInput(chat.id,'Second','app-second');
+  expect(second).toMatchObject({state:'queued',admission:'waiting'});
+  expect(manager.listUserInputs(chat.id).find(input=>input.id===second.id)).toMatchObject({state:'queued',admission:'waiting'});
+});
+
+test('App queue readback preserves the original body after remote connection failure', async () => {
+  const chat = await manager.create('p','a',undefined,'codex',{workspaceId:'remote'});
+  mocked.connect.mockRejectedValue(new Error('Synthetic SSH unavailable'));
+  const request=manager.enqueueUserInput(chat.id,'Keep this draft','app-failed');
+  await vi.waitFor(()=>expect(manager.listUserInputs(chat.id)).toMatchObject([{id:request.id,commandKey:'app-failed',state:'queued',admission:'remote_unavailable'}]));
+  expect(native.startTurn).not.toHaveBeenCalled();
+});
+
+test('an idle local save is not visible as waiting before native startup', async () => {
+  const chat=await manager.create('','',undefined,'codex',{cwd:home});
+  const receipt=manager.enqueueUserInput(chat.id,'Local input','app-local');
+  expect(receipt).toMatchObject({state:'queued',admission:'starting'});
+  expect(manager.listUserInputs(chat.id)).toMatchObject([{id:receipt.id,state:'queued',admission:'starting'}]);
+});
+
+test('projects the actual human-priority input even behind paused coordination and older background work', async()=>{
+  const chat=await manager.create('p','a',undefined,'codex',{workspaceId:'remote'});
+  manager.coordination.pauseDelivery(chat.id);
+  const input=(text:string,key:string,source:unknown)=>{
+    const row=manager.enqueueUserInput(chat.id,text,key);
+    store.database.prepare('UPDATE task_user_inputs SET source=? WHERE id=?').run(JSON.stringify(source),row.id);
+    return row;
+  };
+  const paused=input('Paused reports','paused-reports',{kind:'coordination',receiptIds:['r']});
+  const automatic=input('Older background','older-background',{kind:'idle'});
+  const telegram=input('Telegram human','telegram-human',{kind:'telegram',requestId:'tg'});
+  const later=manager.enqueueUserInput(chat.id,'Desktop human','desktop-human');
+  expect(manager.listUserInputs(chat.id).map(({id,admission})=>[id,admission])).toEqual([
+    [paused.id,'waiting'],[automatic.id,'waiting'],[telegram.id,'connecting'],[later.id,'waiting'],
+  ]);
+  await vi.waitFor(()=>expect(native.startTurn).toHaveBeenCalledTimes(1));
+  expect(manager.listUserInputs(chat.id).find(row=>row.id===telegram.id)?.state).toBe('running');
+});
+
+test('an explicitly selected continuation is starting after confirmed Stop, not waiting behind older input',async()=>{
+  const chat=await manager.create('p','a',undefined,'codex',{workspaceId:'remote'});
+  await manager.send(chat.id,'Original active request');
+  const older=manager.enqueueUserInput(chat.id,'Older waiting input','older-selected');
+  const selected=manager.enqueueUserInput(chat.id,'Explicit selected input','explicit-selected');
+  let verify!:()=>void;
+  native.assertReloadable=vi.fn(()=>new Promise<void>(resolve=>{verify=resolve;}));
+  const continuation=manager.sendQueuedInput(chat.id,selected.id,manager.executionId(chat.id));
+  try{
+    await vi.waitFor(()=>expect(native.assertReloadable).toHaveBeenCalledTimes(1));
+    expect(manager.listUserInputs(chat.id).map(({id,admission})=>[id,admission])).toEqual([
+      [older.id,'waiting'],[selected.id,'starting'],
+    ]);
+  }finally{
+    verify?.();await continuation;
+  }
+});

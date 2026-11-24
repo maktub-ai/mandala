@@ -4,13 +4,31 @@ import { useLanguage } from './i18n';
 import Icon from './ui/Icon';
 export default function QueuedMessages({inputs,onCancel,onCopy,onReuse,onSend,busy=false,disabled=false}:{inputs:QueuedInput[];onSend?:(input:QueuedInput)=>void;busy?:boolean;disabled?:boolean;onCopy:(input:QueuedInput)=>void;onReuse:(input:QueuedInput)=>void;onCancel:(id:string)=>void}) {
  const {text: localize, t}=useLanguage();
- if(!inputs.length)return null;
- return <section className="queued-messages" aria-label={t(inputs.some(input => input.unrecorded) ? '已保存的请求' : '等待发送')}>
-  <div className="queue-heading"><Icon name="clock" size={14}/>{t(inputs.some(input => input.unrecorded) ? '已保存的请求' : '等待发送')}<small>{inputs.length}</small></div>
-  <ol>{inputs.map(input=><li className="queued-input" key={input.id}>
-   <div className="queued-content"><span title={input.agentMessage?undefined:input.text}>{input.source?.kind==='telegram'?'Telegram · '+(input.text||t('附件消息')):input.source?(localize('自动后台输入', 'Automatic background input')):input.agentMessage?.direction==='reply'?t('Agent 回复'):input.text||t('附件消息')}</span><small>{input.waitingReason==='background'?localize('等待后台命令退出，随后自动发送','Will send automatically when background commands finish'):t(input.agentMessage?input.agentMessage.direction==='reply'?'Agent 回复，等待接续':'Agent 询问，等待执行':input.unrecorded ? '尚未交给执行端，可复制或用于新对话' : busy?'当前回复结束后自动发送':'等待继续发送')}{input.waitingReason==='directory'&&' · '+t('等待工作目录可用')}{!!input.attachments?.length&&' · '+t('{count} 个附件',{count:input.attachments.length})}</small></div>
-   {!input.unrecorded&&!input.agentMessage&&!input.source&&onSend&&<Button type="button" className="queued-send" disabled={disabled||input.waitingReason==='background'} aria-label={t(busy?'打断并发送':'继续发送')} onClick={()=>onSend(input)}><Icon name={busy?'stop':'play'} size={14}/><span>{t(busy?'打断并发送':'继续发送')}</span></Button>}
-   {input.unrecorded ? <><Button type="button" aria-label={t('复制消息')} title={t('复制消息')} onClick={()=>onCopy(input)}><Icon name="copy" size={14}/></Button><Button type="button" aria-label={t('在新对话中使用此请求')} title={t('在新对话中使用此请求')} onClick={()=>onReuse(input)}><Icon name="message" size={14}/></Button></> : <Button type="button" disabled={disabled} aria-label={t('取消排队')} title={t('取消排队')} onClick={()=>onCancel(input.id)}><Icon name="close" size={14}/></Button>}
+ const groups = new Map<string,QueuedInput[]>();
+ for (const input of inputs) {
+   const phase=input.state==='queued'&&!input.unrecorded&&['waiting','starting','connecting','remote_unavailable'].includes(input.admission??'')?input.admission!:'saved';
+   const group=groups.get(phase)??[];
+   group.push(input);
+   groups.set(phase,group);
+ }
+ const labels = {
+   waiting:t('等待发送'),
+   starting:localize('正在启动请求','Starting your request'),
+   connecting:localize('正在连接远程电脑','Connecting to the remote computer'),
+   remote_unavailable:localize('远程电脑暂不可用','Remote computer unavailable'),
+   saved:t('已保存的请求'),
+ };
+ return <>{Array.from(groups,([phase,rows])=>{
+  const label=labels[phase as keyof typeof labels];
+  const preparing=phase==='starting'||phase==='connecting';
+  const cancelLabel=phase==='waiting'?t('取消排队'):localize('取消已保存的请求','Cancel saved request');
+  return <section key={phase} className="queued-messages" aria-label={label}>
+  <div className="queue-heading"><Icon name="clock" size={14}/>{label}<small>{rows.length}</small></div>
+  <ol>{rows.map(input=><li className="queued-input" key={input.id}>
+   <div className="queued-content"><span title={input.agentMessage?undefined:input.text}>{input.source?.kind==='telegram'?'Telegram · '+(input.text||t('附件消息')):input.source?(localize('自动后台输入', 'Automatic background input')):input.agentMessage?.direction==='reply'?t('Agent 回复'):input.text||t('附件消息')}</span><small>{phase==='starting'?localize('请求已保存，正在启动执行端','Saved; starting the runtime'):phase==='connecting'?localize('请求已保存，正在检查连接','Saved; checking the connection'):phase==='remote_unavailable'?localize('请求已保存。检查远程电脑后，继续发送这条请求。','Saved. Check the remote computer, then resume this request.'):phase==='saved'&&!input.unrecorded?localize('请求已保存，尚不清楚是否开始执行','Saved; execution status is not yet known'):input.waitingReason==='background'?localize('等待后台命令退出，随后自动发送','Will send automatically when background commands finish'):t(input.agentMessage?input.agentMessage.direction==='reply'?'Agent 回复，等待接续':'Agent 询问，等待执行':input.unrecorded ? '尚未交给执行端，可复制或用于新对话' : busy?'当前回复结束后自动发送':'等待继续发送')}{input.waitingReason==='directory'&&' · '+t('等待工作目录可用')}{!!input.attachments?.length&&' · '+t('{count} 个附件',{count:input.attachments.length})}</small></div>
+   {!preparing&&!input.unrecorded&&!input.agentMessage&&!input.source&&onSend&&<Button type="button" className="queued-send" disabled={disabled||input.waitingReason==='background'} aria-label={t(busy?'打断并发送':'继续发送')} onClick={()=>onSend(input)}><Icon name={busy?'stop':'play'} size={14}/><span>{t(busy?'打断并发送':'继续发送')}</span></Button>}
+   {input.unrecorded ? <><Button type="button" aria-label={t('复制消息')} title={t('复制消息')} onClick={()=>onCopy(input)}><Icon name="copy" size={14}/></Button><Button type="button" aria-label={t('在新对话中使用此请求')} title={t('在新对话中使用此请求')} onClick={()=>onReuse(input)}><Icon name="message" size={14}/></Button></> : <Button type="button" disabled={disabled} aria-label={cancelLabel} title={cancelLabel} onClick={()=>onCancel(input.id)}><Icon name="close" size={14}/></Button>}
   </li>)}</ol>
  </section>;
+ })}</>;
 }

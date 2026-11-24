@@ -27,7 +27,7 @@ for(const reason of ['directory','concurrency'])it(`shows ${reason} queueing ins
 for(const language of ['zh-CN','en'])it(`renders queue and native questions in ${language} without pre-submitting a choice`,()=>{
  vi.stubGlobal('localStorage',{getItem:()=>language});
  const render=(component:any)=>renderToStaticMarkup(createElement(LanguageProvider,null,component));
- const queue=render(createElement(QueuedMessages,{inputs:[{id:'a',conversationId:'c',text:'',attachments:['image'],state:'queued',createdAt:''}],onCopy(){}, onReuse(){}, onCancel(){}}));
+ const queue=render(createElement(QueuedMessages,{inputs:[{id:'a',conversationId:'c',text:'',attachments:['image'],state:'queued',admission:'waiting',createdAt:''}],onCopy(){}, onReuse(){}, onCancel(){}}));
  expect(queue).toContain(language==='en'?'Attachment message':'附件消息');
  expect(queue).toContain(language==='en'?'Cancel queued message':'取消排队');
  expect(render(createElement(QueuedMessages,{inputs:[],onCopy(){}, onReuse(){}, onCancel(){}}))).toBe('');
