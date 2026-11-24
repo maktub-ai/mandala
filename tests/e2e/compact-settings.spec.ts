@@ -32,3 +32,22 @@ test('Desktop command UI distinguishes registered from PATH availability and wai
  await page.addInitScript(()=>{let status={supported:true,installed:false,runtimeReady:true,launcherPath:'/tmp/mandala-ui-contract/.local/bin/mandala',command:"'/tmp/mandala-ui-contract/.local/bin/mandala'",inPath:false,shadowed:false,existingCommand:null,conflict:false,updateAvailable:false};(window as any).__cliInstallCalls=0;(window as any).mandalaDesktop={cli:{status:async()=>status,install:async()=>{(window as any).__cliInstallCalls++;await new Promise<void>(resolve=>(window as any).__releaseCliInstall=resolve);status={...status,installed:true};return status;}}};});
  await page.goto('/settings/general');const section=page.getByRole('region',{name:'Mandala command',exact:true});await section.getByRole('button',{name:'Register mandala command',exact:true}).click();await expect(section.getByRole('button',{name:'Registering…',exact:true})).toBeDisabled();await expect(page.locator('aside.sidebar [data-area=projects]')).toHaveAttribute('aria-disabled','true');await page.evaluate(()=>(window as any).__releaseCliInstall());await expect(section).toContainText('Registered');await expect(section).toContainText('Command directory not included');await expect(section).toContainText('--help');expect(await page.evaluate(()=>(window as any).__cliInstallCalls)).toBe(1);
 });
+
+test('manual desktop updates open the installer download without offering in-app installation',async({page})=>{
+ await page.addInitScript(()=>{
+  localStorage.setItem('mana-language','en');
+  let state={supported:true,channel:'installer',current:'1.0.3',status:'idle',update:null,checkedAt:null,autoCheck:false,error:null} as import('../../shared/desktop-updates').DesktopUpdateState;
+  let clicks=0;
+  Object.defineProperty(window,'installerDownloadClicks',{get:()=>clicks});
+  Object.defineProperty(window,'mandalaDesktop',{value:{platform:'win32',updates:{
+   state:async()=>state,onChange:()=>()=>{},check:async()=>state={...state,status:'available',update:{version:'1.0.4',size:123,url:'https://example.invalid/test.exe',notes:'https://example.invalid/test'}},
+   download:async()=>{clicks++;return state;}
+  }}});
+ });
+ await page.goto('/settings/general');
+ await expect(page.getByText('This version can check for updates in Mandala. Downloads and installation take place outside the app.')).toBeVisible();
+ await page.getByRole('button',{name:'Check for updates',exact:true}).click();
+ await page.getByRole('button',{name:'Open installer download for 1.0.4'}).click();
+ await expect.poll(()=>page.evaluate(()=>Reflect.get(window,'installerDownloadClicks'))).toBe(1);
+ await expect(page.getByRole('button',{name:'Install and restart'})).toHaveCount(0);
+});

@@ -154,3 +154,22 @@ test('tampered signed offer does not expose a manual download for the same versi
  expect(await updates.check()).toMatchObject({status:'error',update:null,error:'signed_verification'});
  await updates.download();expect(openExternal).not.toHaveBeenCalled();
 });
+
+test('reports installer-only mode before checking and labels the external Windows download explicitly', async () => {
+  const { updates, showMessage, openExternal } = controller(githubOnly([github('v1.0.1', 'win-x64')]), { platform: 'win32', arch: 'x64' });
+  expect(updates.state()).toMatchObject({ status: 'idle', channel: 'installer' });
+  expect(openExternal).not.toHaveBeenCalled();
+  showMessage.mockResolvedValue({ response: 1 });
+  await updates.check('menu');
+  expect(showMessage).toHaveBeenCalledWith(expect.objectContaining({ buttons: ['Later', 'Open installer download'], detail: expect.stringContaining('browser') }));
+  expect(openExternal).toHaveBeenCalledExactlyOnceWith(`${repo}/releases/download/v1.0.1/Mandala-1.0.1-win-x64.exe`);
+  expect(updates.state()).toMatchObject({ status: 'available', channel: 'installer' });
+});
+
+test('reports Mac updater capability without enabling it on the unsigned installer path', async () => {
+  const feed = githubOnly([]);
+  expect(controller(feed).updates.state().channel).toBe('installer');
+  expect(controller(feed, { local: { ready: () => null } }).updates.state().channel).toBe('local');
+  expect(controller(feed, { publicMac: { ready: () => null } }).updates.state().channel).toBe('signed-mac');
+  expect(controller(feed, { platform: 'linux' }).updates.state().channel).toBe('unsupported');
+});

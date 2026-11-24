@@ -69,9 +69,10 @@ function createUpdateController({ version, platform, arch, fetch, local, publicM
   let saved = {};
   try { const value = store.read(); if (value && typeof value === 'object') saved = value; } catch { /* Start fresh. */ }
   const supported = platform === 'darwin' || platform === 'win32';
+  const channel = !supported ? 'unsupported' : local ? 'local' : publicMac ? 'signed-mac' : 'installer';
   const localInfo = build => build && { version: build.version, local: true };
   const staged = localInfo(local?.ready()) ?? publicMac?.ready();
-  let state = { supported, current: version, status: staged ? 'ready' : 'idle', update: staged ?? null, checkedAt: Number.isFinite(saved.checkedAt) ? saved.checkedAt : null, autoCheck: saved.autoCheck !== false, error: null };
+  let state = { supported, channel, current: version, status: staged ? 'ready' : 'idle', update: staged ?? null, checkedAt: Number.isFinite(saved.checkedAt) ? saved.checkedAt : null, autoCheck: saved.autoCheck !== false, error: null };
   let pending = null;
   const persist = () => { try { store.write({ autoCheck: state.autoCheck, checkedAt: state.checkedAt, notified: saved.notified ?? null }); } catch { /* Convenience only. */ } };
   const set = patch => { state = { ...state, ...patch }; if (isActive()) onChange(state); };
@@ -119,7 +120,8 @@ function createUpdateController({ version, platform, arch, fetch, local, publicM
       else if (status === 'downloading' || status === 'installing') return;
       else if (status === 'error') await showMessage({ type: 'warning', title: 'Could not check for updates', message: state.error === 'signed_verification' ? 'Could not verify the signed update. The current app was not changed.' : 'Check your connection and try again later. You can keep using Mandala.', buttons: ['OK'] });
       else if (status === 'available') {
-        const answer = await showMessage({ type: 'info', title: 'Mandala update available', message: `Mandala ${update.version} is available`, detail: update.publicMac ? 'Download and verify the signed update in Mandala. Installation is a separate step.' : local ? 'Download this local build in Mandala. Quit and reopen to apply it.' : 'Download the installer, then use “Stop runtime and quit…” before replacing Mandala.', buttons: ['Later', 'Download update'], defaultId: 0, cancelId: 0 });
+        const externalInstaller = !update.local && !update.publicMac;
+        const answer = await showMessage({ type: 'info', title: 'Mandala update available', message: `Mandala ${update.version} is available`, detail: update.publicMac ? 'Download and verify the signed update in Mandala. Installation is a separate step.' : local ? 'Download this local build in Mandala. Quit and reopen to apply it.' : 'Open the installer download in your browser. After downloading, use “Stop runtime and quit…” before installing the new version.', buttons: ['Later', externalInstaller ? 'Open installer download' : 'Download update'], defaultId: 0, cancelId: 0 });
         if (answer.response === 1) {
           try { await download(); }
           catch { if (isActive()) await showMessage({ type: 'warning', title: 'Could not download the update', message: 'Check for updates again and retry.', buttons: ['OK'] }); }
