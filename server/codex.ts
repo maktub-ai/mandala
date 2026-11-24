@@ -9,7 +9,7 @@ import { join, resolve } from "node:path";
 import { createRpcClient, RpcResponseError } from "./rpc";
 import type { CliStatus, ModelChoice, McpServer, ApprovalMode } from "../shared/types";
 import type { RpcClient, RpcMessage } from "./rpc";
-import { runtimeError, validateRuntimeArgs } from "./runtime";
+import { bindLocalCatalogLauncher, runtimeError, validateRuntimeArgs } from "./runtime";
 import {DomainError} from '../shared/workspace-contracts';
 import { windowsSystemBinary } from '../cli/windows-system.mjs';
 import { codexMailboxSid, ownedPrivatePath } from '../cli/private-path.mjs';
@@ -93,6 +93,8 @@ export type CodexOptions = {
   safeSystem?: boolean;
   model?: string;
   gateway?: 'native' | 'unavailable';
+  /** Internal opt-in set only by the local catalog session manager. */
+  [bindLocalCatalogLauncher]?: true;
   env?: Record<string, string>;
   onEvent: (event: RpcMessage) => void;
   onApproval: (request: RpcMessage) => void;
@@ -383,6 +385,7 @@ export async function startCodex(options: CodexOptions): Promise<CodexClient> {
     shell: false,
     signal: options.signal,
     env: { ...process.env, ...options.env },
+    catalogRuntime: options[bindLocalCatalogLauncher] ? 'codex' as const : undefined,
     refreshWindowsPath: !Object.keys(options.env ?? {}).some(key => key.toUpperCase() === 'PATH'),
   };
   const child = spawn("codex", [...profileArgs, "app-server", "--stdio", ...serverArgs], launch);

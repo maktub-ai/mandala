@@ -7,7 +7,7 @@ import type { TurnOptions } from '../shared/chat-input';
 import type { ApprovalMode, McpServer, ModelChoice } from '../shared/types';
 import type { CodexClient, CodexOptions } from './codex';
 import { spawn } from './native-spawn';
-import { runtimeError } from './runtime';
+import { bindLocalCatalogLauncher, runtimeError } from './runtime';
 
 type LocalCli = 'cursor' | 'antigravity';
 type Turn = { id:string; cancelled:boolean; started:boolean; child?:ChildProcessWithoutNullStreams; stop?:Promise<void>; permission?:string; text:string; input:TurnOptions; finishItems?:()=>void; settle:(status:string,error?:string)=>void };
@@ -50,7 +50,7 @@ export async function startLocalCli(cli:LocalCli, options:CodexOptions):Promise<
  const execute=(args:string[]):Promise<string>=>{
   assertOpen();return new Promise((resolve,reject)=>{
    let child:ChildProcessWithoutNullStreams;
-   try{child=spawn(command,args,{cwd,env,stdio:'pipe',shell:false,detached:process.platform!=='win32'});}catch(error){reject(error);return;}
+   try{child=spawn(command,args,{catalogRuntime:options[bindLocalCatalogLauncher]?cli:undefined,cwd,env,stdio:'pipe',shell:false,detached:process.platform!=='win32'});}catch(error){reject(error);return;}
    helpers.add(child);let output='',stderr='',settled=false,identityReady=false;
    const timer=setTimeout(()=>{finish(new Error(`${cli} command timed out`));void terminate(child);},30000);
    const finish=(error?:Error)=>{if(settled)return;settled=true;clearTimeout(timer);helpers.delete(child);error?reject(error):resolve(output.trim());};
@@ -93,7 +93,7 @@ export async function startLocalCli(cli:LocalCli, options:CodexOptions):Promise<
   if(cli==='cursor')args.push(prompt);
   else if(options.env?.MANDALA_AGY_SETTINGS)args.push('--settings',options.env.MANDALA_AGY_SETTINGS);
   let child:ChildProcessWithoutNullStreams;
-  try{child=spawn(command,args,{cwd,env,stdio:'pipe',shell:false,detached:process.platform!=='win32'});turn.child=child;}catch(error){turn.settle('failed',String(error));return;}
+  try{child=spawn(command,args,{catalogRuntime:options[bindLocalCatalogLauncher]?cli:undefined,cwd,env,stdio:'pipe',shell:false,detached:process.platform!=='win32'});turn.child=child;}catch(error){turn.settle('failed',String(error));return;}
   let buffer='',stderr='',chain=Promise.resolve(),resultSeen=false,resultError='',textSeen=false;
   const messageIds=new Set<string>(),calls=new Map<string,Record<string,unknown>>(),messages=new Map<string,string>();
   turn.finishItems=()=>{for(const [id,text] of messages)emit('item/completed',{item:{id,type:'agentMessage',text}});messages.clear();};

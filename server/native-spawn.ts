@@ -77,12 +77,18 @@ function resolveWindowsLaunch(command: string, env: NodeJS.ProcessEnv, refreshWi
 }
 
 // Native CLI adapters always use three pipes; cross-spawn also resolves/escapes Windows npm shims.
-export function spawn(command: string, args: string[], { refreshWindowsPath = false, ...options }: SpawnOptionsWithoutStdio & { stdio: 'pipe'; refreshWindowsPath?: boolean }): ChildProcessWithoutNullStreams {
+export function spawn(command: string, args: string[], { refreshWindowsPath = false, catalogRuntime, ...options }: SpawnOptionsWithoutStdio & {
+  stdio: 'pipe'; refreshWindowsPath?: boolean; catalogRuntime?: Cli;
+}): ChildProcessWithoutNullStreams {
   if (process.platform === 'win32') process.env.comspec = windowsSystemBinary('cmd.exe');
   // Native tools can use PWD before their protocol session supplies cwd.
   const cwd = typeof options.cwd === 'string' || options.cwd === undefined ? resolve(options.cwd ?? process.cwd()) : fileURLToPath(options.cwd);
   const env = { ...(options.env ?? process.env), PWD: cwd };
-  const child = crossSpawn(process.platform === 'win32' ? resolveWindowsLaunch(command, env, refreshWindowsPath) : command, args, { ...options, env, windowsHide: true }) as ChildProcessWithoutNullStreams;
+  // Unix built-ins use the same ordered absolute PATH candidates as diagnostics.
+  // Custom commands and explicit paths keep their existing launch semantics.
+  const executable = process.platform === 'win32' ? resolveWindowsLaunch(command, env, refreshWindowsPath)
+    : catalogRuntime && runtimeCatalog[catalogRuntime].command === command ? resolveNativeCli(command, env) : command;
+  const child = crossSpawn(executable, args, { ...options, env, windowsHide: true }) as ChildProcessWithoutNullStreams;
   if (process.platform === 'win32') {
     const kill = child.kill.bind(child);
     child.kill = signal => {

@@ -9,7 +9,7 @@ import type { ApprovalMode, McpServer } from '../shared/types';
 import type { TurnOptions } from '../shared/chat-input';
 import { canApproveAcpLocally } from './approval-policy';
 import { spawn } from './native-spawn';
-import { runtimeError } from './runtime';
+import { bindLocalCatalogLauncher, runtimeError } from './runtime';
 
 const approvalPrefix = 'Mandala tool approval: ';
 const noMcp = (mcp?: McpServer[]) => {
@@ -22,7 +22,7 @@ export async function startPi(options: CodexOptions): Promise<CodexClient> {
   const args = ['--mode', 'rpc', '--no-extensions'];
   if (options.safeSystem) args.push('--no-tools', '--no-skills', '--no-prompt-templates', '--no-context-files');
   else args.push('-e', extensionPath);
-  const child = spawn('pi', args, { cwd: options.cwd, stdio: 'pipe', shell: false,
+  const child = spawn('pi', args, { catalogRuntime: options[bindLocalCatalogLauncher]?'pi':undefined, cwd: options.cwd, stdio: 'pipe', shell: false,
     env: { ...process.env, ...options.env }, detached: process.platform !== 'win32' });
   let closed = false, exited = false, started = false, exitReported = false, stderr = '', sessionId = '', instructions = '', bound = false;
   let model: any;

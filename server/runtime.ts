@@ -1,6 +1,9 @@
 import { effectiveRuntime, supportsSystemTasks } from "../shared/runtimes";
 import type { Agent, Cli, RuntimeConfig } from "../shared/types";
 
+// Deliberate in-process opt-in; serialized runtime options cannot set this.
+export const bindLocalCatalogLauncher = Symbol('bindLocalCatalogLauncher');
+
 const reservedEnv = new Set(["HOME", "CODEX_HOME", "OMP_PROFILE", "PI_CODING_AGENT_DIR", "NODE_OPTIONS"]);
 export function validateRuntimeEnv(env: Record<string, string>): void {
   for (const key of Object.keys(env))

@@ -11,7 +11,7 @@ import { spawn,resolveNativeCli,diagnoseRuntimePrerequisites } from './native-sp
 import type { CodexClient, CodexOptions } from './codex';
 import type { Cli, McpServer, ApprovalMode, ModelChoice } from '../shared/types';
 import { runtimeCatalog,runtimeLabel,supportsSystemTasks } from '../shared/runtimes';
-import { runtimeError, validateRuntimeArgs } from './runtime';
+import { bindLocalCatalogLauncher, runtimeError, validateRuntimeArgs } from './runtime';
 
 const bounded = async <T>(promise: Promise<T>,timeout=15000): Promise<T> => {
  let timer: ReturnType<typeof setTimeout>;
@@ -92,7 +92,7 @@ export async function connectAcp(options: CodexOptions & {nativeModel?:ModelChoi
   sessionRequestMeta:options.safeSystem?()=>({claudeCode:{options:{tools:[],settingSources:[],persistSession:false,settings:{disableAllHooks:true},mcpServers:{}}}}):undefined,
   spawnAgent({command,args,options:launch}){
    lifetime.signal.throwIfAborted();
-   const child=spawn(command,args,{...launch,stdio:'pipe'});
+   const child=spawn(command,args,{...launch,catalogRuntime:options[bindLocalCatalogLauncher]?cli:undefined,stdio:'pipe'});
    // acpx also owns --version/--help probes; only piped-stdin ACP agents
    // represent the conversation connection, even when they share its scope.
    if(!(Array.isArray(launch.stdio)&&launch.stdio[0]==='ignore'))child.once('spawn',()=>{if(child.pid)agentPids.add(child.pid);});

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openStore, type Store } from "../server/store";
 import { createSessionManager, type SessionManager } from "../server/sessions";
+import { bindLocalCatalogLauncher } from '../server/runtime';
 import type { CodexOptions, CodexClient } from "../server/codex";
 import type { Config } from "../shared/types";
 import { DomainError } from "../shared/workspace-contracts";
@@ -612,6 +613,8 @@ it("checks_cli_readiness_without_starting_work_and_filters_connection_errors", a
     status: "ready",
     version: "0.154.0",
   });
+  expect(options[bindLocalCatalogLauncher]).toBe(true);
+  expect(JSON.stringify(options)).not.toContain('bindLocalCatalogLauncher');
   expect(turns).toEqual([]);
   expect(store.listConversations()).toEqual([]);
   manager.close();

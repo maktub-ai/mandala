@@ -85,7 +85,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { homedir, tmpdir } from "node:os";
 import { enabledRuntimes } from "../shared/runtimes";
 import { capabilitySignature } from "./capabilities";
-import { configuredRuntime, executionRuntimePolicy, resolveRuntime, runtimeSignature, systemRuntime } from "./runtime";
+import { bindLocalCatalogLauncher, configuredRuntime, executionRuntimePolicy, resolveRuntime, runtimeSignature, systemRuntime } from "./runtime";
 import type { RpcMessage } from "./rpc";
 import { normalizeHookEvent } from "../shared/hooks";
 import { memoryHistoryReferences, type MemoryRuntime } from "./memory-runtime";
@@ -369,7 +369,7 @@ export function createSessionManager(
     const isolated=mode!=='session',attachOnly=mode==='inspect',runtimeId=mode==='fork'?'fork-'+randomUUID():id;
     const location=context?.executionLocation;
     const remote=location&&isolated?await connectSshExecution({id:location.machineId,name:location.machineName,host:location.host},{home,conversationId:runtimeId}):context?await remoteFor(context,id):undefined;
-    if(!remote)return factory(cli)(options);
+    if(!remote)return factory(cli)({...options,[bindLocalCatalogLauncher]:true});
     try{return await initialize(async()=>{
       const policy=executionRuntimePolicy(cli,context!.agent,config.runtimeDefaults);
       const client=await (attachOnly?remote.start(cli,options,policy,true):remote.start(cli,options,policy)),close=client.close.bind(client);

@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import type { CodexClient, CodexOptions } from "./codex";
 import type { McpServer, Skill, ApprovalMode } from "../shared/types";
-import { runtimeError } from "./runtime";
+import { bindLocalCatalogLauncher, runtimeError } from "./runtime";
 import { createRpcClient } from "./rpc";
 
 export async function prepareCapabilityRuntime(home: string, conversationId: string,
@@ -75,7 +75,7 @@ export async function startOmp(options: OmpOptions): Promise<CodexClient> {
   if (options.pluginDir) args.push("--plugin-dir", options.pluginDir);
   args.push(...(options.extraArgs ?? []));
   await options.validateHandoff?.();
-  const child = spawn("omp", args, { cwd: options.cwd, stdio: "pipe", shell: false,
+  const child = spawn("omp", args, { catalogRuntime: options[bindLocalCatalogLauncher]?"omp":undefined, cwd: options.cwd, stdio: "pipe", shell: false,
     signal: options.signal, env: { ...process.env, ...options.env } });
   const stopped = new Promise<void>(resolve => { child.once("close", () => resolve()); });
   let stderr = "";
@@ -305,7 +305,7 @@ export async function startOmp(options: OmpOptions): Promise<CodexClient> {
         const source = await request("get_state");
         const acp = createRpcClient(spawn("omp", ["acp", ...args.filter(arg =>
           !arg.startsWith("--mode=") && !arg.startsWith("--resume=") && arg !== "--no-session")], {
-          cwd: options.cwd, stdio: "pipe", shell: false, signal: options.signal,
+          catalogRuntime: options[bindLocalCatalogLauncher]?"omp":undefined, cwd: options.cwd, stdio: "pipe", shell: false, signal: options.signal,
           env: { ...process.env, ...options.env },
         }), { jsonRpc: true });
         let forkId: string;
