@@ -83,8 +83,8 @@ function translatedError(language: Language, message: string, pack?: LanguagePac
   const ssh = sshErrorText(language, message);
   if (ssh) return ssh;
   if (message === "Codex conversation is open in another client") return language !== "zh-CN"
-    ? "Another Codex client is holding this conversation open. Close the conversation in that client, then restore the saved request to the composer and send it again in this chat."
-    : "另一个 Codex 客户端仍占用此对话。请先在那边关闭对话，再将已保存的请求恢复到当前对话的输入框并发送。";
+    ? "Another Codex client is holding this conversation open. Close the conversation in that client. If it is still busy, save your work and quit that Codex client normally. Once it releases the conversation, restore the saved request to the composer and manually send it again in this chat."
+    : "另一个 Codex 客户端仍占用此对话。请先在那边关闭对话。如果仍提示占用，先保存工作，再正常退出那个 Codex 客户端。解除占用后，将已保存的请求恢复到输入框，再在当前对话手动发送。";
   // Earlier versions stored Codex's raw error message. Suppress its native ID;
   // that message alone does not prove the attempted turn was never submitted.
   if (/^thread [a-zA-Z0-9_-]+ already has an active writer$/i.test(message)) return language !== "zh-CN"
