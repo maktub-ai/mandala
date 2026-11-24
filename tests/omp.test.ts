@@ -1,14 +1,28 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { expect, it, vi } from "vitest";
+import { dirname, join } from "node:path";
+import { afterEach, expect, it, vi } from "vitest";
+import { spawn } from "node:child_process";
 import { startOmp, prepareCapabilityRuntime } from "../server/omp";
+import { spawn as spawnNative } from "../server/native-spawn";
+
+const fixtures = vi.hoisted(() => new Map<string, string>());
+vi.mock("../server/native-spawn", () => ({
+  spawn: vi.fn((command, args, options) => {
+    const fixture = command === "omp" && typeof options.cwd === "string"
+      ? fixtures.get(options.cwd) : undefined;
+    if (!fixture) throw new Error("Test blocked an unexpected native CLI spawn");
+    // Use the same registered fake for normal RPC, ACP fork, and the forked RPC.
+    return spawn(process.execPath, [fixture, ...args], options);
+  }),
+}));
+function registerFixture(path: string) { fixtures.set(dirname(path), path); }
+afterEach(() => { fixtures.clear(); vi.mocked(spawnNative).mockClear(); });
 
 it("preserves distinct OMP replies, thinking and the final model timing", async () => {
   const dir = await mkdtemp(join(tmpdir(), "mana-omp-observe-"));
-  const executable = join(dir, "omp");
-  await writeFile(executable, `#!/usr/bin/env node
-const { createInterface } = require("node:readline");
+  const executable = join(dir, "omp-fixture.cjs");
+  await writeFile(executable, `const { createInterface } = require("node:readline");
 const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
 send({ type: "ready" });
 createInterface({ input: process.stdin }).on("line", line => {
@@ -27,11 +41,11 @@ createInterface({ input: process.stdin }).on("line", line => {
   send({ type: "agent_end", messages: [{ role: "assistant", stopReason: "stop" }] });
 });
 `);
-  await chmod(executable, 0o700);
+  registerFixture(executable);
   const events: { method?: string; params?: any }[] = [];
   let client;
   try {
-    client = await startOmp({ cwd: dir, env: { PATH: dir + ":" + process.env.PATH }, onEvent: e => events.push(e), onApproval() {}, onExit() {} });
+    client = await startOmp({ cwd: dir, onEvent: e => events.push(e), onApproval() {}, onExit() {} });
     await client.startTurn("sample", "Inspect");
     for (let i = 0; i < 100 && !events.some(e => e.method === "turn/completed"); i++)
       await new Promise(resolve => setTimeout(resolve, 10));
@@ -46,14 +60,13 @@ createInterface({ input: process.stdin }).on("line", line => {
       {messageId:'msg-commentary',model:'sample-model',usage:{input:10,output:5,cacheRead:20,cacheWrite:3,reasoningTokens:2}},
       {messageId:'msg-final_answer',model:'sample-model',usage:{input:10,output:5,cacheRead:20,cacheWrite:3,reasoningTokens:2}},
     ]);
-  } finally { client?.close(); await rm(dir, { recursive: true, force: true }); }
+  } finally { await client?.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
 it("surfaces a failed OMP model turn instead of leaving the chat running", async () => {
   const dir = await mkdtemp(join(tmpdir(), "open-mana-omp-"));
-  const executable = join(dir, "omp");
-  await writeFile(executable, `#!/usr/bin/env node
-const { createInterface } = require("node:readline");
+  const executable = join(dir, "omp-fixture.cjs");
+  await writeFile(executable, `const { createInterface } = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 send({ type: "ready" });
 createInterface({ input: process.stdin }).on("line", (line) => {
@@ -70,9 +83,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-  await chmod(executable, 0o700);
-  const previousPath = process.env.PATH;
-  process.env.PATH = dir + ":" + previousPath;
+  registerFixture(executable);
   const events: { method?: string; params?: any }[] = [];
   let client;
   try {
@@ -86,18 +97,16 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     expect(events.find((event) => event.method === "turn/completed")?.params?.turn?.status)
       .toBe("failed");
   } finally {
-    client?.close();
-    process.env.PATH = previousPath;
+    await client?.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
 
 it.each(["default", "strict", "auto"] as const)("starts OMP RPC with %s approval, separate arguments and inherited environment", async (approvalMode) => {
   const dir = await mkdtemp(join(tmpdir(), "mana-omp-runtime-"));
-  const executable = join(dir, "omp");
+  const executable = join(dir, "omp-fixture.cjs");
   const capture = join(dir, "launch.json");
-  await writeFile(executable, `#!/usr/bin/env node
-require("node:fs").writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ args: process.argv.slice(2), value: process.env.MANA_RUNTIME_TEST, inherited: process.env.PATH }));
+  await writeFile(executable, `require("node:fs").writeFileSync(${JSON.stringify(capture)}, JSON.stringify({ args: process.argv.slice(2), value: process.env.MANA_RUNTIME_TEST, inherited: process.env.PATH }));
 const { createInterface } = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 send({ type: "ready" });
@@ -106,9 +115,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   send({ type: "response", id: request.id, success: true, data: { sessionFile: "test-session" } });
 });
 `);
-  await chmod(executable, 0o700);
-  const previousPath = process.env.PATH;
-  process.env.PATH = dir + ":" + previousPath;
+  registerFixture(executable);
   let client;
   try {
     client = await startOmp({ cwd: dir, approvalMode, extraArgs: ["--thinking", "high"], env: { MANA_RUNTIME_TEST: "resolved-value" },
@@ -118,16 +125,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     expect(launch.value).toBe("resolved-value");
     expect(launch.inherited).toBe(process.env.PATH);
   } finally {
-    client?.close();
-    process.env.PATH = previousPath;
+    await client?.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
 
 it("forwards native extension errors with distinct ids without synthesizing a hook lifecycle", async () => {
   const dir = await mkdtemp(join(tmpdir(), "mana-omp-hooks-"));
-  await writeFile(join(dir, "omp"), `#!/usr/bin/env node
-const { createInterface } = require("node:readline");
+  await writeFile(join(dir, "omp-fixture.cjs"), `const { createInterface } = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 send({ type: "ready" });
 createInterface({ input: process.stdin }).on("line", (line) => {
@@ -141,9 +146,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
 });
 `);
-  await chmod(join(dir, "omp"), 0o700);
-  const previousPath = process.env.PATH;
-  process.env.PATH = dir + ":" + previousPath;
+  registerFixture(join(dir, "omp-fixture.cjs"));
   const events: { method?: string; params?: any }[] = [];
   let client;
   try {
@@ -158,8 +161,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     expect(events.some((event) => event.method === "hook/started" || event.method === "hook/completed")).toBe(false);
     expect(events.find((event) => event.method === "error")?.params.error.message).toBe("Ordinary CLI error");
   } finally {
-    client?.close();
-    process.env.PATH = previousPath;
+    await client?.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
@@ -167,8 +169,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 it.each(["success", "cancelled", "wrong-prefix"])("branches OMP through native entry ids and verifies active context: %s", async (mode) => {
   const dir = await mkdtemp(join(tmpdir(), "mana-omp-branch-"));
   const capture = join(dir, "requests.jsonl");
-  await writeFile(join(dir, "omp"), `#!/usr/bin/env node
-const { createInterface } = require("node:readline");
+  await writeFile(join(dir, "omp-fixture.cjs"), `const { createInterface } = require("node:readline");
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 let branched = false;
 send({ type: "ready" });
@@ -183,9 +184,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   send({ type: "response", id: r.id, success: true, data });
 });
 `);
-  await chmod(join(dir, "omp"), 0o700);
-  const previousPath = process.env.PATH;
-  process.env.PATH = dir + ":" + previousPath;
+  registerFixture(join(dir, "omp-fixture.cjs"));
   let client;
   try {
     client = await startOmp({ cwd: dir, resume: "source-session", onEvent() {}, onApproval() {}, onExit() {} });
@@ -196,16 +195,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     expect(requests.find(request => request.type === "branch")).toMatchObject({ entryId: "entry-b" });
     expect(requests.some(request => request.type === "prompt")).toBe(false);
   } finally {
-    client?.close();
-    process.env.PATH = previousPath;
+    await client?.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
 
 it.each(["accept", "decline"])("exposes OMP select-based tool approval and streams tool progress after %s", async (decision) => {
   const dir = await mkdtemp(join(tmpdir(), "mana-omp-approval-"));
-  await writeFile(join(dir, "omp"), `#!/usr/bin/env node
-const { createInterface } = require("node:readline");
+  await writeFile(join(dir, "omp-fixture.cjs"), `const { createInterface } = require("node:readline");
 const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
 send({type:"ready"});
 createInterface({input:process.stdin}).on("line", line => {
@@ -224,8 +221,7 @@ createInterface({input:process.stdin}).on("line", line => {
  }
 });
 `);
-  await chmod(join(dir, "omp"), 0o700);
-  const original = process.env.PATH; process.env.PATH = dir + ":" + original;
+  registerFixture(join(dir, "omp-fixture.cjs"));
   const events: any[] = [], approvals: any[] = [];
   let client;
   try {
@@ -237,14 +233,14 @@ createInterface({input:process.stdin}).on("line", line => {
     await expect.poll(() => events.some(e=>e.method==="turn/completed")).toBe(true);
     expect(events.find(e=>e.method==="item/completed").params.item.status).toBe(decision === "accept" ? "completed" : "failed");
     expect(events.filter(e=>e.method==="item/commandExecution/outputDelta").map(e=>e.params.delta)).toEqual(["first", " second"]);
-  } finally { client?.close(); process.env.PATH = original; await rm(dir,{recursive:true,force:true}); }
+  } finally { await client?.close(); await rm(dir,{recursive:true,force:true}); }
 });
 
-it("force closes an OMP process that ignores SIGTERM even after its signal aborts", async () => {
+// Windows does not deliver a catchable POSIX SIGTERM to the Node fixture.
+it.skipIf(process.platform === "win32")("force closes an OMP process that ignores SIGTERM even after its signal aborts", async () => {
   const dir = await mkdtemp(join(tmpdir(), "mana-omp-close-"));
   const pidFile = join(dir, "pid");
-  await writeFile(join(dir, "omp"), `#!/usr/bin/env node
-require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+  await writeFile(join(dir, "omp-fixture.cjs"), `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
 process.on("SIGTERM", () => {});
 setInterval(() => {}, 1000);
 const {createInterface}=require("node:readline");
@@ -254,8 +250,7 @@ createInterface({input:process.stdin}).on("line", line=>{
  const r=JSON.parse(line);send({type:"response",id:r.id,success:true,data:{sessionFile:"test-session"}});
 });
 `);
-  await chmod(join(dir,"omp"),0o700);
-  const original=process.env.PATH;process.env.PATH=dir+":"+original;
+  registerFixture(join(dir,"omp-fixture.cjs"));
   const controller=new AbortController();
   let client, pid=0;
   try {
@@ -264,8 +259,8 @@ createInterface({input:process.stdin}).on("line", line=>{
     controller.abort();client.close();
     await expect.poll(()=>{try{process.kill(pid,0);return false;}catch{return true;}},{timeout:3500}).toBe(true);
   } finally {
-    client?.close();if(pid)try{process.kill(pid,"SIGKILL");}catch{}
-    process.env.PATH=original;await rm(dir,{recursive:true,force:true});
+    await client?.close();if(pid)try{process.kill(pid,"SIGKILL");}catch{}
+    await rm(dir,{recursive:true,force:true});
   }
 });
 
@@ -273,8 +268,7 @@ createInterface({input:process.stdin}).on("line", line=>{
 it.each(["success", "unsupported", "wrong-history"])("forks the latest OMP reply via ACP without prompting: %s", async mode => {
   const dir = await mkdtemp(join(tmpdir(), "mana-omp-reply-fork-"));
   const capture = join(dir, "requests.jsonl");
-  await writeFile(join(dir, "omp"), `#!/usr/bin/env node
-const { createInterface } = require("node:readline");
+  await writeFile(join(dir, "omp-fixture.cjs"), `const { createInterface } = require("node:readline");
 const acp = process.argv.includes("acp");
 let forked = process.argv.includes("--resume=fork-id");
 const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
@@ -295,9 +289,9 @@ createInterface({input:process.stdin}).on("line", line => {
   send({type:"response",id:r.id,success:true,data});
 });
 `);
-  await chmod(join(dir, "omp"), 0o700);
+  registerFixture(join(dir, "omp-fixture.cjs"));
   const events: unknown[] = [];
-  const client = await startOmp({cwd:dir,resume:"source-session",env:{PATH:dir + ":" + process.env.PATH,FORK_TEST_AGENT:"bound-agent"},extraArgs:["--no-tools"],onEvent:e=>events.push(e),onApproval() {},onExit() {}});
+  const client = await startOmp({cwd:dir,resume:"source-session",env:{FORK_TEST_AGENT:"bound-agent"},extraArgs:["--no-tools"],onEvent:e=>events.push(e),onApproval() {},onExit() {}});
   try {
     if (mode === "success") expect(await client.forkThread!("source-session", ["first"], 1)).toBe("fork-session");
     else await expect(client.forkThread!("source-session", ["first"], 1)).rejects.toThrow(mode === "unsupported" ? "Native reply branching unavailable" : "Native branch prefix could not be verified");
@@ -310,9 +304,8 @@ createInterface({input:process.stdin}).on("line", line => {
 
 it("maps a non-invoking prompt response before emitting its terminal", async () => {
   const dir = await mkdtemp(join(tmpdir(), "mana-omp-command-"));
-  const executable = join(dir, "omp");
-  await writeFile(executable, `#!/usr/bin/env node
-const { createInterface } = require("node:readline");
+  const executable = join(dir, "omp-fixture.cjs");
+  await writeFile(executable, `const { createInterface } = require("node:readline");
 const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
 send({ type: "ready" });
 createInterface({ input: process.stdin }).on("line", line => {
@@ -320,15 +313,15 @@ createInterface({ input: process.stdin }).on("line", line => {
   send({ type: "response", id: r.id, success: true, data: r.type === "get_state" ? { sessionFile: "sample" } : { agentInvoked: false } });
 });
 `);
-  await chmod(executable, 0o700);
+  registerFixture(executable);
   const events: { method?: string; params?: any }[] = [];
   let client;
   try {
-    client = await startOmp({ cwd: dir, env: { PATH: dir + ":" + process.env.PATH }, onEvent: e => events.push(e), onApproval() {}, onExit() {} });
+    client = await startOmp({ cwd: dir, onEvent: e => events.push(e), onApproval() {}, onExit() {} });
     const turnId = await client.startTurn("sample", "/command");
     expect(events.map(e => e.method)).toEqual(["turn/started", "turn/completed"]);
     expect(events.every(e => e.params.threadId === "sample" && e.params.turn.id === turnId)).toBe(true);
-  } finally { client?.close(); await rm(dir, { recursive: true, force: true }); }
+  } finally { await client?.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
 
@@ -338,9 +331,9 @@ it('revalidates immediately before a prepared instruction file is written',async
  finally{await rm(home,{recursive:true,force:true});}
 });
 it('revalidates before spawning OMP with an instruction file',async()=>{
- const home=await mkdtemp(join(tmpdir(),'omp-spawn-fence-'));const marker=join(home,'spawned'),executable=join(home,'omp');
- await writeFile(executable,`#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)},'spawned');process.stdout.write(JSON.stringify({type:'ready'})+'\\n');setTimeout(()=>{},1000);\n`);await chmod(executable,0o700);
- let client:Awaited<ReturnType<typeof startOmp>>|undefined;try{await expect(startOmp({cwd:home,env:{PATH:home+':'+process.env.PATH},instructions:join(home,'instructions.md'),onEvent(){},onApproval(){},onExit(){},validateHandoff(){throw new Error('stale_memory_dependency');}}).then(value=>{client=value;})).rejects.toThrow('stale_memory_dependency');await expect(readFile(marker,'utf8')).rejects.toThrow();}
+ const home=await mkdtemp(join(tmpdir(),'omp-spawn-fence-'));const marker=join(home,'spawned'),executable=join(home,'omp-fixture.cjs');
+ await writeFile(executable,`require('node:fs').writeFileSync(${JSON.stringify(marker)},'spawned');process.stdout.write(JSON.stringify({type:'ready'})+'\\n');setTimeout(()=>{},1000);\n`);registerFixture(executable);
+ let client:Awaited<ReturnType<typeof startOmp>>|undefined;try{await expect(startOmp({cwd:home,instructions:join(home,'instructions.md'),onEvent(){},onApproval(){},onExit(){},validateHandoff(){throw new Error('stale_memory_dependency');}}).then(value=>{client=value;})).rejects.toThrow('stale_memory_dependency');expect(spawnNative).not.toHaveBeenCalled();await expect(readFile(marker,'utf8')).rejects.toThrow();}
  finally{await client?.close();await rm(home,{recursive:true,force:true});}
 });
 
@@ -349,8 +342,7 @@ it("uses native model effort choices and sends model, effort and image bytes bef
   const capture = join(dir, "requests.jsonl");
   const imagePath = join(dir, "sample.png");
   await writeFile(imagePath, Buffer.from("synthetic image bytes"));
-  await writeFile(join(dir, "omp"), `#!/usr/bin/env node
-const { createInterface } = require("node:readline");
+  await writeFile(join(dir, "omp-fixture.cjs"), `const { createInterface } = require("node:readline");
 const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
 const model = { provider: "sample", id: "model", name: "Model", reasoning: true, thinking: { efforts: ["low", "high"], defaultLevel: "low" } };
 send({ type: "ready" });
@@ -361,10 +353,10 @@ createInterface({ input: process.stdin }).on("line", line => {
   send({ type: "response", id: r.id, success: true, data });
 });
 `);
-  await chmod(join(dir, "omp"), 0o700);
+  registerFixture(join(dir, "omp-fixture.cjs"));
   let client;
   try {
-    client = await startOmp({ cwd: dir, env: { PATH: dir + ":" + process.env.PATH }, onEvent() {}, onApproval() {}, onExit() {} });
+    client = await startOmp({ cwd: dir, onEvent() {}, onApproval() {}, onExit() {} });
     expect(await client.listModels()).toEqual([{ id: "sample/model", label: "sample / Model", isDefault: true, defaultReasoningEffort: "low", supportedReasoningEfforts: ["none", "low", "high"] }]);
     await client.startTurn("sample-session", "inspect", undefined, undefined, { model: "sample/model", effort: "high", images: [{ path: imagePath, mimeType: "image/png" }] });
     const requests = (await readFile(capture, "utf8")).trim().split("\n").map(line => JSON.parse(line));
@@ -379,8 +371,7 @@ createInterface({ input: process.stdin }).on("line", line => {
 it.each(['rejection', 'missing-session'] as const)('reaps the child before rejecting initial OMP %s negotiation', async mode => {
   const dir = await mkdtemp(join(tmpdir(), 'mandala-omp-init-failure-'));
   const pidFile = join(dir, 'pid');
-  await writeFile(join(dir, 'omp'), `#!/usr/bin/env node
-require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+  await writeFile(join(dir, 'omp-fixture.cjs'), `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
 const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
 process.on('SIGTERM', () => setTimeout(() => process.exit(0), 50));
 send({type:'ready'});
@@ -389,11 +380,11 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
   send({type:'response', id:request.id, success:${mode === 'missing-session'}, data:{}, error:'state unavailable'});
 });
 `);
-  await chmod(join(dir, 'omp'), 0o700);
+  registerFixture(join(dir, 'omp-fixture.cjs'));
   let pid: number | undefined;
   const onExit = vi.fn();
   try {
-    await expect(startOmp({cwd:dir, env:{PATH:dir+':'+process.env.PATH},
+    await expect(startOmp({cwd:dir,
       onEvent(){}, onApproval(){}, onExit,
     })).rejects.toThrow(mode === 'rejection' ? 'state unavailable' : 'OMP did not provide a session identifier');
     pid = Number(await readFile(pidFile, 'utf8'));
@@ -408,17 +399,16 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
 it.each([undefined,'saved-session'])('delivers the current host instruction file to native OMP (resume=%s)',async resume=>{
  const dir=await mkdtemp(join(tmpdir(),'mandala-omp-instructions-')),capture=join(dir,'captured.json');
  const root=await prepareCapabilityRuntime(dir,'chat',[],[],'Current system coordinator context');
- await writeFile(join(dir,'omp'),`#!/usr/bin/env node
-const fs=require('node:fs'),args=process.argv.slice(2);
+ await writeFile(join(dir,'omp-fixture.cjs'),`const fs=require('node:fs'),args=process.argv.slice(2);
 const path=args.find(a=>a.startsWith('--append-system-prompt=')).split('=').slice(1).join('=');
 fs.writeFileSync(${JSON.stringify(capture)},JSON.stringify({args,instructions:fs.readFileSync(path,'utf8')}));
 const send=value=>process.stdout.write(JSON.stringify(value)+'\\n');send({type:'ready'});
 require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);send({type:'response',id:r.id,success:true,data:{sessionFile:'native'}});});
 `);
- await chmod(join(dir,'omp'),0o700);
+ registerFixture(join(dir,'omp-fixture.cjs'));
  let client;
  try{
-  client=await startOmp({cwd:dir,resume,instructions:join(root,'instructions.md'),env:{PATH:dir+':'+process.env.PATH},onEvent(){},onApproval(){},onExit(){}});
+  client=await startOmp({cwd:dir,resume,instructions:join(root,'instructions.md'),onEvent(){},onApproval(){},onExit(){}});
   const launch=JSON.parse(await readFile(capture,'utf8'));
   expect(launch.instructions).toBe('Current system coordinator context');
   expect(launch.args.includes('--resume=saved-session')).toBe(!!resume);
