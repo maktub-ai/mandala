@@ -103,6 +103,54 @@ std::wstring digestFile(HANDLE file, std::uint64_t expected) {
   }
 }
 
+struct EmbeddedMessage {
+  HCERTSTORE store=nullptr;
+  HCRYPTMSG message=nullptr;
+  ~EmbeddedMessage() { if(message) CryptMsgClose(message); if(store) CertCloseStore(store,0); }
+};
+struct EmbeddedCertificate {
+  PCCERT_CONTEXT context=nullptr;
+  ~EmbeddedCertificate() { if(context) CertFreeCertificateContext(context); }
+};
+
+bool messageParam(HCRYPTMSG message,DWORD param,std::vector<unsigned char>& out) {
+  DWORD size=0;
+  if(!message || !CryptMsgGetParam(message,param,0,nullptr,&size) || !size || size>1024*1024) return false;
+  out.resize(size);
+  return CryptMsgGetParam(message,param,0,out.data(),&size) && size==out.size();
+}
+
+bool independentlyBoundPrimary(const std::wstring& path,HCRYPTMSG authenticated,PCCERT_CONTEXT leaf) {
+  if(!authenticated||!leaf) return false;
+  EmbeddedMessage embedded;
+  DWORD content=0;
+  if(!CryptQueryObject(CERT_QUERY_OBJECT_FILE,path.c_str(),CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED,
+      CERT_QUERY_FORMAT_FLAG_BINARY,0,nullptr,&content,nullptr,&embedded.store,&embedded.message,nullptr) ||
+      content!=CERT_QUERY_CONTENT_PKCS7_SIGNED_EMBED || !embedded.store || !embedded.message) return false;
+  DWORD count=0, length=sizeof(count);
+  if(!CryptMsgGetParam(embedded.message,CMSG_SIGNER_COUNT_PARAM,0,&count,&length)||
+     length!=sizeof(count)||count!=1) return false;
+  std::vector<unsigned char> encoded,verified,signer;
+  if(!messageParam(embedded.message,CMSG_ENCODED_MESSAGE,encoded)||
+     !messageParam(authenticated,CMSG_ENCODED_MESSAGE,verified)||encoded!=verified||
+     !messageParam(embedded.message,CMSG_SIGNER_INFO_PARAM,signer)||signer.size()<sizeof(CMSG_SIGNER_INFO)) return false;
+  const auto info=reinterpret_cast<const CMSG_SIGNER_INFO*>(signer.data());
+  CERT_INFO id{}; id.Issuer=info->Issuer; id.SerialNumber=info->SerialNumber;
+  EmbeddedCertificate found;
+  found.context=CertFindCertificateInStore(embedded.store,X509_ASN_ENCODING|PKCS_7_ASN_ENCODING,
+      0,CERT_FIND_SUBJECT_CERT,&id,nullptr);
+  if(!found.context||found.context->cbCertEncoded!=leaf->cbCertEncoded||!leaf->cbCertEncoded||
+     memcmp(found.context->pbCertEncoded,leaf->pbCertEncoded,leaf->cbCertEncoded)!=0) return false;
+  // The issuer/serial identity must be unique in the independently opened CMS.
+  // Passing pPrev consumes the context even when the search fails: only the
+  // result of this second search remains owned by the local RAII wrapper.
+  auto previous=std::exchange(found.context,nullptr);
+  SetLastError(ERROR_SUCCESS);
+  found.context=CertFindCertificateInStore(embedded.store,X509_ASN_ENCODING|PKCS_7_ASN_ENCODING,
+      0,CERT_FIND_SUBJECT_CERT,&id,previous);
+  return !found.context && GetLastError()==static_cast<DWORD>(CRYPT_E_NOT_FOUND);
+}
+
 void verifyEmbedded(HANDLE handle, std::wstring const& path, std::wstring const& pin) {
   Module module;
   if (!module.value) throw unavailable;
@@ -117,7 +165,7 @@ void verifyEmbedded(HANDLE handle, std::wstring const& path, std::wstring const&
   file.hFile = handle;
   WINTRUST_SIGNATURE_SETTINGS signatures{};
   signatures.cbStruct = sizeof(signatures);
-  signatures.dwFlags = WSS_VERIFY_SPECIFIC | WSS_GET_SECONDARY_SIG_COUNT;
+  signatures.dwFlags = WSS_GET_SECONDARY_SIG_COUNT;
   signatures.cSecondarySigs = MAXDWORD;
   signatures.dwVerifiedSigIndex = MAXDWORD;
   WINTRUST_DATA data{};
@@ -129,11 +177,29 @@ void verifyEmbedded(HANDLE handle, std::wstring const& path, std::wstring const&
   data.dwStateAction = WTD_STATEACTION_VERIFY;
   data.dwProvFlags = WTD_REVOCATION_CHECK_CHAIN_EXCLUDE_ROOT | WTD_CACHE_ONLY_URL_RETRIEVAL | WTD_DISABLE_MD2_MD4;
   data.pSignatureSettings = &signatures;
+  auto close = [&]() {
+    data.dwStateAction = WTD_STATEACTION_CLOSE;
+    verify(nullptr, &action, &data);
+    data.hWVTStateData = nullptr;
+  };
+  const auto countResult = verify(nullptr, &action, &data);
+  const auto secondaryCount = signatures.cSecondarySigs;
+  close();
+  if (countResult != ERROR_SUCCESS) throw untrusted;
+  if (secondaryCount != 0) throw bad_signer;
+  // Run a distinct explicit primary trust check under the same file and
+  // parent locks; only its returned provider state can authenticate a leaf.
+  LARGE_INTEGER zero{};
+  if (!SetFilePointerEx(handle, zero, nullptr, FILE_BEGIN)) throw unavailable;
+  signatures = {};
+  signatures.cbStruct = sizeof(signatures);
+  signatures.dwFlags = WSS_VERIFY_SPECIFIC;
+  signatures.dwVerifiedSigIndex = MAXDWORD;
+  data.dwStateAction = WTD_STATEACTION_VERIFY;
   const auto result = verify(nullptr, &action, &data);
-  const auto close = [&]() { data.dwStateAction = WTD_STATEACTION_CLOSE; verify(nullptr, &action, &data); };
   try {
     if (result != ERROR_SUCCESS) throw untrusted;
-    if (signatures.dwVerifiedSigIndex != 0 || signatures.cSecondarySigs != 0) throw bad_signer;
+    if (signatures.dwVerifiedSigIndex != 0 && signatures.dwVerifiedSigIndex != MAXDWORD) throw bad_signer;
     // Only an embedded PKCS#7 can qualify; do not accept an OS catalog member.
     if (!CryptQueryObject(CERT_QUERY_OBJECT_FILE, path.c_str(), CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED,
         CERT_QUERY_FORMAT_FLAG_BINARY, 0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr)) throw bad_signer;
@@ -142,6 +208,11 @@ void verifyEmbedded(HANDLE handle, std::wstring const& path, std::wstring const&
     const auto signer = getSigner(state, 0, FALSE, 0);
     if (!signer || signer->dwError || !signer->pChainContext || signer->pChainContext->TrustStatus.dwErrorStatus || !signer->csCertChain || !signer->pasCertChain ||
         !signer->pasCertChain[0].pCert) throw bad_signer;
+    // Some providers leave the reported index untouched even after a
+    // successful explicit primary request. Require independent proof that
+    // their authenticated message and leaf are the one embedded signature.
+    if (signatures.dwVerifiedSigIndex == MAXDWORD &&
+        !independentlyBoundPrimary(path,state->hMsg,signer->pasCertChain[0].pCert)) throw bad_signer;
     auto& spki = signer->pasCertChain[0].pCert->pCertInfo->SubjectPublicKeyInfo;
     DWORD size = 0;
     if (!CryptEncodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO, &spki, 0, nullptr, nullptr, &size) ||

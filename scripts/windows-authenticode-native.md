@@ -115,3 +115,21 @@ Use a verified URI-capable Node runtime for this optional adapter; older
 generic Node builds may not interpret SQLite file URI options and are not
 supported. Keep the adapter out of production until the exact shipped
 main-process binary and its protected-directory authorizer are verified.
+
+To opt into the additional native positive and tamper cases, separately set
+MANDALA_WINDOWS_TRUST_FIXTURE to the existing x64 Windows SDK 10.0.22621.0
+SignTool file, and MANDALA_WINDOWS_TRUST_FIXTURE_PIN to the independently
+read SHA-256 of its leaf certificate DER SubjectPublicKeyInfo. The test
+requires the exact fixture digest, reads/copies the fixture strictly as data,
+and runs only the locally built verification probe. The pin is not update
+configuration; agreement with this Microsoft sample does not authorize any
+Mandala installer or other publisher.
+
+A sole embedded signature must survive two cache-only WinTrust checks:
+explicit secondary-count discovery and explicit primary verification. An
+unreported primary index is not affirmative evidence. In that case, require
+the authenticated provider's CMS bytes to equal an independently obtained
+embedded CMS, exactly one primary in that CMS, and one unique issuer/serial
+certificate match that equals the authenticated leaf in DER. Any second
+match is ambiguous, even identical DER. Authenticated chain/revocation,
+embedded source, exact bytes, and independent publisher pin still apply.
