@@ -15,8 +15,13 @@ import { windowsSystemBinary } from '../cli/windows-system.mjs';
 import { codexMailboxSid, ownedPrivatePath } from '../cli/private-path.mjs';
 
 const mailboxError = (code: CodexMailboxErrorCode) => new DomainError(code, 500, codexMailboxErrors[code]);
-export function codexMailboxFailure(code: unknown): DomainError | undefined {
-  return isCodexMailboxErrorCode(code) ? mailboxError(code) : undefined;
+const helperNonzeroExit = 'helper_nonzero_exit' as const;
+type MailboxFailure = DomainError & { mailboxSetupOutcome?: typeof helperNonzeroExit };
+export function codexMailboxFailure(code: unknown, outcome?: unknown): MailboxFailure | undefined {
+  if (!isCodexMailboxErrorCode(code)) return;
+  const error = mailboxError(code);
+  return code === 'codex_mailbox_setup_failed' && outcome === helperNonzeroExit
+    ? Object.assign(error, { mailboxSetupOutcome: helperNonzeroExit }) : error;
 }
 
 let mailboxPreparations = Promise.resolve();
@@ -42,6 +47,7 @@ function prepareWindowsMailbox(rpc: RpcClient, mailboxPath: string, launch: Para
       ? resolve(String(launch.cwd), env.CODEX_HOME) : join(homedir(), '.codex');
     env.CODEX_HOME = codexHome;
     const scratch = await mkdtemp(join(mailboxPath, '.sandbox-setup-')).catch(() => { throw invalidPath(); });
+    let observedHelperNonzeroExit = false;
     const setup = async () => {
       const command = [windowsSystemBinary('cmd.exe'), '/d', '/c', 'exit', '0'];
       if (workspaceSandbox) {
@@ -65,10 +71,17 @@ function prepareWindowsMailbox(rpc: RpcClient, mailboxPath: string, launch: Para
       return new Promise<number | null>((done, reject) => {
         const timeout = setTimeout(() => child.kill(), 10000);
         child.once('error', reject);
-        child.once('close', code => { clearTimeout(timeout); done(code); });
+        child.once('close', code => {
+          clearTimeout(timeout);
+          // An observed status is not a diagnosis of the OS failure. Never inspect
+          // or keep helper output, and don't infer a nonzero exit from a signal.
+          observedHelperNonzeroExit = typeof code === 'number' && Number.isInteger(code) && code !== 0;
+          done(code);
+        });
       });
     };
-    const setupFailed = () => mailboxError('codex_mailbox_setup_failed');
+    const setupFailed = () => codexMailboxFailure('codex_mailbox_setup_failed',
+      observedHelperNonzeroExit ? helperNonzeroExit : undefined)!;
     if (await setup().catch(() => { throw setupFailed(); }) !== 0) throw setupFailed();
     const unverifiedCapability = () => mailboxError('codex_mailbox_capability_unverified');
     const sid = await codexMailboxSid(join(codexHome, 'cap_sid'), mailboxPath).catch(() => { throw unverifiedCapability(); });

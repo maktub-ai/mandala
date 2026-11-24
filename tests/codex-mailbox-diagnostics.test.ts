@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { PassThrough } from "node:stream";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,8 +10,11 @@ import { createRpcClient } from "../server/rpc";
 import type { RpcClient } from "../server/rpc";
 
 vi.mock("../cli/private-path.mjs", () => ({ codexMailboxSid: vi.fn(), ownedPrivatePath: vi.fn(), protectInvocationDirectory: vi.fn() }));
+const {helper}=vi.hoisted(()=>({helper:vi.fn()}));
+vi.mock("../cli/windows-system.mjs",()=>({windowsSystemBinary:()=> 'synthetic-cmd.exe'}));
 vi.mock("../server/native-spawn", () => ({
   spawn: vi.fn((_command: string, args: string[]) => {
+    if (args[0] === "sandbox") return helper(...args);
     if (args[0] !== "app-server") throw new Error("Blocked unexpected test subprocess");
     return { stderr: new PassThrough() };
   }),
@@ -66,6 +70,50 @@ it.skipIf(process.platform !== "win32").each([
   }
 });
 
+it.each([["exit",1,"helper_nonzero_exit"],["signal",null,undefined],["spawn",null,undefined]])(
+"reports only an observed nonzero isolated helper exit before a native turn (%s)", async (phase,exitCode,outcome) => {
+  const root=await mkdtemp(join(tmpdir(),"mandala-helper-outcome-"));
+  const platform=Object.getOwnPropertyDescriptor(process,"platform")!;
+  const child=Object.assign(new EventEmitter(),{stdout:new PassThrough(),stderr:new PassThrough(),kill:vi.fn()});
+  try{
+    const mailbox=join(root,"mailbox");
+    await mkdir(mailbox);
+    Object.defineProperty(process,"platform",{...platform,value:"win32"});
+    helper.mockImplementation(()=>{
+      if(phase==="spawn")throw new Error("PRIVATE_HELPER_DIAGNOSTIC");
+      queueMicrotask(()=>{child.stderr.end("PRIVATE_HELPER_DIAGNOSTIC");child.emit("close",exitCode,phase==="signal"?"SIGTERM":null);});
+      return child;
+    });
+    const request=vi.fn(async(method:string)=>{
+      if(method==="initialize")return {userAgent:"codex/0.167.0"};
+      if(method==="config/read")return {config:{windows:{sandbox:"unelevated"}}};
+      if(method==="thread/resume")return {thread:{id:"synthetic-original-thread"},sandbox:{type:"readOnly"},cwd:root};
+      throw new Error("Unexpected synthetic RPC: "+method);
+    });
+    vi.mocked(createRpcClient).mockReturnValue({request,notify(){},close(){}} as unknown as RpcClient);
+    const client=await startCodex({cwd:root,fullAccess:false,env:{CODEX_HOME:root},onEvent(){},onApproval(){},onExit(){}});
+    try{
+      const error:unknown=await client.resumeThread("synthetic-original-thread",[],undefined,undefined,undefined,mailbox).catch(reason=>reason);
+      expect(error).toMatchObject({code:"codex_mailbox_setup_failed",status:500});
+      expect((error as {mailboxSetupOutcome?:string}).mailboxSetupOutcome).toBe(outcome);
+      expect(JSON.stringify(error)).not.toMatch(/PRIVATE_HELPER_DIAGNOSTIC|synthetic-original-thread/);
+      expect((error as Error).message).not.toContain(root);
+      expect(helper).toHaveBeenCalledTimes(1);
+      expect(request.mock.calls.map(([method])=>method)).toEqual(["initialize","config/read","thread/resume"]);
+    }finally{await client.close();}
+  }finally{
+    Object.defineProperty(process,"platform",platform);
+    helper.mockReset();
+    await rm(root,{recursive:true,force:true});
+  }
+});
+
+it("does not copy arbitrary helper annotations into a public diagnostic",async()=>{
+  const {codexMailboxFailure}=await import("../server/codex");
+  expect(codexMailboxFailure("codex_mailbox_setup_failed","PRIVATE_HELPER_DIAGNOSTIC")).not.toHaveProperty("mailboxSetupOutcome");
+  expect(codexMailboxFailure("codex_mailbox_path_invalid","helper_nonzero_exit")).not.toHaveProperty("mailboxSetupOutcome");
+});
+
 
 // SSH transports typed runtime codes in plain Errors. The persisted event must
 // reconstruct safe copy instead of retaining the remote diagnostic message.
@@ -113,7 +161,7 @@ it("durably rejects a known prestart human queue failure without accepting, repl
   const project = join(home, "project");
   await mkdir(project);
   const factory = vi.fn(async () => {
-    throw Object.assign(new Error("PRIVATE_REMOTE_DIAGNOSTIC"), {code:"codex_mailbox_setup_failed",status:500});
+    throw Object.assign(new Error("PRIVATE_REMOTE_DIAGNOSTIC"), {code:"codex_mailbox_setup_failed",status:500,mailboxSetupOutcome:"helper_nonzero_exit"});
   });
   const setup = () => {
     const store = openStore(home);
@@ -134,9 +182,11 @@ it("durably rejects a known prestart human queue failure without accepting, repl
     expect(receipt()).toMatchObject({
       id:input.id,text:body,state:"cancelled",prestartFailure:{code:"codex_mailbox_setup_failed"},
     });
-    expect(store.listEvents(chat.id,0).filter(event=>event.kind==="error").map(event=>event.data)).toMatchObject([
-      {queuedInputId:input.id,nativeTurnSubmitted:false,code:"codex_mailbox_setup_failed"},
+    const diagnostics=store.listEvents(chat.id,0).filter(event=>event.kind==="error").map(event=>event.data);
+    expect(diagnostics).toMatchObject([
+      {queuedInputId:input.id,nativeTurnSubmitted:false,code:"codex_mailbox_setup_failed",mailboxSetupOutcome:"helper_nonzero_exit"},
     ]);
+    expect(JSON.stringify(diagnostics)).not.toMatch(/PRIVATE_REMOTE_DIAGNOSTIC|PRIVATE_HELPER_DIAGNOSTIC/);
     expect(store.database.prepare("SELECT COUNT(*) n FROM task_input_invocations WHERE input_id=?").get(input.id)?.n).toBe(0);
     expect(store.database.prepare("SELECT COUNT(*) n FROM task_directory_claims WHERE kind='input' AND owner_id=?").get(input.id)?.n).toBe(0);
     await manager.close();

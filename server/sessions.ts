@@ -1292,7 +1292,9 @@ export function createSessionManager(
       if (closed) throw new Error("service closed");
       if (live.get(id) !== current || current.controller.signal.aborted) return;
       let error = e as Error;
-      const mailboxFailure = !turnSubmitted && before.cli === "codex" ? codexMailboxFailure((error as Partial<DomainError>).code) : undefined;
+      const mailboxFailure = !turnSubmitted && before.cli === "codex" ? codexMailboxFailure(
+        (error as Partial<DomainError>).code,(error as {mailboxSetupOutcome?:unknown}).mailboxSetupOutcome) : undefined;
+      const mailboxSetupDetails = mailboxFailure?.mailboxSetupOutcome ? {mailboxSetupOutcome:mailboxFailure.mailboxSetupOutcome} : {};
       if (mailboxFailure) error = mailboxFailure;
       const nativeThreadBusy = !turnSubmitted && before.cli === "codex" &&
         (error as Partial<DomainError>).code === "native_thread_busy" && (error as Partial<DomainError>).status === 409;
@@ -1318,7 +1320,7 @@ export function createSessionManager(
           if(!scheduler.failPrestartInput(failureInputId,id,prestartQueueCode))return false;
           resources.releaseUnsubmitted('input',failureInputId);
           reportFailedRecall();
-          appendEvent(id,'error',{message:error.message,queuedInputId:failureInputId,code:prestartQueueCode,nativeTurnSubmitted:false});
+          appendEvent(id,'error',{message:error.message,queuedInputId:failureInputId,code:prestartQueueCode,nativeTurnSubmitted:false,...mailboxSetupDetails});
           return true;
         }));
       if(failedQueueInput)current.queuedInputId=undefined;
@@ -1329,7 +1331,7 @@ export function createSessionManager(
       if (!failedQueueInput) {
         reportFailedRecall();
         appendEvent(id, "error", { message: error.message, nativeTurnSubmitted: turnSubmitted,
-          ...(reloadBlocked?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy'}:mailboxFailure?{code:mailboxFailure.code}:{}) });
+          ...(reloadBlocked?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy'}:mailboxFailure?{code:mailboxFailure.code,...mailboxSetupDetails}:{}) });
       }
       if (current.queuedInputId && !turnSubmitted && error instanceof DomainError && ["reference_changed", "invalid_references"].includes(error.code)) {
         scheduler.rejectUnsubmittedInput(current.queuedInputId);
