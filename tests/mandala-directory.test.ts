@@ -110,6 +110,13 @@ it('ranks public remit evidence before opaque fillers, not by vendor or array or
  expect(()=>mandalaRoutingDirectory({...scoped,projects:[{...project,archivedAt:'yesterday'}]},input)).toThrow();
 });
 
+it('uses the public name for legacy specialists and respects an explicit remit instead',()=>{
+ const worker={...config.agents[1],name:'Invoice reconciliation',instructions:'PRIVATE FIXTURE'};
+ const candidates=(routingRemit?:string)=>mandalaRoutingDirectory({...config,agents:[{...worker,routingRemit}]},{query:'invoice',projectId:null}).candidates;
+ expect(candidates()[0]).toMatchObject({routingRemit:null,evidence:'keyword_overlap'});
+ expect(candidates('Payroll only')[0]).toMatchObject({routingRemit:'Payroll only',evidence:'no_keyword_overlap'});
+});
+
 it('distinguishes explicit unbound routing from an omitted Project filter',()=>{
  const agent={...config.agents[1],id:'unbound',routingRemit:'Database reconciliation'};
  const model={...config,agents:[...config.agents,agent]};

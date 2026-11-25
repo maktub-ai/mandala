@@ -541,6 +541,34 @@ it('selects the scoped unnamed specialist and dispatches the same one-off inquir
 
 });
 
+it('can automatically dispatch to a specialist created through team setup without a routing override',async()=>{
+ const {home,store,manager,chat,entries,finish}=await setup();
+ const initial=await readConfig(home);
+ await writeConfig(home,{...initial.config,agents:initial.config.agents.filter(a=>a.systemRole)},initial.revision);
+ await manager.send(chat.id,'Create a billing team with an invoice specialist');
+ const token=entries[0].token;
+ const configure=(kind:string,values:Record<string,unknown>)=>manager.callBoundTool(token,'mandala_configure',{
+  mode:'direct',change:{kind,action:'create',values}
+ },'team-setup-'+kind);
+ await configure('agent',{id:'invoice',name:'Invoice reconciliation',instructions:'PRIVATE FIXTURE',defaultCli:'codex',models:{},mcp:[],skills:[]});
+ await configure('project',{id:'billing',name:'Billing',cwd:home,agentIds:['invoice'],resources:[],mcp:[],skills:[]});
+ finish();
+ await manager.send(chat.id,'Investigate an invoice discrepancy');
+ const coordinator=entries.at(-1)!;
+ const next=coordinator.token;
+ const directory=await manager.callBoundTool(next,'mandala_directory',{query:'invoice',projectId:'billing'},'invoice-directory');
+ expect(JSON.stringify(directory)).not.toContain('PRIVATE FIXTURE');
+ const receipt=await manager.callBoundTool(next,'message_ask',{automatic:true,targetAgentId:'invoice',targetProjectId:'billing',text:'Check a sample invoice'},'invoice-inquiry') as import('../shared/agent-messages').AgentMessage;
+ expect(receipt).toMatchObject({targetAgentId:'invoice',state:'queued'});
+ expect(directory).toMatchObject({candidates:[{id:'invoice',routingRemit:null,evidence:'keyword_overlap'}]});
+ finish(coordinator);
+ await vi.waitFor(()=>expect(store.getConversation(receipt.targetConversationId)?.turnId).toBeTruthy());
+ const worker=entries.at(-1)!;
+ worker.options.onEvent({method:'item/completed',params:{threadId:worker.native,turnId:worker.native+'-turn',item:{id:'invoice-answer',type:'agentMessage',phase:'final_answer',text:'Sample invoice verified'}}});
+ finish(worker);
+ await vi.waitFor(()=>expect(manager.getAgentMessage(receipt.id)).toMatchObject({state:'succeeded',reply:'Sample invoice verified'}));
+});
+
 it('accepts a single automatic inquiry per human request across rewritten payloads and reused keys',async()=>{
  const {home,store,manager,chat,entries,finish}=await setup();
  const state=await readConfig(home);

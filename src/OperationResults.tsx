@@ -20,6 +20,7 @@ export default function OperationResults({events,allEvents,onOpen,taskState}:{ta
  const reason=(result:OperationResult)=>{
   switch(result.errorCode){
    case 'storage_failure':return t('存储操作异常，未能确认是否受理。','A storage error prevented confirmation.');
+   case 'specialist_unavailable':return t('所选专员未能接受自动询问。请检查专员及其执行端设置。','The selected specialist could not accept the inquiry. Check the Agent and runtime settings.');
    case 'executor_unavailable':case 'assignment_unavailable':return t('执行方当前不可用。','The executor is unavailable.');
    case 'forbidden':return t('当前权限不允许。','Current permissions do not allow this.');
    case 'invalid_message_source':return t('未指定有效的项目范围。','A valid project scope is required.');

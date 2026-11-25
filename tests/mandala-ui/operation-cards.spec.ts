@@ -87,7 +87,8 @@ test('shows sanitized delegate rejection and unknown in the original turn withou
  const feedback=turn.getByRole('region',{name:'委派状态',exact:true});
  const check=async()=>{
   await expect(feedback).toBeVisible();
-  await expect(feedback.getByRole('listitem')).toHaveCount(2);
+  await expect(feedback.getByRole('listitem')).toHaveCount(3);
+  await expect(feedback.getByRole('listitem').filter({hasText:'询问专员'})).toContainText('所选专员未能接受自动询问');
   await expect(feedback.getByRole('listitem').filter({hasText:'创建目标'})).toContainText('结果待确认');
   await expect(feedback.getByRole('listitem').filter({hasText:'分派任务'})).toContainText('未接受');
   await expect(feedback).not.toContainText('PRIVATE_OUTPUT_TEST');

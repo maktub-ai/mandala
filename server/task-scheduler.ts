@@ -81,6 +81,8 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
   db.prepare('INSERT INTO schema_migrations VALUES (?,?)').run(key,new Date().toISOString());
  });
  store.transaction(()=>{
+  if(!db.prepare('PRAGMA table_info(task_user_inputs)').all().some(row=>row.name==='unsent_notice_dismissed'))
+   db.exec('ALTER TABLE task_user_inputs ADD COLUMN unsent_notice_dismissed INTEGER NOT NULL DEFAULT 0');
   if(!db.prepare('PRAGMA table_info(task_user_inputs)').all().some(row=>row.name==='context_window_hold'))
    db.exec('ALTER TABLE task_user_inputs ADD COLUMN context_window_hold INTEGER NOT NULL DEFAULT 0');
  });
@@ -100,7 +102,14 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
   if (!store.getConversation(id)) fail('conversation_not_found', 404);
   if (db.prepare('SELECT id FROM task_user_inputs WHERE conversation_id=? AND owner_user_id<>? LIMIT 1').get(id, principal.userId)) fail('forbidden', 403);
  };
- const inputRow = (r: Record<string, unknown>): QueuedInput => ({ ...(r.state==='queued' && r.context_window_hold ? {waitingReason:'context-window' as const} : {}), ...(r.source?{source:JSON.parse(r.source as string)}:{}), ...(options.inputMetadata?.(r.id as string)?{agentMessage:options.inputMetadata!(r.id as string)}:{}), commandKey: r.command_key as string, id: r.id as string, conversationId: r.conversation_id as string, text: r.text as string, state: r.state as QueuedInput['state'], createdAt: r.created_at as string, ...(r.state==='cancelled' && r.native_writer_conflict===1?{prestartFailure:{code:'native_thread_busy'}}:r.state==='cancelled' && isCodexMailboxErrorCode(r.prestart_failure_code)?{prestartFailure:{code:r.prestart_failure_code}}:{}), ...(r.unrecorded ? { unrecorded: true } : {}), ...(r.attachments !== "[]" ? { attachments: JSON.parse(r.attachments as string) } : {}), ...(r.reference_selections !== "[]" ? { references: JSON.parse(r.reference_selections as string) } : {}) });
+ const prestartReceipt = (row: Record<string, unknown>): Pick<QueuedInput,'prestartFailure'> => {
+  if(row.state!=='cancelled')return {};
+  const code=row.native_writer_conflict===1?'native_thread_busy':row.prestart_failure_code;
+  if(code==='native_thread_busy'||isCodexMailboxErrorCode(code))
+   return {prestartFailure:row.unsent_notice_dismissed===1?{code,dismissed:true}:{code}};
+  return {};
+ };
+ const inputRow = (r: Record<string, unknown>): QueuedInput => ({ ...(r.state==='queued' && r.context_window_hold ? {waitingReason:'context-window' as const} : {}), ...(r.source?{source:JSON.parse(r.source as string)}:{}), ...(options.inputMetadata?.(r.id as string)?{agentMessage:options.inputMetadata!(r.id as string)}:{}), commandKey: r.command_key as string, id: r.id as string, conversationId: r.conversation_id as string, text: r.text as string, state: r.state as QueuedInput['state'], createdAt: r.created_at as string, ...prestartReceipt(r), ...(r.unrecorded ? { unrecorded: true } : {}), ...(r.attachments !== "[]" ? { attachments: JSON.parse(r.attachments as string) } : {}), ...(r.reference_selections !== "[]" ? { references: JSON.parse(r.reference_selections as string) } : {}) });
  const loadInput = (id: string) => {
   const row = db.prepare('SELECT * FROM task_user_inputs WHERE id=?').get(id);
   if (!row) return fail('input_not_found', 404);
@@ -301,6 +310,11 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
    root();
    return store.transaction(() => {
     const input = loadInput(id);
+    if (input.prestartFailure && !input.prestartFailure.dismissed) {
+     db.prepare('UPDATE task_user_inputs SET unsent_notice_dismissed=1 WHERE id=?').run(id);
+     event('task.unsent_notice_dismissed', id, { inputId: id });
+     return loadInput(id);
+    }
     if (input.state === 'cancelled') return input;
     if (input.state !== 'queued') fail('input_not_queued', 409);
     db.prepare("UPDATE task_user_inputs SET state='cancelled' WHERE id=?").run(id);

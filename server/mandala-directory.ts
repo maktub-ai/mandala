@@ -78,11 +78,11 @@ export function mandalaRoutingDirectory(config:Config,input:{query?:unknown;proj
   const membership=projects.filter(p=>p.agentIds.includes(agent.id)).map(p=>p.id).sort();
   if(!unbound&&!membership.length)return [];
   const routingRemit=agent.routingRemit?.trim()||null;
-  const score=routingRemit?[...routingTokens(routingRemit)].filter(word=>queryTokens.has(word)).length:0;
+  const score=[...routingTokens(routingRemit??agent.name.slice(0,120))].filter(word=>queryTokens.has(word)).length;
   return [{score,id:agent.id,name:agent.name.slice(0,120),projectIds:membership.slice(0,20),routingRemit,
     evidence:score>0?'keyword_overlap' as const:'no_keyword_overlap' as const,readiness:'unverified' as const}];
  }).sort((a,b)=>b.score-a.score||Number(!!b.routingRemit)-Number(!!a.routingRemit)||(a.id<b.id?-1:a.id>b.id?1:0));
  return {scope:unbound?'unbound' as const:projectId===undefined?'projects' as const:'project' as const,projectId:projectId??null,eligibleCount:ordered.length,truncated:ordered.length>12,
   candidates:ordered.slice(0,12).map(({score,...candidate})=>candidate),
-  note:'Keyword overlap is only evidence; compare remits by meaning. No keyword evidence is not proof of no fit. Lookup is not authorization or a launch guarantee; a request can be queued before its runtime is available.'};
+  note:'Keyword overlap is only evidence; compare the configured remit by meaning, using the public Agent name when the remit is empty. No keyword evidence is not proof of no fit. Lookup is not authorization or a launch guarantee; a request can be queued before its runtime is available.'};
 }

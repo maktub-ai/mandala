@@ -408,7 +408,7 @@ writerConflictTest('a composer request with a pre-start Codex mailbox failure st
     const unsent=page.getByRole('region',{name:'未发送',exact:true});
     await expect(unsent.getByText(text,{exact:true})).toBeVisible();
     await expect(unsent.getByText('原请求已保存，但未发送到 Codex。')).toBeVisible();
-    await expect(unsent.getByRole('button')).toHaveCount(0);
+    await expect(unsent.getByRole('button',{name:'移除未发送提示'})).toBeVisible();
     await expect(page.getByRole('region',{name:'等待发送',exact:true})).toHaveCount(0);
     await expect(page.getByText('Fixture reply: '+text,{exact:true})).toHaveCount(0);
   };
@@ -417,6 +417,11 @@ writerConflictTest('a composer request with a pre-start Codex mailbox failure st
   await checkVisible();
   expect(new URL(page.url()).searchParams.get('conversation')).toBe(chat.id);
   expect(await receipt()).toEqual([accepted]);
+  await page.getByRole('button',{name:'移除未发送提示'}).click();
+  await expect.poll(receipt).toMatchObject([{id:accepted.id,state:'cancelled',prestartFailure:{code:'codex_mailbox_setup_failed',dismissed:true}}]);
+  await page.reload();
+  await expect(page.getByRole('textbox',{name:'消息',exact:true})).toBeVisible();
+  await expect(page.getByRole('region',{name:'未发送',exact:true})).toHaveCount(0);
   expect(submissions).toEqual(['/api/conversations/'+chat.id+'/queue']);
 });
 
@@ -454,7 +459,7 @@ writerConflictTest('queued writer conflict restores a draft in the same chat and
  });
  const composer=page.getByRole('textbox',{name:'消息',exact:true});
  const restore=page.locator('.message.user').last().getByRole('button',{name:'恢复到当前草稿',exact:true});
- await expect(page.getByText('此请求未发送。等另一个 Codex 客户端释放这条会话后，可在原对话恢复草稿再发送。')).toBeVisible();
+ await expect(page.getByText('发送这条消息时，原会话被占用。可从对话记录恢复草稿，或移除这条提示。')).toBeVisible();
  await composer.fill('Do not replace my draft');
  await expect.poll(savedDraft).toBe('Do not replace my draft');
  await page.reload();
@@ -467,7 +472,10 @@ writerConflictTest('queued writer conflict restores a draft in the same chat and
  await expect(page.locator('.composer-attachments')).toContainText('original-queued.txt');
  await expect(page.locator('.composer-references')).toBeVisible();
  await expect.poll(savedDraft).toBe(text);
+ await page.getByRole('button',{name:'移除未发送提示'}).click();
+ await expect(page.getByRole('region',{name:'未发送',exact:true})).toHaveCount(0);
  await page.reload();
+ await expect(page.getByRole('region',{name:'未发送',exact:true})).toHaveCount(0);
  await expect(composer).toHaveValue(text);
  await expect(restore).toBeDisabled();
  expect(submissions).toEqual([]);

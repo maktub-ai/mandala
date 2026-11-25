@@ -359,6 +359,22 @@ test.each(['codex_mailbox_setup_failed','native_thread_busy'])('prestart failure
  expect(f.scheduler.listUserInputs(f.chat.id).at(-1)).toMatchObject({id:system.id,state:'running'});
 });
 
+test.each(['native_thread_busy','codex_mailbox_setup_failed'])('dismisses only the requested %s notice and keeps its failure receipt',code=>{
+ const f=setup();
+ const inputs=['one','two'].map(key=>{
+  const input=f.scheduler.enqueueUserInput(f.chat.id,'Saved request',key);
+  f.scheduler.takeNext(f.chat.id);
+  expect(f.store.transaction(()=>f.scheduler.failPrestartInput(input.id,f.chat.id,code))).toBe(true);
+  return input;
+ });
+ const dismissed=f.scheduler.cancelUserInput(inputs[0].id);
+ expect(dismissed).toMatchObject({state:'cancelled',prestartFailure:{code,dismissed:true}});
+ expect(f.scheduler.cancelUserInput(inputs[0].id)).toEqual(dismissed);
+ const reopened=createTaskScheduler(f.store,f.tasks,{principal:p});
+ expect(reopened.listUserInputs(f.chat.id).map(i=>i.prestartFailure)).toEqual([{code,dismissed:true},{code}]);
+ expect(reopened.enqueueUserInput(f.chat.id,'Saved request','one')).toMatchObject({id:inputs[0].id,state:'cancelled'});
+});
+
 test('adding the prestart failure column preserves older rows, indexes and references',()=>{
  const f=setup(), code='codex_mailbox_setup_failed',db=f.store.database;
  db.exec("ALTER TABLE task_user_inputs DROP COLUMN prestart_failure_code");

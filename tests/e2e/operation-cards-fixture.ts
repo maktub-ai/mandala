@@ -11,6 +11,7 @@ export async function operationCardsFixture(req:IncomingMessage,res:ServerRespon
   const source=store.appendEvent(chat.id,'user',{text:'请分派测试工作。',invocationId});
   const attempts=[
    {id:'create',command:'mandala_create',state:'unknown',errorCode:'storage_failure'},
+   {id:'ask',command:'message_ask',state:'failed',errorCode:'specialist_unavailable'},
    {id:'assign',command:'mandala_delegate',state:'failed',errorCode:'executor_unavailable'},
    {id:'assign',command:'mandala_delegate',state:'failed',errorCode:'executor_unavailable'},
   ];

@@ -2282,8 +2282,8 @@ export function createSessionManager(
       const targetProject=primary?input.targetProjectId??'':source.projectId;
       if(primary)assertPrimaryInquiryScope(config,source,input.targetAgentId,targetProject);
       const {agent,project,workspace,executionLocation}=conversationContext(config,{projectId:targetProject,agentId:input.targetAgentId},'');
-      if(input.automatic&&(!agent.routingRemit?.trim()||!isRoutingSpecialist(config,agent)))
-        throw new DomainError('specialist_unavailable',422,'Specialist or routing remit unavailable');
+      if(input.automatic&&!isRoutingSpecialist(config,agent))
+        throw new DomainError('specialist_unavailable',422,'Specialist unavailable');
       if(!primary){
         assertExecutionAvailable(config,{projectId:source.projectId,agentId:input.targetAgentId});
         if(!project.agentIds.includes(source.agentId)&&!isSystemAgent(config,source.agentId))throw new DomainError('forbidden',403,'Source unavailable');
