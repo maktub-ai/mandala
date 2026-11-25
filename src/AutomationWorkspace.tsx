@@ -219,11 +219,12 @@ export default function AutomationWorkspace({config,onOpenConversation,onEditing
   const firstScheduleAction = !runtimes.length
     ? { label: localize('配置执行端', 'Set up a CLI adapter'), description: localize('先启用一个执行端，让智能体能按计划运行。', 'Enable a CLI adapter so an Agent can run on a schedule.'), open: () => navigateAssetPage('/settings/runtimes') }
     : !agents.length
-      ? { label: localize('前往智能体', 'Open Agents'), description: localize('先添加一个智能体，再为它安排定时工作。', 'Add an Agent, then schedule work for it.'), open: () => navigateAssetPage('/agents') }
-      : { label: localize('新建计划', 'New schedule'), description: localize('选择智能体和执行时间，让例行工作按计划运行。', 'Choose an Agent and a time to run routine work on a schedule.'), open: () => createDraft() };
+      ? { label: localize('前往智能体', 'Open Agents'), description: localize('定时挂在智能体名下，先要有一个智能体。', 'Schedules belong to an Agent, so add one first.'), open: () => navigateAssetPage('/agents') }
+      : { label: localize('新建计划', 'New schedule'), description: localize('定时挂在智能体名下，到点自动发起一次对话，比如每个工作日 9:00 汇总昨天合并的改动。', 'A schedule belongs to an Agent and starts a chat on time — for example, a weekday 9:00 summary of yesterday’s merged changes.'), open: () => createDraft() };
   const emptySchedules = scheduleFiltered ?
     <EmptyState icon="search" action={<Button onClick={()=>{setSearch('');setRuleStatus('all');if(projectId!=='all')changeProject('all');}}>{localize('清除筛选', 'Clear filters')}</Button>}>{localize('没有匹配的计划。', 'No matching schedules.')}</EmptyState> :
-    <WorkspaceFirstUse icon="schedule" title={t('还没有定时任务')}
+    <WorkspaceFirstUse title={localize('让智能体按时开工', 'Let an Agent start on time')}
+      slot={{fields:[localize('由哪个智能体', 'Which Agent'), localize('要做的事', 'What to do')], lead:localize('工作日 09:00', 'Weekdays 09:00'), createLabel:localize('新建', 'New'), onCreate:runtimes.length&&agents.length?firstScheduleAction.open:undefined, disabled:disabled||pending||!!draft}}
       action={<Button ref={firstScheduleTrigger} variant="primary" disabled={disabled||pending||!!draft} onClick={firstScheduleAction.open}><Icon name="plus" size={15}/>{firstScheduleAction.label}</Button>}>
       {firstScheduleAction.description}
     </WorkspaceFirstUse>;

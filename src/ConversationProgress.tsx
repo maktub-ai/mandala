@@ -92,7 +92,7 @@ export default function ConversationProgress({onCreateTask,config,tasks,tasksLoa
  const firstUse=includeTasks&&!loadingProgress&&!error&&!tasksError&&!hasHistory&&!filteredEmpty;
  const showHistory=()=>{const next=new URLSearchParams(location.search);next.set('scope','all');if(taskState==='active')next.set('state','all');navigateAssetPage('/tasks?'+next);};
  return <section className="conversation-progress">
-  {includeTasks&&<SegmentedControl className="progress-task-grouping" label={say('任务分组','Group tasks')} value={grouping}
+  {includeTasks&&!firstUse&&<SegmentedControl className="progress-task-grouping" label={say('任务分组','Group tasks')} value={grouping}
    onChange={value=>changeFilter('group',value==='status'?'':value)} options={[
     {value:'status',label:say('按状态','By status')},{value:'agent',label:say('按 Agent','By Agent')},{value:'project',label:say('按项目','By project')}
    ]}/>}
@@ -127,9 +127,10 @@ export default function ConversationProgress({onCreateTask,config,tasks,tasksLoa
         <p>{say('超出最近使用窗口的事项已收起，仍可查看历史并继续处理。','Older work is outside the recent activity window. Open history to find it and continue.')}</p>
         {scope==='active'&&<div className="progress-empty-actions"><Button onClick={showHistory}>{say('查看历史事项','Show history')}</Button></div>}
       </> : includeTasks ?
-        <WorkspaceFirstUse icon="plan" title={say('从一个任务开始','Start with a task')}
+        <WorkspaceFirstUse title={say('任务从对话里长出来','Tasks grow out of chats')}
+          slot={{shape:'task',fields:[say('任务标题','Task title'),say('负责的智能体','Owner Agent'),say('项目','Project')],child:say('执行中的对话，可以有多条','Execution chats, one or more'),createLabel:say('新建','New'),onCreate:onCreateTask}}
           action={<Button variant="primary" onClick={onCreateTask}><Icon name="plus" size={15}/>{say('新建任务','New task')}</Button>}>
-          {say('记下要完成的事，分配给智能体，随时跟进进展。','Capture work, assign it to an Agent, and follow its progress.')}
+          {say('在主对话里把需要持续跟进的事交给智能体，它就会出现在这里，执行中的对话挂在任务下面。一次性的提问不会生成任务。','Hand work that needs follow-up to an Agent in the main chat and it appears here, with its execution chats underneath. One-off questions don’t create tasks.')}
         </WorkspaceFirstUse> : <>
           <h2>{say('从一次对话开始','Start with a chat')}</h2>
           <p>{say('在聊天中交代想完成的事情，或记录一个待办。','Describe a deliverable in chat, or capture a to-do.')}</p>

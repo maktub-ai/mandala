@@ -164,7 +164,8 @@ Build on the source-owned shadcn/ui Radix foundation, Tailwind CSS 4, Mandala se
 - **Provenance and references** use concise labels with expandable detail; never stack paragraphs of implementation detail on operational pages.
 - **States.** Loading, empty, error and offline states preserve drafts and name the recovery action. Use one of these forms:
   - *Loading*: `LoadingState` skeleton rows for a region that is reading; never block content that is already ready.
-  - *First-use workspace* (Tasks, Projects, Agents and Schedules): centre a narrow, left-aligned group in the available canvas. Use a small monochrome layered illustration above a heading, a short description and one contextual action. The built-in Mandala Agent keeps its own row.
+  - *First-use workspace* (Tasks, Projects, Agents and Schedules): `WorkspaceFirstUse`, drawn where the first item will appear — left aligned on the content edge at the top of the list, never centred in the canvas and never a large faded icon. A 16px brand mark leads a `--section-heading-size` title that says what lives here; one or two lines of `--type-body` say what it does for the user and where it comes from (Tasks come from delegation in the main chat). Below it, a dashed blueprint of the first item at its real size (`--border-strong` dashes, `--type-meta` field names such as name, runtime CLI, projects), followed by fading outlines that hint at a list. Its shape follows the page: Agents are cards, Projects and Schedules rows, Tasks a parent row with a nested execution chat. The sample repeats the primary action for pointers; the action button below is the accessible control. When a prerequisite is missing (a Schedule needs an Agent) the sample is inert and the action names the previous step. Page chrome that needs data (grouping, view switches, quick capture) stays hidden until there is something to show. The built-in Mandala Agent keeps its own row.
+  - *First-use panel* (Mandala side panel tabs): the same parts in `size="panel"` — `--type-ui` title, `--type-meta` text, one 44px sample and one outline, no button; the entry point is the chat itself.
   - *Page or list empty*: `EmptyState` — a 20px muted icon beside a `--type-ui` / 500 title, a one-line `--type-meta` explanation and an optional action, left aligned on the content edge.
   - *Narrow panel empty* (popovers, inspectors): the same parts, centred.
   - *Section empty* (a column, a run history, an association list): one muted `--type-meta` line without an icon.
@@ -243,6 +244,7 @@ Review is required for each changed module, independent of tests: light and dark
 
 | Date | Change |
 | --- | --- |
+| 2026-11-25 | First-use empty states: in-place dashed blueprint of the first item replaces the centred layered illustration on Tasks, Projects, Agents, Schedules and the Mandala side panel. |
 | 2026-11-25 | Chat operation cards: one header line and always-visible rows; replies summarized by Mandala with originals folded under the summary. |
 | 2026-11-05 | Design system rewritten as one current document. Visual language v2: cool neutrals, indigo interaction accent, Geist; system mode by default. Page anatomy, type roles and stylesheet guards. |
 | 2026-11-04 | Speech and objects in chat; Task lanes, one Task dialog and execution chats replace subtasks. |

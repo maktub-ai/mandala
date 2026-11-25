@@ -70,7 +70,7 @@ test('panel loading, empty, error and revoked permission clear data and offer re
  let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
  await page.route('**/api/mandala/goals',async route=>{await gate;await route.fulfill({json:[]});});
  await page.goto('/mandala');const panel=page.locator('.mandala-panels');await expect(panel.getByText('正在读取…',{exact:true})).toBeVisible();release();
- await expect(panel.getByText('本对话还没有协作。在聊天中交代想完成的事情。')).toBeVisible();
+ await expect(panel.getByText('在聊天里请智能体帮忙，协作对话和任务会出现在这里。')).toBeVisible();
  await page.unroute('**/api/mandala/goals');await page.route('**/api/mandala/goals',route=>route.fulfill({status:403,json:{error:'Synthetic permission revoked'}}));
  await expect(panel.getByRole('alert')).toContainText('Synthetic permission revoked');await expect(panel.locator('.mandala-collab-task')).toHaveCount(0);
  await page.unroute('**/api/mandala/goals');await panel.getByRole('button',{name:'重试',exact:true}).click();await expect(panel.locator('.mandala-collab-task')).toHaveCount(1);

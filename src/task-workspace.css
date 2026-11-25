@@ -119,7 +119,8 @@
 .task-reply-attention { color:var(--warning); margin:0 0 12px; }
 .task-detail-panel { min-width:0; }
 .task-workspace[data-task-view=board] .workspace-list { display:flex; flex-direction:column; overflow:hidden; }
-.task-workspace:has(.workspace-first-use) .workspace-page-actions > .primary { display:none; }
+.task-workspace:has(.workspace-first-use) .workspace-page-actions,
+.task-workspace:has(.workspace-first-use) .task-capture-disclosure { display:none; }
 .task-workspace[data-task-view=board] .workspace-list:has(.workspace-first-use) { overflow:auto; }
 .task-workspace[data-task-view=board] .conversation-progress:has(.progress-overview-board) { display:flex; flex-direction:column; flex:1; min-height:0; }
 .task-workspace[data-task-view=board] .conversation-progress .task-board.progress-overview-board { grid-template-rows:minmax(0,1fr); align-items:stretch; min-height:0; overflow-y:hidden; }
