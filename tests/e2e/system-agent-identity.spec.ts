@@ -57,9 +57,9 @@ test('pinned identity is searchable, separate from ordinary count and opens sett
  await expect(system).toContainText('了解全局任务，协调项目与智能体，也可独立执行工作。');
  await expect(page.locator('.workspace-page-heading')).toContainText('1');await expect(page.locator('.workspace-directory-row')).toHaveCount(1);
  await page.getByRole('searchbox',{name:'智能体',exact:true}).fill('协调项目');await expect(system).toBeVisible();await expect(page.locator('.workspace-directory-row')).toHaveCount(0);
- await system.getByRole('link',{name:'设置',exact:true}).click();await expect(page.getByRole('dialog',{name:'Mandala 设置'})).toBeVisible();await expect(page).toHaveURL(/\/agents$/);expect(primaryReads).toBe(0);
- await expect(page.getByRole('dialog')).toContainText('系统角色');await page.keyboard.press('Escape');await expect(system).toBeVisible();
- await page.goto('/agents?agent='+systemId);await expect(page.getByRole('dialog',{name:'Mandala 设置'})).toBeVisible();expect(primaryReads).toBe(0);
+ await system.getByRole('link',{name:'设置',exact:true}).click();await expect(page).toHaveURL(/\/settings\/mandala$/);await expect(page.getByRole('textbox',{name:'名字',exact:true})).toBeVisible();expect(primaryReads).toBe(0);
+ await expect(page.locator('main')).toContainText('系统智能体');await page.goBack();await expect(system).toBeVisible();
+ await page.goto('/agents?agent='+systemId);await expect(page).toHaveURL(/\/settings\/mandala$/);await expect(page.getByRole('textbox',{name:'名字',exact:true})).toBeVisible();expect(primaryReads).toBe(0);
 });
 
 test('system group supports ordinary Project chats, keyboard selection and task assignment',async({page,request})=>{
@@ -81,8 +81,8 @@ for(const theme of ['light','dark'])for(const width of [1440,1024,768,390])test(
 
 
 test('saved system settings refresh directory and the next ordinary edit revision',async({page})=>{
- await page.goto('/agents?agent='+systemId);const dialog=page.getByRole('dialog',{name:'Mandala 设置'});await dialog.getByRole('textbox',{name:'名字',exact:true}).fill('Mandala renamed');await dialog.getByRole('button',{name:'保存',exact:true}).click();
- await expect(dialog).toHaveCount(0);await expect(page.getByRole('region',{name:'系统智能体',exact:true})).toContainText('Mandala renamed');
+ await page.goto('/agents?agent='+systemId);const settings=page.locator('.mandala-settings-page');await settings.getByRole('textbox',{name:'名字',exact:true}).fill('Mandala renamed');await expect(settings.locator('.settings-autosave')).toHaveText('已保存');
+ await page.goto('/agents');await expect(page.getByRole('region',{name:'系统智能体',exact:true})).toContainText('Mandala renamed');
  await page.locator('.workspace-directory-row').filter({hasText:'Writer'}).click();const role=page.getByRole('region',{name:'职责与指令',exact:true});await role.getByRole('button',{name:'编辑',exact:true}).click();await role.getByRole('textbox').fill('Updated after system save');await waitForAutosave(page);await expect(page.locator('.settings-save-error')).toHaveCount(0);
 });
 
@@ -115,7 +115,7 @@ test('long system name wraps at narrow width and empty/search/error states remai
  await expect(page.getByRole('region',{name:'系统智能体',exact:true})).toContainText(name.trim());await expect(page.getByRole('button',{name:'添加智能体',exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.getByRole('searchbox',{name:'智能体',exact:true}).fill('unmatched identity');await expect(page.getByText('没有匹配选项',{exact:true})).toBeVisible();await page.getByRole('searchbox',{name:'智能体',exact:true}).fill('');
  let failSettings=true;await page.route('**/api/config',route=>failSettings?route.fulfill({status:503,json:{error:'Synthetic settings unavailable'}}):route.continue());await page.getByRole('region',{name:'系统智能体',exact:true}).getByRole('link',{name:'设置',exact:true}).click();
- const dialog=page.getByRole('dialog',{name:'Mandala 设置'});await expect(dialog.getByRole('alert')).toContainText('Synthetic settings unavailable');failSettings=false;await dialog.getByRole('button',{name:'重新读取',exact:true}).click();await expect(dialog.getByRole('textbox',{name:'名字',exact:true})).toHaveValue(name.trim());
+ const failure=page.locator('.settings-region-error');await expect(failure).toContainText('Synthetic settings unavailable');failSettings=false;await failure.getByRole('button',{name:'重新读取',exact:true}).click();await expect(page.getByRole('textbox',{name:'名字',exact:true})).toHaveValue(name.trim());
 });
 
 

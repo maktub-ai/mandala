@@ -21,7 +21,7 @@ test('renders multiple Mermaid diagrams, updates mounted charts with the theme a
   await expect(diagram).toContainText('开始');
   const darkFill = await diagram.locator('.node rect').first().evaluate(el => getComputedStyle(el).fill);
   const settings = await context.newPage();
-  await settings.goto('/settings/general');
+  await settings.goto('/settings/appearance');
   await settings.getByRole('button', {name:'浅色',exact:true}).click();
   await expect(diagram).toHaveAttribute('data-theme', 'light');
   await expect(diagram.locator('.mermaid-stage > svg')).toBeVisible();
@@ -174,7 +174,7 @@ test('fullscreen viewing expands the diagram, supports interaction and restores 
   await expand.click();
   const darkFill = await svg.locator('.node rect').first().evaluate(el => getComputedStyle(el).fill);
   const settings = await context.newPage();
-  await settings.goto('/settings/general');
+  await settings.goto('/settings/appearance');
   await settings.getByRole('button', {name:'浅色',exact:true}).click();
   await settings.close();
   await expect(dialog.locator('.mermaid-stage > svg')).toBeVisible();

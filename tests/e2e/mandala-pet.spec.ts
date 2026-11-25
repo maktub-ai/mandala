@@ -31,8 +31,8 @@ test('the panel pet follows recorded progress and opens what needs the person', 
 test('a pet imported from a file replaces the figure, and an invalid file is explained', async ({ page }) => {
   await page.goto('/mandala');
   await expect(page.getByRole('textbox', { name: '消息', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: 'Mandala 设置', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Mandala 设置' });
+  await page.goto('/settings/appearance');
+  const dialog = page.getByRole('region', { name: '桌宠', exact: true });
   const pets = dialog.getByRole('group', { name: '选择桌宠' });
   await expect(pets.getByRole('button', { name: /花瓣精灵/ })).toHaveAttribute('aria-pressed', 'true');
   await dialog.getByLabel('导入桌宠文件').setInputFiles({ name: 'bad.json', mimeType: 'application/json', buffer: Buffer.from('{"format":"mandala-pet","version":1,"name":"x","states":{}}') });
@@ -40,7 +40,8 @@ test('a pet imported from a file replaces the figure, and an invalid file is exp
   await dialog.getByLabel('导入桌宠文件').setInputFiles({ name: 'dot.json', mimeType: 'application/json', buffer: Buffer.from(petFile) });
   await expect(pets.getByRole('button', { name: /圆点/ })).toHaveAttribute('aria-pressed', 'true');
   await expect(pets.getByRole('button', { name: /花瓣精灵/ })).toHaveAttribute('aria-pressed', 'false');
-  await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  await page.goto('/mandala');
+  await expect(page.getByRole('textbox', { name: '消息', exact: true })).toBeEnabled();
   const card = page.getByRole('region', { name: 'Mandala 状态', exact: true });
   if (!await card.isVisible()) await page.getByRole('button', { name: /面板|Panel/ }).first().click();
   await expect(card.locator('.mandala-pet.is-pack')).toBeVisible();

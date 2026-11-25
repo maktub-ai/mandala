@@ -33,7 +33,7 @@ test('copies only the selected table with exact strings, blank cells and all col
   await expect(draft).toHaveValue('Keep this unsent draft');
   await page.screenshot({ path: testInfo.outputPath('markdown-table-dark.png') });
   const conversationUrl = page.url();
-  await page.goto('/settings/general');
+  await page.goto('/settings/appearance');
   await page.getByRole('button', { name: 'Light', exact: true }).click();
   await page.goto(conversationUrl);
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');

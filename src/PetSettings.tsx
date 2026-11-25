@@ -8,6 +8,7 @@ import { PetFigure, desktopPet, usePetPreference } from './MandalaPet';
 import Button from './ui/Button';
 import Input from './ui/Input';
 import SegmentedControl from './ui/SegmentedControl';
+import { SettingsGroup, SettingRow } from './ui/SettingsLayout';
 import './mandala-pet.css';
 
 /** Chooses the Mandala pet on this device: the official figure, a Market pet or one imported from a file. */
@@ -32,24 +33,23 @@ export default function PetSettings({ onBrowse }: { onBrowse: () => void }) {
     finally { setBusy(false); }
   };
   const choices = [{ id: 'official', name: text('花瓣精灵', 'Petal'), note: text('官方 · 跟随主题', 'Official · follows the theme'), pack: undefined }, ...pets.map(item => ({ id: item.catalogId, name: item.name, note: item.publisher === 'Local' ? text('从文件导入', 'Imported') : item.publisher, pack: item.data.format === 'mandala-pet' ? item.data : undefined }))];
-  return <section className="pet-settings" aria-label={text('桌宠', 'Pet')}>
-    <strong>{text('桌宠', 'Pet')}</strong>
-    <p className="field-hint">{text('显示在 Mandala 面板顶部，用动作提示当前状态。只保存在这台设备上。', 'Shown at the top of the Mandala panel; its motion shows the current state. Saved on this device only.')}</p>
-    <div className="pet-settings-list" role="group" aria-label={text('选择桌宠', 'Choose a pet')}>
-      {choices.map(choice => <button key={choice.id} type="button" className="pet-choice" aria-pressed={preference.figure === choice.id || (choice.id === 'official' && !choices.some(other => other.id === preference.figure))} onClick={() => setPreference({ ...preference, figure: choice.id })}>
-        <PetFigure state="idle" pack={choice.pack} size={52} />
-        <span>{choice.name}</span><small>{choice.note}</small>
-      </button>)}
-    </div>
-    <div className="pet-settings-actions">
-      <Button disabled={busy || !snapshot} busy={busy} onClick={() => file.current?.click()}>{text('从文件导入', 'Import from file')}</Button>
+  return <SettingsGroup className="pet-settings" label={text('桌宠', 'Pet')} title={text('桌宠', 'Pet')} scope={text('仅这台设备', 'This device only')}
+    description={text('显示在 Mandala 面板顶部，用动作提示当前状态。', 'Shown at the top of the Mandala panel; its motion shows the current state.')}
+    actions={<>
       <Button variant="ghost" onClick={onBrowse}>{text('在市场浏览更多', 'Browse the Market')}</Button>
+      <Button disabled={busy || !snapshot} busy={busy} onClick={() => file.current?.click()}>{text('从文件导入', 'Import from file')}</Button>
       <Input ref={file} type="file" hidden accept=".json,application/json" aria-label={text('导入桌宠文件', 'Import pet file')} onChange={event => { void importPet(event.target.files?.[0]); event.target.value = ''; }} />
+    </>}>
+    <div className="pet-settings-list" role="group" aria-label={text('选择桌宠', 'Choose a pet')}>
+        {choices.map(choice => <button key={choice.id} type="button" className="pet-choice" aria-pressed={preference.figure === choice.id || (choice.id === 'official' && !choices.some(other => other.id === preference.figure))} onClick={() => setPreference({ ...preference, figure: choice.id })}>
+          <PetFigure state="idle" pack={choice.pack} size={52} />
+          <span>{choice.name}</span><small>{choice.note}</small>
+        </button>)}
     </div>
-    {error && <p role="alert" className="form-error">{error}</p>}
-    {desktop && <div className="pet-settings-actions"><span className="field-hint">{text('显示位置', 'Placement')}</span>
+      {error && <p role="alert" className="form-error">{error}</p>}
+    {desktop && <SettingRow label={text('显示位置', 'Placement')}>
       <SegmentedControl label={text('显示位置', 'Placement')} value={preference.placement} onChange={value => { const placement = value === 'desktop' ? 'desktop' : 'panel'; setPreference({ ...preference, placement }); void (placement === 'desktop' ? desktop.show() : desktop.hide()).catch(() => {}); }}
         options={[{ value: 'panel', label: text('面板顶部', 'Panel') }, { value: 'desktop', label: text('桌面浮窗', 'Desktop window') }]} />
-    </div>}
-  </section>;
+    </SettingRow>}
+  </SettingsGroup>;
 }

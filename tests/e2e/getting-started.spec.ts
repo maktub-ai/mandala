@@ -168,11 +168,11 @@ test('system preferences can be saved unselected and preserve a later explicit r
  delete current.config.system;
  expect((await request.put('/api/config',{data:current})).ok()).toBe(true);
  await page.goto('/settings/system');
- const runtimes=page.getByRole('radiogroup',{name:'系统任务执行端',exact:true});
- await expect(runtimes.getByRole('radio',{checked:true})).toHaveCount(0);
+ const runtimes=page.getByRole('combobox',{name:'系统任务执行端',exact:true});
+ await expect(runtimes).toHaveAttribute('data-value','');
  await page.getByRole('switch',{name:'自动生成对话标题',exact:true}).check();
  await expect.poll(async()=>{const {config}=await(await request.get('/api/config')).json();return config.system;}).toEqual({automaticTitles:true});
- await runtimes.getByRole('radio',{name:'OMP',exact:true}).click();
+ await runtimes.click();await page.getByRole('listbox').locator('[role="option"][data-value="omp"]').click();
  await expect.poll(async()=>{const {config}=await(await request.get('/api/config')).json();return config.system?.cli;}).toBe('omp');
  await page.reload();
  await page.getByRole('switch',{name:'自动生成对话标题',exact:true}).uncheck();

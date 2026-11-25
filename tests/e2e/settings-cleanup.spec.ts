@@ -3,7 +3,7 @@ import {chooseOption} from './helpers/select';
 import {waitForAutosave} from './helpers/settings';
 
 test('SC1 appearance applies and persists immediately without a save button',async({page})=>{
- await page.goto('/settings/general');
+ await page.goto('/settings/appearance');
  await page.getByRole('button',{name:'GitHub Light',exact:true}).click();
  await expect(page.locator('html')).toHaveAttribute('data-palette','github-light');
  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('mandala-appearance-v1')??'null')?.light)).toBe('github-light');

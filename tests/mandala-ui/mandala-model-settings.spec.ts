@@ -12,11 +12,12 @@ test('managed models persist per runtime and status follows idle configuration v
     ?route.fulfill({json:[]}):route.continue());
   await page.goto('/mandala');
   const status=page.getByRole('button',{name:'执行端状态',exact:true});
-  const open=()=>page.locator('.mandala-header-identity button').click();
+  const open=async()=>{await page.locator('.mandala-header-identity button').click();await expect(page).toHaveURL(/\/settings\/mandala$/);};
   const model=page.getByRole('combobox',{name:'模型',exact:true});
-  const runtime=page.getByRole('combobox',{name:'Runtime',exact:true});
+  const runtime=page.getByRole('combobox',{name:'执行端',exact:true});
   const chooseRuntime=async(value:string)=>{await runtime.click();await page.getByRole('option',{name:value,exact:true}).click();await expect(page.getByRole('listbox')).toHaveCount(0);await expect(runtime).toBeFocused();};
-  const save=async()=>{await page.getByRole('button',{name:'保存',exact:true}).click();await expect(page.getByRole('dialog')).toHaveCount(0);};
+  // Settings save on their own; returning to the chat keeps its unsent draft.
+  const save=async()=>{await expect(page.locator('.mandala-settings-page .settings-autosave')).toHaveText('已保存');await page.goBack();await expect(page).toHaveURL(/\/mandala/);};
   const composer=page.getByRole('textbox',{name:'消息',exact:true});
   await composer.fill('未发送的设置草稿');
   await open();
@@ -102,8 +103,7 @@ test('catalog loading, failure and empty states retain custom choices and use ma
   await model.click();await page.getByRole('searchbox',{name:'模型 · 搜索选项',exact:true}).fill('unknown-model');await page.keyboard.press('Enter');
   await expect(model).toHaveAttribute('data-value','unknown-model');
   await model.click();await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog')).toBeVisible();await expect(model).toBeFocused();
-  await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page).toHaveURL(/\/settings\/mandala$/);await expect(model).toBeFocused();
 });
 
 
@@ -111,9 +111,9 @@ test('English model settings remain usable on a narrow viewport',async({page},te
   await page.addInitScript(()=>localStorage.setItem('mana-language','en'));
   await page.setViewportSize({width:390,height:900});
   await page.goto('/mandala');await page.locator('.mandala-header-identity button').click();
-  await expect(page.getByRole('dialog')).toContainText('Runtime and model apply to the next main-chat turn');
+  await expect(page.locator('.mandala-settings-page')).toContainText('Applies from the next turn');
   await expect(page.getByRole('combobox',{name:'Model',exact:true})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.screenshot({path:testInfo.outputPath('english-settings-390.png'),animations:'disabled'});
-  await page.keyboard.press('Escape');await expect(page.locator('.mandala-header-identity button')).toBeFocused();
+  await page.goBack();await expect(page.locator('.mandala-header-identity button')).toBeVisible();
 });

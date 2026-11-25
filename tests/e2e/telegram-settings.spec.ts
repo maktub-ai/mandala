@@ -1,11 +1,10 @@
 import {test,expect,type Page} from '@playwright/test';
 
 async function openSettings(page:Page){
- await page.goto('/mandala');
- await page.getByRole('button',{name:'Mandala 设置',exact:true}).click();
- const dialog=page.getByRole('dialog',{name:'Mandala 设置'});
- await dialog.getByText('手机连接 · Telegram',{exact:true}).click();
- return dialog;
+ await page.goto('/settings/messaging');
+ const section=page.getByRole('region',{name:'Telegram',exact:true});
+ await expect(section.getByRole('region',{name:'Telegram 连接'})).toBeVisible();
+ return section;
 }
 
 test('connects a dedicated bot, pairs the named person, updates notifications and unlinks',async({page})=>{
@@ -33,8 +32,8 @@ test('connects a dedicated bot, pairs the named person, updates notifications an
  await expect(dialog.getByText('测试用户',{exact:true})).toBeVisible();
  await dialog.getByRole('button',{name:'确认绑定此账号',exact:true}).click();
  await expect.poll(()=>calls.find(call=>call.path.endsWith('/confirm'))?.body).toEqual({userId:42});
- await dialog.getByLabel('需要我处理时通知手机',{exact:true}).click();
- await expect(dialog.getByLabel('需要我处理时通知手机',{exact:true})).not.toBeChecked();
+ await dialog.getByRole('switch',{name:'需要我处理时通知手机',exact:true}).click();
+ await expect(dialog.getByRole('switch',{name:'需要我处理时通知手机',exact:true})).not.toBeChecked();
  await dialog.getByRole('button',{name:'发送测试消息',exact:true}).click();
  await expect(dialog.getByRole('region',{name:'Telegram 连接'}).getByRole('status').filter({hasText:'测试消息已发送'})).toContainText('测试消息已发送');
  await dialog.getByRole('button',{name:'解除绑定',exact:true}).click();
@@ -144,9 +143,9 @@ test('reopening a connection while unlink finishes rejects the earlier status sn
  await dialog.getByRole('button',{name:'解除绑定',exact:true}).click();
  await dialog.getByRole('button',{name:'确认解除绑定',exact:true}).click();
  await expect.poll(()=>!!finishDelete).toBe(true);
- await dialog.getByText('手机连接 · Telegram',{exact:true}).click();
+ await page.getByRole('navigation',{name:'设置'}).getByRole('link',{name:'通用',exact:true}).click();
  await expect(dialog.getByRole('region',{name:'Telegram 连接'})).toHaveCount(0);
- await dialog.getByText('手机连接 · Telegram',{exact:true}).click();
+ await page.getByRole('navigation',{name:'设置'}).getByRole('link',{name:'手机与消息',exact:true}).click();
  await expect.poll(()=>!!finishRead).toBe(true);
  finishDelete!();await expect.poll(()=>removed).toBe(true);
  const staleResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/mandala/telegram'&&response.request().method()==='GET');

@@ -1,9 +1,3 @@
-.mandala-settings.settings-panel { width: min(560px, calc(100vw - 32px)); padding: var(--space-5); }
-.mandala-settings-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
-.mandala-settings-heading .brand-mark { width: 24px; height: 24px; }
-.mandala-settings-heading h2 { margin: 0; font-size: 20px; }
-.mandala-settings form { display: grid; gap: 16px; }
-.mandala-settings-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .mandala-header-identity { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .mandala-header-identity .brand-mark { width: 24px; height: 24px; flex-shrink: 0; }
 .mandala-header-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -27,12 +21,10 @@
 .workspace-main .mandala-topbar .context { display: flex; min-width: 0; flex: 1; }
 .workspace-main .mandala-topbar .context > .mandala-header-identity { display: inline-flex; }
 
-@media (max-width: 600px) { .mandala-settings.settings-panel { padding: var(--space-4); } }
-.mandala-settings .pet-settings { display: grid; gap: 4px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border-soft); }
 
 .mandala-welcome-loop { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:4px 8px; margin:24px 0 0; padding-top:16px; border-top:1px solid var(--border-soft); font-size:var(--type-ui); color:var(--text); }
 .mandala-welcome-loop > svg { color:var(--muted); }
 .mandala-welcome-loop small { flex-basis:100%; color:var(--muted); font-size:var(--type-meta); line-height:1.6; }
 .cli-notice code { font-size:var(--type-meta); font-family:var(--font-mono); padding:0 4px; border-radius:4px; background:var(--raised); }
-.mandala-details-setting { display:flex; align-items:center; gap:8px; }
 .mandala-handoff-hint { display:block; padding:0 8px 4px; color:var(--muted); font-size:var(--type-meta); }
+.mandala-settings-footnote { margin:var(--space-5) 0 0; }

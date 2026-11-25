@@ -20,14 +20,13 @@ test('local coding runtimes are configurable and only tools-disabled runtimes ca
  let saved=(await (await request.get('/api/config')).json()).config;
  expect(saved.chatDefaults.pi.model).toBe('pi-fixture');
  await page.goto('/settings/system');
- const choices=page.getByRole('radiogroup',{name:'系统任务执行端',exact:true});
- await expect(choices.getByRole('radio',{name:'Cursor Agent',exact:true})).toBeDisabled();
- await expect(choices.getByRole('radio',{name:'Antigravity',exact:true})).toBeDisabled();
- await expect(choices.getByRole('radio',{name:'Hermes Agent',exact:true})).toBeDisabled();
- await expect(choices.getByRole('radio',{name:'OpenClaw',exact:true})).toBeDisabled();
- await choices.getByRole('radio',{name:'Pi',exact:true}).click();await waitForAutosave(page);
+ const choices=page.getByRole('combobox',{name:'系统任务执行端',exact:true});
+ await choices.click();const options=page.getByRole('listbox');
+ for(const name of ['Cursor Agent','Antigravity','Hermes Agent','OpenClaw'])await expect(options.getByRole('option',{name,exact:true})).toBeDisabled();
+ await page.keyboard.press('Escape');
+ await chooseOption(page,choices,'pi');await waitForAutosave(page);
  saved=(await (await request.get('/api/config')).json()).config;expect(saved.system.cli).toBe('pi');
- await page.reload();await expect(choices.getByRole('radio',{name:'Pi',exact:true})).toHaveAttribute('data-state','checked');
+ await page.reload();await expect(choices).toHaveAttribute('data-value','pi');
  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
 

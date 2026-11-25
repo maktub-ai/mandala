@@ -5,11 +5,12 @@ test('Mandala keeps one chat, allows only its settings, and preserves composed C
   await expect(page.getByRole('button', { name: 'Mandala 设置', exact:true })).toBeVisible();
   const first = await (await request.get('/api/mandala')).json();
   await page.getByRole('button', { name: 'Mandala 设置', exact:true }).click();
+  await expect(page).toHaveURL(/\/settings\/mandala$/);
   await page.getByRole('textbox', { name: '名字', exact:true }).fill('Mandala 测试');
   await page.getByRole('textbox', { name: 'soul.md', exact:true }).fill('简明地协作，保留中文偏好。');
   await page.getByRole('spinbutton', { name: '后台总并行上限', exact:true }).fill('4');
-  await page.getByRole('button', { name: '保存', exact:true }).click();
-  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('.mandala-settings-page .settings-autosave')).toHaveText('已保存');
+  await page.goBack();
   await expect(page.getByRole('button', { name:'Mandala 测试 设置',exact:true })).toBeVisible();
   const composer=page.getByRole('textbox',{name:'消息',exact:true});
   await composer.fill('中文输入尚未发送');
@@ -27,10 +28,10 @@ test('Mandala keeps one chat, allows only its settings, and preserves composed C
   expect(second.conversation.id).toBe(first.conversation.id);
   expect(second.config.mandala).toMatchObject({maxParallel:4,soul:'简明地协作，保留中文偏好。'});
   await page.getByRole('button', { name:'Mandala 测试 设置',exact:true }).click();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page).toHaveURL(/\/settings\/mandala$/);
+  await page.goBack();
   await page.goto('/agents/'+first.config.mandala.agentId);
-  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page).toHaveURL(/\/settings\/mandala$/);
   await expect(page.getByRole('textbox',{name:'soul.md',exact:true})).toHaveValue('简明地协作，保留中文偏好。');
   await expect(page.getByRole('textbox',{name:'职责与指令',exact:true})).toHaveCount(0);
 });
@@ -45,18 +46,11 @@ for(const mode of ['light','dark'] as const) for(const width of [1440,1024,768,3
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     await page.screenshot({path:testInfo.outputPath(`mandala-${mode}-${width}.png`),fullPage:true,animations:'disabled'});
     await page.locator('.mandala-header-identity button').click();
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page).toHaveURL(/\/settings\/mandala$/);
     await expect(page.getByRole('textbox',{name:'名字',exact:true})).toBeVisible();
-    await expect.poll(()=>page.getByRole('dialog').evaluate(element=>Number(getComputedStyle(element).opacity))).toBe(1);
-    const bounds=await page.getByRole('dialog').boundingBox();
-    expect(bounds!.x).toBeGreaterThanOrEqual(0);expect(bounds!.y).toBeGreaterThanOrEqual(0);
-    expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(width);
-    expect(bounds!.y+bounds!.height).toBeLessThanOrEqual(900);
+    await expect(page.getByRole('link',{name:'Mandala',exact:true}).and(page.locator('[aria-current=page]'))).toBeVisible();
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
     await page.screenshot({path:testInfo.outputPath(`mandala-settings-${mode}-${width}.png`),fullPage:true,animations:'disabled'});
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(page.locator('.mandala-header-identity button')).toBeFocused();
   });
 }
 

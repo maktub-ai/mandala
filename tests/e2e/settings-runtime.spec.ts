@@ -13,8 +13,8 @@ async function fixture(request: APIRequestContext) {
 
 test("general settings persist language and theme", async ({ page, request }) => {
   await fixture(request);
-  await page.goto("/settings/general");
-  await expect(page.getByRole("heading", { name: "通用设置", exact: true })).toBeVisible();
+  await page.goto("/settings/appearance");
+  await expect(page.getByRole("heading", { name: "外观", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "深色", exact: true }).click();
   await page.getByRole("button", { name: "浅色", exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");

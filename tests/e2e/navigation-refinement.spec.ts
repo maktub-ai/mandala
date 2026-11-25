@@ -106,7 +106,7 @@ test('Agent links restore identity and content owns its local leaves without dup
   await expect(page.locator('aside.sidebar [aria-current=page]')).toHaveCount(1);
   await expect(page.getByText('更多资源', { exact: true })).toHaveCount(0);
   await page.goto('/settings/mcp');
-  await expect(page.locator('main .content-navigation').getByRole('link', { name: 'MCP 连接', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('main .settings-rail').getByRole('link', { name: 'MCP', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('aside.sidebar [aria-current=page]')).toHaveCount(1);
   await page.goto('/mana?tab=memory');
   await expect(page.getByRole('button',{name:'用户菜单',exact:true})).toHaveAttribute('aria-current','page');
@@ -203,7 +203,7 @@ test('default legacy Memory history restores content and local navigation throug
   await expect(page.locator('main').getByRole('heading', { name: '记忆', exact: true })).toBeVisible();
   await expect(memory).toHaveAttribute('aria-current', 'page');
   await openArea(page,'设置');
-  await expect(page.locator('main').getByRole('link', { name: '通用设置', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('main').getByRole('link', { name: '通用', exact: true })).toHaveAttribute('aria-current', 'page');
   await page.goBack();
   await expect(page).toHaveURL(/\/mana$/);
   await expect(page.locator('main').getByRole('heading', { name: '记忆', exact: true })).toBeVisible();
@@ -212,7 +212,7 @@ test('default legacy Memory history restores content and local navigation throug
   await expect(page.locator('main .content-navigation')).toHaveCount(0);
   await page.goForward();
   await page.reload();
-  await expect(page.locator('main').getByRole('link', { name: '通用设置', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('main').getByRole('link', { name: '通用', exact: true })).toHaveAttribute('aria-current', 'page');
   await openArea(page, '设置');
   await page.goto('/mana?tab=skill');
   await page.getByRole('button', { name: '新增 Skill 草稿', exact: true }).click();

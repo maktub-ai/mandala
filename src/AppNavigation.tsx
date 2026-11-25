@@ -61,7 +61,7 @@ export default function AppNavigation({ active, disabled = false, library, modul
         {account && <><DropdownMenuItem className="sidebar-account-identity" onSelect={() => account.onOpen()} aria-label={t('账号') + ' · ' + account.username}><AccountAvatar className="sidebar-account-avatar" name={account.username} source={account.avatar} /><span><strong>{account.username}</strong><small>{account.status}</small></span></DropdownMenuItem><DropdownMenuSeparator/></>}
         {unpinned.map(item => <DropdownMenuItem key={item.id} asChild disabled={disabled}>{link(item)}</DropdownMenuItem>)}
         <DropdownMenuItem asChild>{link(items.find(item => item.id === 'settings')!)}</DropdownMenuItem>
-        {update && <><DropdownMenuSeparator/><DropdownMenuItem className="sidebar-update-item" disabled={disabled} onSelect={() => onOpenPath('/settings/general')}><Icon name="download" size={16}/><span>{text(`更新到 ${update.version}`, `Update to ${update.version}`)}</span></DropdownMenuItem></>}
+        {update && <><DropdownMenuSeparator/><DropdownMenuItem className="sidebar-update-item" disabled={disabled} onSelect={() => onOpenPath('/settings/about')}><Icon name="download" size={16}/><span>{text(`更新到 ${update.version}`, `Update to ${update.version}`)}</span></DropdownMenuItem></>}
       </DropdownMenuContent></DropdownMenu><TaskNotificationInbox disabled={disabled}/></div></div>
     </nav>
   </>;

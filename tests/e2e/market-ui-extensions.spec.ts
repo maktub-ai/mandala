@@ -60,14 +60,15 @@ for (const variant of ['light', 'dark']) test(`language installation, RTL, fallb
   await expect(page.locator('html')).toHaveAttribute('data-theme', variant);
   expect((await page.locator('.area-sidebar').boundingBox())!.x).toBeCloseTo(sidebarBefore.x, 0);
   await page.goto('/settings/general');
-  await expect(page.getByRole('heading', {name: 'اختصارات', exact: true})).toBeVisible();
-  const headingTextOffset = await page.getByRole('heading', { name: 'اختصارات', exact: true }).evaluate(element => {
+  const shortcutsLabel = page.locator('.setting-row-label').filter({ hasText: /^اختصارات$/ });
+  await expect(shortcutsLabel).toBeVisible();
+  const headingTextOffset = await shortcutsLabel.evaluate(element => {
     const range = document.createRange(); range.selectNodeContents(element);
     return range.getBoundingClientRect().left - element.getBoundingClientRect().left;
   });
   expect(headingTextOffset).toBeLessThan(2);
   await expect(page.getByLabel('Language / 语言')).toContainText('العربية');
-  const languageLabel = (await page.locator('.general-settings .settings-form-row > span').boundingBox())!;
+  const languageLabel = (await page.locator('.setting-row').filter({ has: page.getByLabel('Language / 语言') }).locator('.setting-row-label').boundingBox())!;
   const languageControl = (await page.getByLabel('Language / 语言').boundingBox())!;
   expect(languageControl.x).toBeGreaterThan(languageLabel.x);
   await page.getByLabel('Language / 语言').scrollIntoViewIfNeeded();

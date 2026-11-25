@@ -32,7 +32,7 @@ export default function ExecutionMachinesSettings({config,disabled=false,onChang
   finally{setChecking(current=>current===host?'':current);}
  };
  const usage=(machine:ExecutionMachine):Usage[]=>config.projects.flatMap(project=>projectWorkspaces(project).filter(workspace=>workspace.machineId===machine.id).map(workspace=>({projectId:project.id,projectName:project.name,workspaceName:workspace.name==='Default'?text('默认目录组','Default'):workspace.name})));
- return <DetailSection title={text('远程机器','Remote machines')} actions={<Button disabled={disabled||adding} onClick={()=>{setAdding(true);setEditing('');}}><Icon name="plus" size={16}/>{text('添加机器','Add machine')}</Button>}>
+ return <DetailSection title={text('机器','Machines')} actions={<Button disabled={disabled||adding} onClick={()=>{setAdding(true);setEditing('');}}><Icon name="plus" size={16}/>{text('添加机器','Add machine')}</Button>}>
   <p className="field-hint">{text('智能体默认在本机执行。添加可通过 SSH 登录的 Linux 机器后，可在项目的目录组中选择让智能体在那里执行。','Agents run on this computer by default. Add a Linux machine you can reach over SSH, then choose it for a project workspace to run Agents there.')}</p>
   <Requirements/>
   {adding&&<MachineEditor machine={{id:'',name:'',host:''}} machines={machines} disabled={disabled} checking={checking} checks={checks} onProbe={probe} onSave={value=>{onChange([...machines,{...value,id:crypto.randomUUID()}]);setAdding(false);}} onCancel={()=>setAdding(false)}/>}

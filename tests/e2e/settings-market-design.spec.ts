@@ -8,9 +8,9 @@ for(const width of [1440,1024,768,390])for(const theme of ['light','dark'])test(
  await page.setViewportSize({width,height:1000});await page.addInitScript(theme=>localStorage.setItem('mana-theme',theme),theme);
  for(const route of ['/settings/general?agent=design-reader','/settings/runtimes','/settings/system','/settings/mcp','/mana/skills']){
   await page.goto(route);const main=page.locator('main.settings-main');await expect(main).not.toHaveClass(/object-experience/);
-  const nav=page.getByRole('navigation',{name:'Settings and connections',exact:true});await expect(nav).toBeVisible();await expect(nav.getByRole('link')).toHaveCount(5);
+  const nav=page.getByRole('navigation',{name:'Settings',exact:true});await expect(nav).toBeVisible();await expect(nav.getByRole('link')).toHaveCount(14);
   expect(await main.evaluate(node=>node.scrollWidth<=node.clientWidth+1)).toBe(true);
-  if(route.includes('general')){const gaps=await page.locator('.settings-page-body > section').evaluateAll(nodes=>nodes.slice(1).map((node,i)=>node.getBoundingClientRect().top-nodes[i].getBoundingClientRect().bottom));expect(Math.min(...gaps)).toBeGreaterThanOrEqual(24);const group=await page.locator('.theme-settings').boundingBox();if(width>=1024)expect(group!.width).toBeGreaterThan(width===1440?600:400);}
+  if(route.includes('general')){const gaps=await page.locator('.settings-page-body > section').evaluateAll(nodes=>nodes.slice(1).map((node,i)=>node.getBoundingClientRect().top-nodes[i].getBoundingClientRect().bottom));expect(Math.min(...gaps)).toBeGreaterThanOrEqual(24);const group=await page.locator('.settings-page-body > section').first().boundingBox();if(width>=1024)expect(group!.width).toBeGreaterThan(width===1440?600:400);}
   await page.screenshot({path:info.outputPath(route.split('?')[0].replaceAll('/','-')+'.png'),fullPage:true});
  }
  await page.goto('/market');await expect(page.locator('.market-card').first()).toBeVisible();const cards=page.locator('.market-card');

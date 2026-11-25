@@ -55,7 +55,7 @@ test('highlights code, preserves exact copying and remains readable in both them
   expect(await page.evaluate(() => (window as any).codeInjection)).toBeUndefined();
   await page.screenshot({ path: testInfo.outputPath('code-highlight-dark.png') });
   const conversationUrl = page.url();
-  await page.goto('/settings/general');
+  await page.goto('/settings/appearance');
   await page.getByRole('button', { name: '浅色', exact: true }).click();
   await page.goto(conversationUrl);
   await expect.poll(() => keyword.evaluate(el => getComputedStyle(el).color)).not.toBe(darkColor);

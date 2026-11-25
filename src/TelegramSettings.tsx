@@ -4,14 +4,15 @@ import type {TelegramStatus} from '../shared/telegram';
 import {telegramRequest} from './telegram-api';
 import {useLanguage} from './i18n';
 import Button from './ui/Button';
-import Disclosure from './ui/Disclosure';
+import { SettingSwitch } from './ui/SettingsLayout';
 import Field from './ui/Field';
 import Input from './ui/Input';
 import LoadingState from './ui/LoadingState';
 import StatusLabel from './ui/StatusLabel';
 import './telegram.css';
 
-function Connection(){
+/** Telegram connection for the Mandala main chat on this computer. */
+export function TelegramConnection(){
  const {text:t}=useLanguage();
  const [status,setStatus]=useState<TelegramStatus>(),[token,setToken]=useState(''),[error,setError]=useState(''),[readError,setReadError]=useState('');
  const [busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[unlink,setUnlink]=useState(false),[qr,setQr]=useState(''),[now,setNow]=useState(Date.now());
@@ -73,8 +74,7 @@ function Connection(){
   </>}
   {status?.binding&&<>
    <p>{t('已绑定：','Connected account: ')}<strong>{status.binding.name}</strong>{status.binding.username&&<> · @{status.binding.username}</>} · ID {status.binding.userId}</p>
-   <label className="telegram-option"><Input type="checkbox" checked={status.attention} disabled={busy} onChange={event=>void act('/notifications','PATCH',{attention:event.target.checked})}/><span>{t('需要我处理时通知手机','Notify my phone when I need to act')}</span></label>
-   <p className="field-hint">{t('手机发起的请求会收到回复。电脑普通聊天不转发；任务完成通知在对应任务上开启。','Requests from your phone receive replies. Ordinary desktop chats are not forwarded; enable completion notifications on individual tasks.')}</p>
+   <SettingSwitch label={t('需要我处理时通知手机','Notify my phone when I need to act')} hint={t('手机发起的请求会收到回复。电脑普通聊天不转发；任务完成通知在对应任务上开启。','Requests from your phone receive replies. Ordinary desktop chats are not forwarded; enable completion notifications on individual tasks.')} checked={status.attention} disabled={busy} onChange={checked=>void act('/notifications','PATCH',{attention:checked})}/>
    <div className="telegram-actions"><Button disabled={busy||status.state!=='connected'} onClick={()=>void act('/test')}>{t('发送测试消息','Send test message')}</Button></div>
   </>}
   {!!status?.deliveries?.length&&<div><strong>{t('消息投递需要关注','Message delivery needs attention')}</strong>{status.deliveries.map(item=><p key={item.id}>{item.state==='uncertain'?t('送达待确认','Delivery unconfirmed'):t('发送失败','Delivery failed')} · {item.summary}</p>)}<p className="field-hint">{t('请先在 Telegram 核对结果；投递异常不会重新执行任务。','Check Telegram first; delivery failures never rerun the task.')}</p></div>}
@@ -82,9 +82,4 @@ function Connection(){
   {notice&&<p role="status">{notice}</p>}
   <p className="field-hint">{t('离线时 Bot 无法即时回复。恢复后，离线新指令需要你确认；Telegram 最多保留 24 小时未接收的消息，不保证全部找回。','The bot cannot reply while this computer is offline. On reconnect, new offline instructions need your confirmation. Telegram retains unreceived updates for at most 24 hours; recovery is not guaranteed.')}</p>
  </section>;
-}
-
-export default function TelegramSettings(){
- const {text:t}=useLanguage(),[expanded,setExpanded]=useState(false);
- return <Disclosure className="telegram-settings" title={t('手机连接 · Telegram','Phone connection · Telegram')} onToggle={event=>{if(event.target===event.currentTarget)setExpanded(event.currentTarget.open);}}>{expanded&&<Connection/>}</Disclosure>;
 }

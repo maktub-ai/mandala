@@ -34,9 +34,9 @@ for (const width of [1280, 390]) {
     await pickDirectoryAgent(page, 'reviewer');
     await expect(page.getByRole("textbox", { name: "智能体 名称", exact: true })).toHaveValue("Agent reviewer");
     await openArea(page, "设置");
-    await expect(page.locator("main .content-navigation")).toBeVisible();
-    await page.locator("main .content-navigation").getByRole("link", { name: "执行端接入", exact: true }).click();
-    await expect(page.getByRole("heading", { level: 1, name: "执行端接入" })).toBeVisible();
+    await expect(page.locator("main .settings-rail")).toBeVisible();
+    await page.locator("main .settings-rail").getByRole("link", { name: "执行端", exact: true }).click();
+    await expect(page.getByRole("heading", { level: 1, name: "执行端" })).toBeVisible();
     if (width === 390) {
       await expect(sidebar).not.toBeVisible();
       await reveal();

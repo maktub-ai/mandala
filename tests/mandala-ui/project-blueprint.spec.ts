@@ -21,7 +21,7 @@ test.beforeEach(async({page})=>{
 
 test('the global blueprint default persists without changing existing projects',async({page,isolatedAuthority:{request,baseURL}})=>{
  const {project}=await addProject(request,'星图编辑器');
- await page.goto(baseURL+'/settings/general');
+ await page.goto(baseURL+'/settings/defaults');
  const toggle=page.getByRole('switch',{name:'新项目默认开启蓝图'});
  await expect(toggle).not.toBeChecked();await toggle.check();
  await expect.poll(async()=>(await(await request.get('/api/config')).json()).config.blueprintDefaultEnabled).toBe(true);

@@ -49,8 +49,8 @@ test("Agent identity, Project context and shared catalogs have distinct homes", 
   await waitForAutosave(page);
   await expect.poll(async () => (await (await request.get('/api/config')).json()).config.projects[0].background).toBe('A reading log');
   await openArea(page, '设置');
-  await expect(page.locator('main .content-navigation a[href^="/settings/"]')).toHaveCount(4);
-  await expect(page.locator('main .content-navigation').getByRole('link', { name: '技能库', exact: true })).toHaveCount(0);
+  await expect(page.locator('main .settings-rail a[href^="/settings/"]')).toHaveCount(13);
+  await expect(page.locator('main .settings-rail').getByRole('link', { name: '技能库', exact: true })).toHaveCount(0);
   await openArea(page, '团队');await openTeamDirectory(page);
   await expect(page.getByRole('link', { name: '技能库', exact: true })).toHaveAttribute('href', '/mana/skills');
   await expect(page.locator('.workspace-navigation').getByRole('link', { name: '记忆', exact: true })).toHaveAttribute('href', '/mana?tab=memory');

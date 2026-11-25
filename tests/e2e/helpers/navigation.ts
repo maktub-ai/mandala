@@ -141,7 +141,7 @@ export async function setAppearanceMode(page: Page, mode: 'light' | 'dark') {
   // Use the real settings and cross-tab synchronization without losing the current page state.
   const settings = await page.context().newPage();
   try {
-    await settings.goto(new URL('/settings/general', page.url()).href);
+    await settings.goto(new URL('/settings/appearance', page.url()).href);
     await settings.getByRole('button', { name: mode === 'dark' ? /^(深色|Dark)$/ : /^(浅色|Light)$/, exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', mode);
     await expect(settings.locator('html')).toHaveAttribute('data-theme', mode);

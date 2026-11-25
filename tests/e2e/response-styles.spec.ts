@@ -17,8 +17,11 @@ async function run(request: APIRequestContext, id: string, style: string) {
   await expect.poll(async () => (await (await request.get("/api/conversations")).json()).find((chat: { id: string }) => chat.id === id)?.status).toBe("idle");
 }
 
+// Response style defaults live on the Defaults settings page.
+const openDefaults = (page: import("@playwright/test").Page) => page.getByRole("navigation", { name: "设置" }).getByRole("link", { name: "默认值", exact: true }).click();
+
 test("RS1 current settings entry persists global and Agent preferences and updates the next native execution", async ({ page, request }) => {
-  await seed(request); await page.goto("/"); await openArea(page, "设置");
+  await seed(request); await page.goto("/"); await openArea(page, "设置"); await openDefaults(page);
   const global = page.getByRole("combobox", { name: "默认回答风格", exact: true });
   await expectSelection(global, "standard"); await chooseOption(page, global, "concise"); await waitForAutosave(page);
   await page.reload(); await expectSelection(global, "concise");
@@ -30,14 +33,14 @@ test("RS1 current settings entry persists global and Agent preferences and updat
   await page.reload(); await expectSelection(agent, "standard"); await run(request, chat.id, "standard");
   await chooseOption(page, agent, ""); await waitForAutosave(page);
   expect((await (await request.get("/api/config")).json()).config.agents[0]).not.toHaveProperty("responseStyle");
-  await openArea(page, "设置"); await chooseOption(page, global, "explanatory"); await waitForAutosave(page);
+  await openArea(page, "设置"); await openDefaults(page); await chooseOption(page, global, "explanatory"); await waitForAutosave(page);
   await openArea(page, "团队"); await pickDirectoryAgent(page, "style-agent");
   await expect(agent).toContainText("继承全局（解释型）"); await page.reload(); await expect(agent).toContainText("继承全局（解释型）");
   await run(request, chat.id, "explanatory");
 });
 
 test("RS2 failed autosave retains the response style draft and retry persists it", async ({ page, request }) => {
-  await seed(request); await page.goto("/settings/general"); let fail = true;
+  await seed(request); await page.goto("/settings/defaults"); let fail = true;
   await page.route("**/api/config", async route => {
     if (route.request().method() === "PUT" && fail) { await route.fulfill({ status: 503, json: { error: "Synthetic save failure" } }); return; }
     await route.continue();
@@ -53,9 +56,10 @@ for (const [width, language, theme] of [[1280, "zh-CN", "light"], [390, "en", "d
   test(`RS3 current theme and response controls at ${width}px ${language} ${theme}`, async ({ page, request }, info) => {
     await seed(request); await page.setViewportSize({ width, height: 850 });
     await page.addInitScript(value => localStorage.setItem("mana-language", value), language);
-    await page.goto("/settings/general");
+    await page.goto("/settings/appearance");
     await page.getByRole("button", { name: language === "en" ? "Dark" : "浅色", exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await page.goto("/settings/defaults");
     const picker = page.getByRole("combobox", { name: language === "en" ? "Default response style" : "默认回答风格", exact: true });
     await picker.focus(); await page.keyboard.press("Enter"); await expect(page.getByRole("listbox")).toBeVisible();
     await page.keyboard.press("End"); await page.keyboard.press("Enter"); await expectSelection(picker, "explanatory"); await waitForAutosave(page);

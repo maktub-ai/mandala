@@ -11,7 +11,6 @@ import AgentMessageCards,{ReplySource} from './AgentMessageCards';
 import {replyThreads} from './agent-reply-threads';
 import OperationResults from './OperationResults';
 import {useOperationTasks} from './TaskOperationCards';
-import MandalaSettings from "./MandalaSettings";
 import {canonicalObjectPath} from './object-routes';
 import ComposerRecovery from './ComposerRecovery';
 import { useComposerDraft, ComposerDraftIdentity, composerDraftFingerprint, clearAcceptedComposerDraft } from './composer-drafts';
@@ -95,7 +94,7 @@ import "./redesign.css";
 import ConversationLibrary from "./ConversationLibrary";
 import ManaWorkspace from "./ManaWorkspace";
 import { linkedCapabilities } from "../shared/catalog";
-import SettingsPage, { settingsSection, settingsUrl, type SettingsSection } from "./SettingsPage";
+import SettingsPage, { settingsPageIds, settingsSection, settingsUrl, type SettingsSection } from "./SettingsPage";
 import ProjectWorkbench from "./ProjectWorkbench";
 import GettingStarted from "./GettingStarted";
 import MandalaWelcome from "./MandalaWelcome";
@@ -946,7 +945,6 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       if (selectedChat.current === id) setError((e as Error).message);
     }
   };
-  const [mandalaSettingsOpen,setMandalaSettingsOpen]=useState(false);
   const [mandalaLoading,setMandalaLoading]=useState(false);
   useEffect(() => { setMainPreview(null); }, [selected, chatActive, workbench]);
   const preview = mandalaMain && chatActive && !workbench ? mainPreview : null;
@@ -1470,7 +1468,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   useEffect(()=>{
     if(!configLoaded)return;
     if(location.pathname==='/mandala'&&!new URLSearchParams(location.search).has('conversation'))void openMandala();
-    else if(settingsPath&&isSystemAgent(config,config.agents.find(a=>a.id===settingsAgentId))){setSettingsAgentId('');history.replaceState(null,'','/agents');setRouteLocation('/agents');setMandalaSettingsOpen(true);}
+    else if(settingsPath&&isSystemAgent(config,config.agents.find(a=>a.id===settingsAgentId))){setSettingsAgentId('');history.replaceState(null,'','/settings/mandala');setRouteLocation('/settings/mandala');setSettingsPath('/settings/mandala');}
   },[configLoaded,routeLocation,settingsPath,settingsAgentId,config.mandala?.agentId]);
   const paletteProjectId = settingsPath && settingsSection(settingsPath) === "projects" ? config.projects.find(p=>p.id===settingsProjectId)?.id ?? "" : usageOpen ? usageProjectId : activeArea === "chat" ? projectId : workbench ? workbenchProjectId : new URLSearchParams(location.search).get("project") ?? "";
   const paletteAgentId = activeArea === "chat" ? agentId : "";
@@ -1521,7 +1519,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   if (assetsOpen) { pageQuery.delete('tab'); pageQuery.delete('file'); pageQuery.delete('plan'); }
   // Selecting or creating a Project/Agent keeps the settings page and its unsaved creation form.
   if (settingsPath) { pageQuery.delete('agent'); pageQuery.delete('project'); }
-  const withPalette = (content: React.ReactNode) => <TaskNotifications onOpen={openWorkspacePath}><ComposerDraftIdentity.Provider value={draftIdentity}><PageErrorBoundary key={marketOpen ? "/market" : location.pathname+'?'+pageQuery} onRecover={path=>{setNavigationLocked(false);if(path){history.pushState(null,'',path);dispatchEvent(new PopStateEvent('popstate'));}}}>{content}</PageErrorBoundary>{palette}{mandalaSettingsOpen&&<MandalaSettings onClose={()=>setMandalaSettingsOpen(false)} onSaved={(value,revision)=>{settingsSaved.current=value;configRevision.current=revision;latestDraft.current=structuredClone(value);setConfig(value);setDraft(latestDraft.current);setSettingsRevision(revision);}}/>} {shortcutsOpen && <KeyboardShortcuts onClose={() => setShortcutsOpen(false)}/>}{taskDialog && !tasksOpen && <TaskDialog id={taskDialog} config={config} onNavigate={setTaskDialog} onClose={() => setTaskDialog(null)} onOpenPage={() => { const id = taskDialog; setTaskDialog(null); navigateAssetPage("/tasks/" + encodeURIComponent(id)); }}/>}</ComposerDraftIdentity.Provider></TaskNotifications>;
+  const withPalette = (content: React.ReactNode) => <TaskNotifications onOpen={openWorkspacePath}><ComposerDraftIdentity.Provider value={draftIdentity}><PageErrorBoundary key={marketOpen ? "/market" : location.pathname+'?'+pageQuery} onRecover={path=>{setNavigationLocked(false);if(path){history.pushState(null,'',path);dispatchEvent(new PopStateEvent('popstate'));}}}>{content}</PageErrorBoundary>{palette} {shortcutsOpen && <KeyboardShortcuts onClose={() => setShortcutsOpen(false)}/>}{taskDialog && !tasksOpen && <TaskDialog id={taskDialog} config={config} onNavigate={setTaskDialog} onClose={() => setTaskDialog(null)} onOpenPage={() => { const id = taskDialog; setTaskDialog(null); navigateAssetPage("/tasks/" + encodeURIComponent(id)); }}/>}</ComposerDraftIdentity.Provider></TaskNotifications>;
   const conversationLibrary = <fieldset className="library-loading-boundary" disabled={!configLoaded}><ConversationLibrary chats={chats.filter(c=>c.purpose!=="mandala-main")} projects={config.projects} agents={config.agents} selectedId={activeArea === "chat" ? selected : ""}
     projectId={projectId} search={search} onSearch={setSearch} onOpen={id => { if (!navigationLocked && (!settingsPath || closeSettings())) void openConversation(id, true); }} onArchive={(id, archived) => void archiveChat(id, archived)}
     onReference={chatActive&&!settingsPath&&!navigationLocked&&composerDraft.loaded?addConversationReference:undefined}
@@ -1548,12 +1546,12 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   if (settingsPath) {
     const section = settingsSection(settingsPath) ?? "general";
     return withPalette(<div className="product-frame"><SettingsPage onPalette={()=>setPaletteOpen(true)} preferredProjectAgentId={projectAgentChoice(config,settingsProjectId,agentId,rememberedAgents.current)} onNavigationLockChange={setNavigationLocked} navigation={globalNavigation} mobileNav={mobileNav} onMobileNav={setMobileNav}
-      section={(["general", "projects", "agents", "runtimes", "runtime", "system", "mcp", "skills", "execution-machines"].includes(section) ? section : "general") as SettingsSection}
+      section={([...settingsPageIds, "projects", "agents", "runtime"] as string[]).includes(section) ? section : "general"}
       draft={draft} setDraft={setDraft} savedConfig={config} saving={saving} runtimeSaving={runtimeSaving} loading={!configLoaded || !settingsRevision} error={error}
       onRuntimeDirtyChange={dirty => { runtimeDraftDirty.current = dirty; }} onSaveRuntime={saveRuntime} onRuntimeNavigate={path => { if(runtimeSaveInFlight.current) return; if(JSON.stringify(latestDraft.current)!==JSON.stringify(settingsSaved.current))void saveSettings(); const requestedCli=new URLSearchParams(location.search).get('runtime');const previousCli = location.pathname.split('/')[3]==='new'&&runtimeIds.includes(requestedCli as Cli)?requestedCli!:location.pathname.split('/')[3]; history.pushState(null, '', path); setSettingsPath(path); runtimeDraftDirty.current = false; if(path === '/settings/runtimes') requestAnimationFrame(() => (document.querySelector<HTMLButtonElement>('[data-runtime-configure="' + previousCli + '"]') ?? document.querySelector<HTMLButtonElement>('.runtime-connections .primary'))?.focus()); }}
       projectPreparationName={projectPreparationName} onProjectPreparationNameChange={setProjectPreparationName} initialProjectId={settingsProjectId} initialAgentId={isSystemAgent(config,config.agents.find(a=>a.id===settingsAgentId))?'':settingsAgentId} projectSelectionVersion={projectSelectionVersion}
       initialAgentTab={location.pathname.endsWith("/memory") ? "memory" : new URLSearchParams(location.search).get("tab") ?? "profile"}
-      onShortcuts={() => setShortcutsOpen(true)} modulePins={modulePins} moduleOrder={moduleOrder} onModulePin={pinModule} onModuleReorder={reorderModule} saveError={saveError} onRetrySave={() => { failedDraft.current = ''; void saveSettings(); }} onReloadSettings={reloadSettings}
+      onShortcuts={() => setShortcutsOpen(true)} modulePins={modulePins} moduleOrder={moduleOrder} onModulePin={pinModule} onModuleReorder={reorderModule} saveError={saveError} onRetrySave={() => { failedDraft.current = ''; void saveSettings(); }} onReloadSettings={reloadSettings} onMandalaSaved={(value,revision)=>{settingsSaved.current=value;configRevision.current=revision;latestDraft.current=structuredClone(value);setConfig(value);setDraft(latestDraft.current);setSettingsRevision(revision);}}
       onOpenPath={openWorkspacePath} onNavigate={(next, objectId = "") => { if(objectSaveGuard || navigationLocked || !confirmRuntimeLeave()) return; navigationVersion.current++; const query = next === "projects" && objectId ? "?project=" + encodeURIComponent(objectId) : next === "agents" && objectId ? "?agent=" + encodeURIComponent(objectId) : ""; history.pushState(null, "", settingsUrl(next) + query); setSettingsProjectId(next === "projects" ? objectId : ""); setSettingsAgentId(next === "agents" ? objectId : ""); setSettingsPath(location.pathname); setMobileNav(false); }} /></div>);
   }
   if (workbench && !workbenchProject) return withPalette(<div className="product-frame"><div className="app-shell"><AppSidebar navigation={globalNavigation} open={mobileNav} onClose={() => setMobileNav(false)}/><main className="workspace-main"><SidebarToggle onClick={() => setMobileNav(true)}/><p role="alert">{localize('此项目不可用，可能已被移除或你无权访问。', 'This project is unavailable. It may have been removed or you may not have access.')}</p><Button onClick={()=>openWorkspacePath('/projects')}>{localize('返回项目', 'Back to Projects')}</Button></main></div></div>);
@@ -1582,7 +1580,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
         {!workbench && <header className={"topbar"+(mandalaMain?" mandala-topbar":"")}>
           <SidebarToggle chat={!workbench} onClick={() => setMobileNav(true)} />
           <div className="context">
-            {mandalaMain ? <span className="mandala-header-identity"><BrandMark/><strong>{agent?.name??'Mandala'}</strong><Button aria-label={(agent?.name??'Mandala')+(localize(' 设置', ' settings'))} onClick={()=>setMandalaSettingsOpen(true)}><Icon name="settings" size={16}/></Button></span> : manaOpen ? <span className="context-identity"><Icon name="book" size={18} />{t("MANA 工作区")}</span> : <>
+            {mandalaMain ? <span className="mandala-header-identity"><BrandMark/><strong>{agent?.name??'Mandala'}</strong><Button aria-label={(agent?.name??'Mandala')+(localize(' 设置', ' settings'))} onClick={()=>openWorkspacePath('/settings/mandala')}><Icon name="settings" size={16}/></Button></span> : manaOpen ? <span className="context-identity"><Icon name="book" size={18} />{t("MANA 工作区")}</span> : <>
             <span className="context-identity">{workbench ? workbenchProject?.name : project?.name ?? t("不关联项目")}</span>
             <span className="context-divider">/</span>
             <span className="context-identity">{selected && !manaOpen && !workbench && agent && <IdentityAvatar identity={agent} kind="agent" size={22} />}<span>{manaOpen ? "MANA" : workbench ? t("工作资源") : selected ? agent?.name ?? (runtimeName(cli)) : t("新对话")}</span></span>
@@ -1683,7 +1681,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
                 : mandalaMain ? `${runtimeName(statusCli)} · ${localize("这台电脑上没有检测到，Mandala 暂时无法工作", "not found on this computer; Mandala cannot work yet")}`
                 : `${runtimeName(statusCli)} · ${t("无法连接")}`}
             </span>
-            {mandalaMain && !statusMachine && <Button onClick={() => setMandalaSettingsOpen(true)}>{localize("更换 CLI", "Change CLI")}</Button>}
+            {mandalaMain && !statusMachine && <Button onClick={() => openWorkspacePath('/settings/mandala')}>{localize("更换 CLI", "Change CLI")}</Button>}
             {statusMachine ? <Button onClick={() => void openSettings("execution-machines")}>{localize("检查远程机器", "Check remote machine")}</Button> : <Button onClick={() => setCliPanel(true)}>
               {t("查看连接指引")}
             </Button>}

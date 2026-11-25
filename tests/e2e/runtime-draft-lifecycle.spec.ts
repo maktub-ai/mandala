@@ -21,7 +21,7 @@ test('Runtime changes save automatically before refresh or leaving the page',asy
  await page.getByRole('textbox',{name:'启动参数（每行一个）',exact:true}).fill('--strict-config');
  await expect.poll(async()=>(await(await request.get('/api/config')).json()).config.runtimeDefaults.codex.args).toEqual(['--strict-config']);
  await page.reload();await expect(page.getByRole('textbox',{name:'启动参数（每行一个）',exact:true})).toHaveValue('--strict-config');
- await page.getByRole('link',{name:'通用设置',exact:true}).click();await expect(page).toHaveURL('/settings/general');
+ await page.getByRole('link',{name:'通用',exact:true}).click();await expect(page).toHaveURL('/settings/general');
 });
 test('delayed automatic Runtime save preserves newer input and unrelated settings',async({page,request})=>{
  await seed(request);await page.goto('/settings/runtimes');await page.getByRole('region',{name:'Codex',exact:true}).getByRole('button',{name:'配置',exact:true}).click();

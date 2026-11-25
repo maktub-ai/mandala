@@ -76,7 +76,7 @@ export default function ThemeSettings() {
   }
   const range=(title:string,value:number,min:number,max:number,change:(v:number)=>void,suffix='')=><label className="theme-range"><span>{title}</span><Input type="range" aria-label={title} value={value} min={min} max={max} onChange={e=>change(Number(e.target.value))}/><output>{value}{suffix}</output></label>;
   return <section className="settings-card theme-settings" aria-label={label('主题与外观','Themes and appearance')}>
-    <header className="theme-heading"><div><h2>{label('主题与外观','Themes and appearance')}</h2><p>{label('设置主题配色与背景。','Choose colors and an optional background for your theme.')}</p></div><div className="theme-file-actions">
+    <header className="theme-heading"><div><h2>{label('主题','Theme')}</h2><p>{label('显示模式、配色、字体与背景。主题可导入和导出。','Display mode, colors, fonts and background. Themes can be imported and exported.')}</p></div><div className="theme-file-actions">
       <Button type="button" disabled={reading} onClick={()=>fileRef.current?.click()}><Upload size={15}/>{label('导入','Import')}</Button>
       <Button type="button" onClick={exportTheme}><Download size={15}/>{label('导出','Export')}</Button>
       <Input ref={fileRef} type="file" hidden accept=".json" aria-label={label('导入主题文件','Import theme file')} onChange={e=>{void importTheme(e.target.files?.[0]);e.target.value='';}}/>

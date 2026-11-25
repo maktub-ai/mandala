@@ -16,7 +16,7 @@ for(const origin of ['/','/mandala'])test('opening Settings renders before a slo
   await menu.locator('[data-area="settings"]').click();
   await expect.poll(()=>started).toBe(true);
   await expect(page.locator('.settings-page')).toBeVisible({timeout:1000});
-  await expect(page.getByRole('combobox',{name:'默认回答风格',exact:true})).toBeEnabled();
+  await expect(page.getByRole('combobox',{name:'Language / 语言',exact:true})).toBeEnabled();
   await expect(page).toHaveURL(/\/settings\/general$/);
  }finally{release();}
 });
@@ -33,6 +33,7 @@ for(const edit of [false,true])test('a late configuration refresh '+(edit?'prese
  });
  try{
   await menu.locator('[data-area="settings"]').click();
+  await page.getByRole('navigation',{name:'设置',exact:true}).getByRole('link',{name:'默认值',exact:true}).click();
   const control=page.getByRole('combobox',{name:'默认回答风格',exact:true});
   await expect(control).toBeVisible();
   if(edit)await chooseOption(page,control,'concise');

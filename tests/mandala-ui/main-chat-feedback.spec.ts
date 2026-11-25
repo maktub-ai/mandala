@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/test';
 
+const setExecutionDetails=async(page:import('@playwright/test').Page,enabled:boolean)=>{
+  await page.locator('.mandala-header-identity button').click();
+  await expect(page).toHaveURL(/\/settings\/mandala$/);
+  const toggle=page.getByRole('switch',{name:'显示执行详情',exact:true});
+  if(await toggle.isChecked()!==enabled){await toggle.setChecked(enabled);await expect(page.locator('.mandala-settings-page .settings-autosave')).toHaveText('已保存');}
+  await page.goBack();
+};
+
 test('waiting gives way to live text and stops without leaving a pending reply', async ({ page, request }, info) => {
   const { conversation } = await (await request.get('/api/mandala')).json();
   await page.clock.install();
@@ -86,14 +94,9 @@ test('a timed-out turn shows one readable notice and reveals its raw cause on re
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath('timeout-narrow.png'), animations: 'disabled' });
   await expect(turn.getByRole('button', {name:/执行详情/})).toHaveCount(0);
-  await page.locator('.mandala-header-identity button').click();
-  const details = page.getByRole('checkbox', {name:'显示执行详情'});
-  await details.check();
-  await page.getByRole('button', {name:'保存',exact:true}).click();
+  await setExecutionDetails(page,true);
   await expect(turn.getByText(raw, { exact: true })).toBeVisible();
-  await page.locator('.mandala-header-identity button').click();
-  await details.uncheck();
-  await page.getByRole('button', {name:'保存',exact:true}).click();
+  await setExecutionDetails(page,false);
   const mainUrl = page.url();
   const recovery = turn.getByRole('button', { name: '取回到当前输入框' });
   const composer = page.getByRole('textbox', { name: '消息', exact: true });
@@ -108,11 +111,7 @@ test('a timed-out turn shows one readable notice and reveals its raw cause on re
 test('keeps a child-only reply out of the main answer and respects execution details',async({page,request})=>{
   const {conversation}=await(await request.get('/api/mandala')).json();
   await page.goto('/mandala');
-  const preference=async(enabled:boolean)=>{
-    await page.locator('.mandala-header-identity button').click();
-    await page.getByRole('checkbox',{name:'显示执行详情'}).setChecked(enabled);
-    await page.getByRole('button',{name:'保存',exact:true}).click();
-  };
+  const preference=(enabled:boolean)=>setExecutionDetails(page,enabled);
   const composer=page.getByRole('textbox',{name:'消息',exact:true});
   try {
     await preference(false);await composer.fill('activity-flow');await composer.press('Enter');

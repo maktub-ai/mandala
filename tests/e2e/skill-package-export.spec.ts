@@ -41,7 +41,7 @@ test('downloads the complete versioned Skill package in light, dark and narrow v
   for (const mode of ['light', 'dark'] as const) {
     const settings = await page.context().newPage();
     try {
-      await settings.goto(new URL('/settings/general', page.url()).href);
+      await settings.goto(new URL('/settings/appearance', page.url()).href);
       await settings.getByRole('button', { name: mode === 'dark' ? '深色' : '浅色', exact: true }).click();
       await expect(page.locator('html')).toHaveAttribute('data-theme', mode);
     } finally { await settings.close(); }

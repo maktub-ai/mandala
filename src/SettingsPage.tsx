@@ -6,21 +6,19 @@ import DesktopUpdateSettings from './DesktopUpdateSettings';
 import VoiceSettings from './VoiceSettings';
 import MemoryRetrievalSettings from './MemoryRetrievalSettings';
 import ExecutionMachinesSettings from './ExecutionMachinesSettings';
-import { PageHeader, DetailSection } from './ui/WorkspacePage';
+import { PageHeader } from './ui/WorkspacePage';
 import AgentOverview from './AgentOverview';
 import AgentSettings from './AgentSettings';
 import WorkspaceDirectory from './WorkspaceDirectory';
 import IdentityAvatar from './IdentityAvatar';
 import { responseStyles, responseStyleLabels, responseStyleDescriptions, effectiveResponseStyle, type ResponseStyle } from "../shared/response-style";
 import {shortcutLabel} from './shortcuts';
-import SegmentedControl from './ui/SegmentedControl';
 import Tabs, { TabPanel } from './ui/Tabs';
 import Field from './ui/Field';
 import Notice from './ui/Notice';
 import EmptyState from './ui/EmptyState';
 import Button from './ui/Button';
 import Input from './ui/Input';
-import Textarea from './ui/Textarea';
 import ThemeSettings from "./ThemeSettings";
 import LoadingState from './ui/LoadingState';
 import Disclosure from './ui/Disclosure';
@@ -39,7 +37,11 @@ import RuntimeConnections from "./RuntimeConnections";
 import ModelCatalogPicker from "./ModelCatalogPicker";
 import { enabledRuntimes, runtimeLabel, runtimeIds, supportsSystemTasks } from "../shared/runtimes";
 import { api } from "./api";
-import Icon from "./ui/Icon";
+import Icon, { type IconName } from "./ui/Icon";
+import { SettingsGroup, SettingRow, SettingSwitch } from "./ui/SettingsLayout";
+import MandalaSettings from "./MandalaSettings";
+import PetSettings from "./PetSettings";
+import { TelegramConnection } from "./TelegramSettings";
 import Select from "./ui/Select";
 import "./settings.css";
 import "./compact-settings.css";
@@ -48,13 +50,39 @@ import "./object-settings.css";
 import { orderedSidebarItems, modulePinned, type ModulePins } from "./sidebar-modules";
 import { useLanguage } from "./i18n";
 
-export type SettingsSection = "general" | "execution-machines" | "projects" | "agents" | "runtime" | "runtimes" | "system" | "mcp" | "skills";
+export type SettingsSection = "general" | "appearance" | "input" | "mandala" | "defaults" | "memory" | "messaging" | "cli" | "about" | "execution-machines" | "projects" | "agents" | "runtime" | "runtimes" | "system" | "mcp" | "skills";
+/** Settings pages, grouped by who a setting affects (DESIGN.md § Settings). */
+export const settingsPages: { group: [string, string]; pages: { id: SettingsSection; label: [string, string]; icon: IconName; description?: [string, string] }[] }[] = [
+  { group: ['偏好', 'Preferences'], pages: [
+    { id: 'general', label: ['通用', 'General'], icon: 'settings', description: ['语言、侧边栏入口与帮助。', 'Language, sidebar entries and help.'] },
+    { id: 'appearance', label: ['外观', 'Appearance'], icon: 'palette', description: ['主题、字体、背景和桌宠。', 'Theme, fonts, background and pet.'] },
+    { id: 'input', label: ['输入与语音', 'Input and voice'], icon: 'microphone', description: ['语音转写与识别模型。', 'Dictation and transcription models.'] },
+  ] },
+  { group: ['工作区', 'Workspace'], pages: [
+    { id: 'mandala', label: ['Mandala', 'Mandala'], icon: 'sparkles', description: ['系统智能体：了解全局任务，协调项目与智能体，也可独立执行。不属于任何项目。', 'The system Agent understands workspace tasks, coordinates Projects and Agents, and can work on its own. It is not a Project member.'] },
+    { id: 'defaults', label: ['默认值', 'Defaults'], icon: 'layers', description: ['新智能体和新项目从这里继承设置。', 'New Agents and Projects start from these settings.'] },
+    { id: 'system', label: ['系统任务', 'System tasks'], icon: 'activity', description: ['系统任务使用独立原生 CLI 会话与已有原生认证，不进入用户对话。', 'System tasks run in separate native CLI sessions with existing native sign-ins and never enter your chats.'] },
+    { id: 'memory', label: ['记忆', 'Memory'], icon: 'memory', description: ['对话开始前怎样读取和检索记忆。', 'How memory is read and searched before a request.'] },
+  ] },
+  { group: ['连接', 'Connections'], pages: [
+    { id: 'runtimes', label: ['执行端', 'CLI adapters'], icon: 'terminal', description: ['原生 CLI 的接入、认证状态与默认参数。', 'Native CLI adapters, sign-in status and defaults.'] },
+    { id: 'execution-machines', label: ['远程机器', 'Remote machines'], icon: 'server', description: ['让智能体通过 SSH 在其他 Linux 机器上执行。', 'Let Agents run on other Linux machines over SSH.'] },
+    { id: 'mcp', label: ['MCP', 'MCP'], icon: 'plug', description: ['智能体和项目可以使用的 MCP 连接。', 'MCP connections available to Agents and Projects.'] },
+    { id: 'skills', label: ['Skills', 'Skills'], icon: 'blocks', description: ['智能体和项目可以使用的技能。', 'Skills available to Agents and Projects.'] },
+    { id: 'messaging', label: ['手机与消息', 'Phone and messaging'], icon: 'message', description: ['从手机把请求发给 Mandala 主对话，并在需要你处理时收到通知。', 'Send requests to the Mandala main chat from your phone and get notified when you need to act.'] },
+  ] },
+  { group: ['应用', 'App'], pages: [
+    { id: 'cli', label: ['命令行', 'Command line'], icon: 'terminal', description: ['从终端打开当前桌面工作区，使用 App 自带的运行环境。', 'Open this desktop workspace from a terminal using the runtime bundled with the app.'] },
+    { id: 'about', label: ['关于与更新', 'About and updates'], icon: 'info', description: ['当前版本与更新。', 'Current version and updates.'] },
+  ] },
+];
+export const settingsPageIds = settingsPages.flatMap(group => group.pages.map(page => page.id));
 type Section = SettingsSection;
 export const settingsUrl = (section: Section) => section === "agents" || section === "runtime" ? "/agents" : section === "projects" ? "/projects" : section === "skills" ? "/mana/skills" : `/settings/${section}`;
 export const settingsSection = (path: string): Section | null => path === "/agents" || /^\/agents\/[^/]+(?:\/memory)?$/.test(path) ? "agents" : path === "/projects" || path === "/projects/manage" || /^\/projects\/[^/]+\/settings$/.test(path) ? "projects" : path === "/mana/skills" ? "skills" : path.startsWith("/settings/") ? path.split("/")[2] as Section : null;
 const freshId = () => crypto.randomUUID();
 
-export default function SettingsPage({ navigation, mobileNav, onMobileNav, section: requestedSection, draft, setDraft, projectPreparationName, onProjectPreparationNameChange, savedConfig, saving, runtimeSaving = false, loading = false, error, initialProjectId, initialAgentId, initialAgentTab = "profile", preferredProjectAgentId = "", projectSelectionVersion, modulePins, moduleOrder, onModulePin, onModuleReorder, saveError = "", onRetrySave, onReloadSettings, onNavigate, onOpenPath, onRuntimeNavigate, onSaveRuntime, onRuntimeDirtyChange, onShortcuts, onPalette, onNavigationLockChange }: {
+export default function SettingsPage({ navigation, mobileNav, onMobileNav, section: requestedSection, draft, setDraft, projectPreparationName, onProjectPreparationNameChange, savedConfig, saving, runtimeSaving = false, loading = false, error, initialProjectId, initialAgentId, initialAgentTab = "profile", preferredProjectAgentId = "", projectSelectionVersion, modulePins, moduleOrder, onModulePin, onModuleReorder, saveError = "", onRetrySave, onReloadSettings, onNavigate, onOpenPath, onRuntimeNavigate, onSaveRuntime, onRuntimeDirtyChange, onShortcuts, onPalette, onNavigationLockChange, onMandalaSaved }: {
   onNavigationLockChange: (locked: boolean) => void;
   onShortcuts: () => void;
   onPalette: () => void;
@@ -86,11 +114,12 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
   saveError?: string; onRetrySave: () => void; onReloadSettings: () => void|Promise<void>;
   onNavigate: (section: Section, objectId?: string) => void;
   onOpenPath: (path: string) => void;
+  onMandalaSaved: (config: Config, revision: string) => void;
 }) {
   const section = requestedSection === "agents" && initialProjectId && !initialAgentId ? "projects" : requestedSection;
   const {text: localize,  t, language, setLanguage, languages, errorText } = useLanguage();
   const [desktopCliBusy,setDesktopCliBusy]=useState(false);
-  useEffect(()=>{if(section!=='general')return;onNavigationLockChange(desktopCliBusy);return()=>onNavigationLockChange(false);},[desktopCliBusy,onNavigationLockChange,section]);
+  useEffect(()=>{if(section!=='cli')return;onNavigationLockChange(desktopCliBusy);return()=>onNavigationLockChange(false);},[desktopCliBusy,onNavigationLockChange,section]);
   const [blueprintBusy,setBlueprintBusy]=useState(false);
   useEffect(()=>{if(!blueprintBusy)return;onNavigationLockChange(true);return()=>onNavigationLockChange(false);},[blueprintBusy,onNavigationLockChange]);
   const locked = loading || runtimeSaving || desktopCliBusy || blueprintBusy;
@@ -202,16 +231,19 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
   const patchSystem = (patch: Partial<NonNullable<Config["system"]>>) => setDraft((d) => ({ ...d, system: { ...d.system, ...patch } }));
 
   const saveStatus=<div className="settings-autosave" role="status" hidden={!loading && !saveError && !saving && !dirty}><Icon name={saveError?'error':saving||loading||dirty?'refresh':'circleCheck'} size={15}/>{loading?t('正在读取配置…'):saveError?(t(saveError==='configuration changed'?'配置已在其他地方更新，当前修改尚未保存':'自动保存失败')):saving?t('保存中…'):dirty?t('等待自动保存'):t('所有修改已保存')}</div>;
-  return <div className={"settings-page app-shell"+(!objectSection?" settings-compact":"")}>
+  const page = settingsPages.flatMap(group => group.pages).find(item => item.id === section);
+  const openSettingsPath = (path: string) => (event: React.MouseEvent) => { if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); if (!locked) onOpenPath(path); };
+  return <div className={"settings-page app-shell"+(!objectSection?" settings-compact settings-unified":"")}>
     <AppSidebar navigation={navigation} open={mobileNav} onClose={() => onMobileNav(false)} />
     <main data-page-width={showDirectory?"standard":"compact"} ref={main} tabIndex={-1} className={"settings-main module-page"+(objectSection&&selectedObject&&!creatingProject&&!creatingAgent?" object-experience":"")} onScroll={event => { if (showDirectory) directoryScroll.current = event.currentTarget.scrollTop; }}>
       {objectSection&&!showDirectory&&<header className="settings-page-header"><SidebarToggle onClick={()=>onMobileNav(true)}/>{saveStatus}</header>}
       {loading && <LoadingState label={t("正在读取配置…")}/> }
       {saveError && <div className="settings-save-error" role="alert"><div><strong>{errorText(saveError)}</strong>{saveError === 'configuration changed' && <p>{t('请先重新读取最新配置，再核对修改。当前输入仍保留，重新读取将替换未保存的输入。')}</p>}</div>{saveError === 'configuration changed' ? <Button onClick={onReloadSettings}>{t("重新读取配置")}</Button> : <Button onClick={onRetrySave}>{t("重试自动保存")}</Button>}</div>}
       <div data-page-width={showDirectory?"standard":"compact"} data-page-canvas className={teamSection ? `object-settings-layout object-directory-layout${showDirectory ? "" : " has-detail"}${objectSection ? " independent-directory" : ""}` : "settings-compact-layout"}>
-      {!objectSection&&<PageHeader title={t('设置')} icon="settings" onMobileNav={()=>onMobileNav(true)} actions={saveStatus}/>}
-      <div className="object-settings-sidebar">{teamSection && !objectSection && <SettingsObjectBrowser config={draft} projectId={objectSection ? directoryProject?.id ?? '' : ''} agentId={objectSection && objectKind === 'agent' ? agent?.id ?? '' : ''} projectTab={section === 'projects' && !creatingProject ? projectTab : undefined} disabled={locked} query={projectSearch} onQuery={setProjectSearch} onNavigate={onOpenPath} onCreate={addProject} onCreateAgent={addAgent} loading={loading}/>}{!teamSection && <nav className="content-navigation" aria-label={t("设置与连接")}>{([["通用设置","/settings/general"],["执行端接入","/settings/runtimes"],["远程机器","/settings/execution-machines"],["MCP 连接","/settings/mcp"],["Skills","/mana/skills"],["系统任务","/settings/system"]] as const).map(([label,path])=><a key={path} href={path} aria-current={location.pathname===path||path==='/settings/runtimes'&&location.pathname.startsWith(path+'/')?'page':undefined} aria-disabled={locked||undefined} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();if(!locked)onOpenPath(path);}}>{label==='远程机器'?localize('远程机器','Remote machines'):label==='Skills'?label:label==='执行端接入'&&language !== 'zh-CN'?'CLI adapters':t(label)}</a>)}</nav>}</div>
+      {!objectSection&&<PageHeader title={page ? localize(...page.label) : t('设置')} icon={page?.icon ?? "settings"} onMobileNav={()=>onMobileNav(true)} actions={saveStatus}/>}
+      <div className="object-settings-sidebar">{teamSection && !objectSection && <SettingsObjectBrowser config={draft} projectId={objectSection ? directoryProject?.id ?? '' : ''} agentId={objectSection && objectKind === 'agent' ? agent?.id ?? '' : ''} projectTab={section === 'projects' && !creatingProject ? projectTab : undefined} disabled={locked} query={projectSearch} onQuery={setProjectSearch} onNavigate={onOpenPath} onCreate={addProject} onCreateAgent={addAgent} loading={loading}/>}{!teamSection && <nav className="settings-rail" aria-label={localize("设置", "Settings")}>{settingsPages.map(group => <div className="settings-rail-group" key={group.group[0]}><h2>{localize(...group.group)}</h2>{group.pages.map(item => { const path = settingsUrl(item.id); return <a key={item.id} href={path} aria-current={item.id === section ? 'page' : undefined} aria-disabled={locked || undefined} onClick={openSettingsPath(path)}>{localize(...item.label)}</a>; })}</div>)}</nav>}</div>
       <div className="object-settings-content">
+      {!objectSection && page?.description && <p className="settings-page-description">{localize(...page.description)}</p>}
 
       {!loading && ((section === 'agents' && initialAgentId && !agent && !creatingAgent) || (section === 'projects' && initialProjectId && !project)) && <Notice>{localize('此项目或智能体不可用，可能已被移除或你无权访问。', 'This item is unavailable. It may have been removed or you may not have access.')}</Notice>}
       {showDirectory && <WorkspaceDirectory status={saveStatus} onMobileNav={()=>onMobileNav(true)} kind={section === 'projects' ? 'projects' : 'agents'} config={draft} disabled={locked} loading={loading} query={objectSearch} onQuery={setObjectSearch} onNavigate={onOpenPath} onCreate={section === 'projects' ? addProject : addAgent}/>}
@@ -223,50 +255,60 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
       {error && <Notice className="form-error">{errorText(error)}</Notice>}
 
 
-      <fieldset className={"settings-page-body"+(section==="general"?" general-settings-body":"")} disabled={locked} style={loading || showDirectory ? {display:"none"}:undefined}>
-        {section === "general" && <section className="settings-card general-settings" aria-label={t("通用设置")}>
-          <h2>{t("语言")}</h2><div className="settings-form-row"><span>{localize("界面语言", "Interface language")}</span><Select ariaLabel="Language / 语言" value={language} onChange={value => { setLanguage(value); if (value === 'en' || value === 'zh-CN') patchSystem({ memory: { ...draft.system?.memory, language: value } }); }} options={languages}/></div>
-        </section>}
-        {section === "execution-machines" && !loading && <ExecutionMachinesSettings config={draft} disabled={locked} onChange={executionMachines=>setDraft(value=>({...value,executionMachines}))} onOpenPath={onOpenPath}/>}
-        {section === "general" && <DetailSection title={localize('项目蓝图','Project blueprint')}><label className="system-feature-toggle"><span>{localize('新项目默认开启蓝图','Enable blueprints for new projects')}</span><Input type="checkbox" role="switch" checked={!!draft.blueprintDefaultEnabled} onChange={event=>{const enabled=event.target.checked;setDraft(current=>({...current,blueprintDefaultEnabled:enabled}));}}/></label></DetailSection>}
-        {section === "general" && <ThemeSettings/>}
-        {section === "general" && <VoiceSettings/>}
-        {section === "general" && <DesktopCliSettings onBusyChange={setDesktopCliBusy}/>}
-        {section === "general" && <DesktopUpdateSettings/>}
-        {section === "general" && <DetailSection title={localize('快捷键', 'Keyboard shortcuts')}><p className="field-hint">{localize('查看对话和导航的快捷键。', 'View shortcuts for chats and navigation.')}</p><div className="settings-keyboard-actions"><Button type="button" onClick={onPalette}>{localize('打开命令面板', 'Open command palette')}<kbd className="shortcut-key" aria-hidden="true">{shortcutLabel('palette')}</kbd></Button><Button type="button" onClick={onShortcuts}>{localize('快捷键', 'Keyboard shortcuts')}</Button></div></DetailSection>}
-        {section === "general" && <DetailSection title={localize('新手指引', 'Getting started')}><p className="field-hint">{localize('重新检测本机 CLI，并按首次使用的步骤走一遍。不会改动已有对话、Agent 和项目。', 'Check the CLIs on this computer again and walk through first-use setup. Existing chats, Agents and Projects stay as they are.')}</p><div className="settings-keyboard-actions"><Button type="button" onClick={() => onOpenPath('/?welcome=1')}>{localize('打开新手指引', 'Open getting started')}</Button></div></DetailSection>}
-        {section === "general" && <section className="settings-card" aria-label={t("回答风格")}>
-          <div className="workspace-section-heading"><h2>{t("回答风格")}</h2></div>
-          <Field className="response-style-field" label={t("默认回答风格")} hint={t("Agent 默认继承此设置；保存后从下一次执行生效，当前执行和历史回答不变。")}>
-            <Select ariaLabel={t("默认回答风格")} searchable={false} value={effectiveResponseStyle(draft)}
-              onChange={value => setDraft(current => ({ ...current, responseStyle: value as ResponseStyle }))}
-              options={responseStyles.map(value => ({ value, label: t(responseStyleLabels[value]) }))} />
-          </Field>
-          <p className="field-hint">{t(responseStyleDescriptions[effectiveResponseStyle(draft)])}</p>
-        </section>}
-        {section === "general" && <section className="settings-card sidebar-module-settings" aria-label={t("侧边栏模块")}>
-          <h2>{t("侧边栏模块")}</h2>
-          <p className="field-hint">{localize('设置固定入口和顺序；未固定的入口仍可从底部用户菜单打开。', 'Choose pinned entries and their order. Other destinations remain available in the user menu.')}</p>
-          <p className="field-hint">{localize('拖动手柄排序，也可聚焦手柄后按上下方向键。', 'Drag a handle to reorder, or focus it and use the up/down arrow keys.')}</p>
+      <fieldset className="settings-page-body" disabled={locked} style={loading || showDirectory ? {display:"none"}:undefined}>
+        {section === "general" && <>
+          <SettingsGroup title={t("语言")}>
+            <SettingRow label={localize("界面语言", "Interface language")}><Select ariaLabel="Language / 语言" value={language} onChange={value => { setLanguage(value); if (value === 'en' || value === 'zh-CN') patchSystem({ memory: { ...draft.system?.memory, language: value } }); }} options={languages}/></SettingRow>
+          </SettingsGroup>
+          <SettingsGroup className="sidebar-module-settings" label={t("侧边栏模块")} title={t("侧边栏模块")} description={localize('设置固定入口和顺序；未固定的入口仍可从底部用户菜单打开。拖动手柄或聚焦后按上下方向键排序。', 'Choose pinned entries and their order. Other destinations remain available in the user menu. Drag a handle, or focus it and use the up/down arrow keys.')}>
           {orderedSidebarItems(moduleOrder).map((item,index) => <div className="module-visibility-row" key={item.id} onDragOver={event=>{if(moduleDrag.current)event.preventDefault();}} onDrop={event=>{event.preventDefault();const from=moduleOrder.indexOf(moduleDrag.current??'');if(from>=0&&from!==index)onModuleReorder(moduleDrag.current!,index-from);moduleDrag.current=null;}}>
             <Button type="button" className="icon-button module-order-handle" draggable aria-label={localize('调整'+t(item.label)+'顺序', 'Reorder '+(({tasks:'Tasks',projects:'Projects',agents:'Agents',library:'Library',schedules:'Schedules'} as Record<string,string>)[item.id]??t(item.label)))} title={localize('拖动或按上下方向键排序', 'Drag or use arrow keys')} onDragStart={event=>{moduleDrag.current=item.id;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',item.id);}} onDragEnd={()=>{moduleDrag.current=null;}} onKeyDown={event=>{if(event.key==='ArrowUp'||event.key==='ArrowDown'){event.preventDefault();onModuleReorder(item.id,event.key==='ArrowUp'?-1:1);}}}><Icon name="grip" size={16}/></Button>
             <label><Icon name={item.icon} size={18} /><span>{localize(item.label, ({tasks:'Tasks',projects:'Projects',agents:'Agents',library:'Library',schedules:'Schedules'} as Record<string,string>)[item.id]??t(item.label))}</span>
             <Input type="checkbox" role="switch" aria-label={t("显示{module}", { module: localize(item.label, ({tasks:'Tasks',projects:'Projects',agents:'Agents',library:'Library',schedules:'Schedules'} as Record<string,string>)[item.id]??t(item.label)) })}
               checked={modulePinned(item, modulePins)} onChange={event => onModulePin(item.id, event.target.checked)} /></label>
           </div>)}
-        </section>}
+          </SettingsGroup>
+          <SettingsGroup title={localize('帮助', 'Help')}>
+            <SettingRow label={localize('命令面板', 'Command palette')} hint={localize('搜索对话、页面和命令。', 'Search chats, pages and commands.')}><Button type="button" onClick={onPalette}>{localize('打开命令面板', 'Open command palette')}<kbd className="shortcut-key" aria-hidden="true">{shortcutLabel('palette')}</kbd></Button></SettingRow>
+            <SettingRow label={localize('快捷键', 'Keyboard shortcuts')} hint={localize('查看对话和导航的快捷键。', 'View shortcuts for chats and navigation.')}><Button type="button" onClick={onShortcuts}>{localize('快捷键', 'Keyboard shortcuts')}</Button></SettingRow>
+            <SettingRow label={localize('新手指引', 'Getting started')} hint={localize('重新检测本机 CLI，并按首次使用的步骤走一遍。不会改动已有对话、Agent 和项目。', 'Check the CLIs on this computer again and walk through first-use setup. Existing chats, Agents and Projects stay as they are.')}><Button type="button" onClick={() => onOpenPath('/?welcome=1')}>{localize('打开新手指引', 'Open getting started')}</Button></SettingRow>
+          </SettingsGroup>
+        </>}
+        {section === "appearance" && <>
+          <ThemeSettings/>
+          <PetSettings onBrowse={() => onOpenPath('/market?source=mandala-pets')}/>
+        </>}
+        {section === "input" && <VoiceSettings/>}
+        {section === "mandala" && !loading && <MandalaSettings onSaved={onMandalaSaved}/>}
+        {section === "defaults" && <>
+          <SettingsGroup title={localize('智能体', 'Agents')} label={t("回答风格")}>
+            <SettingRow label={t("默认回答风格")} hint={<>{t(responseStyleDescriptions[effectiveResponseStyle(draft)])}<br/>{t("Agent 默认继承此设置；保存后从下一次执行生效，当前执行和历史回答不变。")}</>}>
+              <Select ariaLabel={t("默认回答风格")} searchable={false} value={effectiveResponseStyle(draft)} onChange={value => setDraft(current => ({ ...current, responseStyle: value as ResponseStyle }))} options={responseStyles.map(value => ({ value, label: t(responseStyleLabels[value]) }))} />
+            </SettingRow>
+          </SettingsGroup>
+          <SettingsGroup title={localize('项目', 'Projects')}>
+            <SettingSwitch label={localize('新项目默认开启蓝图', 'Enable blueprints for new projects')} hint={localize('新建项目时自动开启项目蓝图；已有项目不受影响。', 'New projects start with the project blueprint on. Existing projects are unchanged.')} checked={!!draft.blueprintDefaultEnabled} onChange={enabled => setDraft(current => ({ ...current, blueprintDefaultEnabled: enabled }))}/>
+          </SettingsGroup>
+        </>}
+        {section === "memory" && <>
+          <SettingsGroup title={localize('读取', 'Reading')} description={<>{localize('记忆生成由系统任务完成，在', 'Memory generation runs as a system task; configure it in ')}<a href="/settings/system" onClick={openSettingsPath('/settings/system')}>{localize('系统任务', 'System tasks')}</a>{localize('中设置。', '.')}</>}>
+            <SettingSwitch label={t("请求记忆读取")} ariaLabel={t("请求记忆读取")} hint={localize('请求开始前按权限与项目范围加载相关记忆。', 'Load relevant memory, within permissions and Project scope, before each request.')} checked={draft.system?.memory?.request?.read ?? true} onChange={checked => patchSystem({ memory: { ...draft.system?.memory, request: { generate: draft.system?.memoryCapture ?? true, ...draft.system?.memory?.request, read: checked } } })}/>
+          </SettingsGroup>
+          <MemoryRetrievalSettings/>
+        </>}
+        {section === "messaging" && <SettingsGroup title="Telegram" scope={localize('仅这台电脑', 'This computer only')}><TelegramConnection/></SettingsGroup>}
+        {section === "cli" && <DesktopCliSettings onBusyChange={setDesktopCliBusy}/>}
+        {section === "about" && <DesktopUpdateSettings/>}
+        {section === "execution-machines" && !loading && <ExecutionMachinesSettings config={draft} disabled={locked} onChange={executionMachines=>setDraft(value=>({...value,executionMachines}))} onOpenPath={onOpenPath}/>}
         {section === "runtimes" && !loading && (location.pathname.split('/')[3] ? <RuntimeConfiguration key={location.pathname} config={draft} savedConfig={saved} onDraftChange={(cli,value,chatDefaults)=>setDraft(current=>({...current,runtimeDefaults:{...current.runtimeDefaults,[cli]:value[cli]},chatDefaults:{...current.chatDefaults,[cli]:chatDefaults?.[cli]}}))} target={location.pathname.split('/')[3]} locked={saving || dirty}
           onReload={onReloadSettings} onSave={onSaveRuntime} onNavigate={onRuntimeNavigate} onDirtyChange={onRuntimeDirtyChange}/> : <RuntimeConnections enabled={runtimes} defaults={saved.runtimeDefaults}
           refreshKey={catalogRefresh} onRefresh={() => refreshCatalog(n => n + 1)} onNavigate={onRuntimeNavigate}/>)}
         {section === "system" && <div className="system-settings">
-          <p className="field-hint">{t("系统任务使用独立原生 CLI 会话与已有原生认证，不进入用户对话。")}</p>
-          <section className="settings-card" aria-label={localize("系统默认", "System defaults")}>
-            <h2>{localize("系统默认", "System defaults")}</h2>
-            {!draft.system?.cli && <p className="field-hint">{localize("尚未选择。会话相关任务沿用来源会话；无来源会话的生成需先选择执行端。", "Not selected. Chat tasks use their source runtime; generation without a source chat requires a runtime selection.")}</p>}
-            <div className="settings-form-row"><span>{t("系统任务执行端")}</span><SegmentedControl label={t("系统任务执行端")} value={draft.system?.cli ?? ''} onChange={value => patchSystem({ cli: value as Cli, model: undefined })} options={runtimes.map(value => ({value,disabled:!supportsSystemTasks(value),label:<><RuntimeIcon cli={value}/>{runtimeLabel(value)}</>}))}/></div>
-            <div className="system-model-field"><span>{t("系统任务模型")}</span><ModelCatalogPicker ariaLabel={t("系统任务模型")} catalog={draft.system?.cli ? catalogs[draft.system.cli] : {choices:[],loading:false,error:""}} value={draft.system?.model ?? ""}
-              disabled={!draft.system?.cli || !runtimes.includes(draft.system.cli)} onChange={value => patchSystem({ model: value || undefined })} onRefresh={() => refreshCatalog(n => n + 1)} /></div>
-          </section>
+          <SettingsGroup title={localize("系统默认", "System defaults")} label={localize("系统默认", "System defaults")} description={!draft.system?.cli ? localize("尚未选择。会话相关任务沿用来源会话；无来源会话的生成需先选择执行端。", "Not selected. Chat tasks use their source runtime; generation without a source chat requires a runtime selection.") : undefined}>
+            <SettingRow label={t("系统任务执行端")}><Select icon="terminal" ariaLabel={t("系统任务执行端")} searchable={false} value={draft.system?.cli ?? ''} onChange={value => patchSystem({ cli: value as Cli, model: undefined })} options={[...(!draft.system?.cli ? [{ value: '', label: localize('选择执行端', 'Choose a CLI') }] : []), ...runtimes.map(value => ({ value, disabled: !supportsSystemTasks(value), label: runtimeLabel(value), icon: <RuntimeIcon cli={value}/> }))]}/></SettingRow>
+            <SettingRow label={t("系统任务模型")}><ModelCatalogPicker ariaLabel={t("系统任务模型")} catalog={draft.system?.cli ? catalogs[draft.system.cli] : {choices:[],loading:false,error:""}} value={draft.system?.model ?? ""}
+              disabled={!draft.system?.cli || !runtimes.includes(draft.system.cli)} onChange={value => patchSystem({ model: value || undefined })} onRefresh={() => refreshCatalog(n => n + 1)} /></SettingRow>
+          </SettingsGroup>
           {(["title", "memory", "taskProgress"] as const).map(kind => {
             const profile = draft.system?.tasks?.[kind];
             const selectedCli = profile?.cli ?? "";
@@ -275,34 +317,24 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
               const cli = changes.cli ?? effectiveCli;
               if (cli) patchSystem({tasks:{...draft.system?.tasks,[kind]:{...profile,...changes,cli}}});
             };
-            return <section key={kind} className="settings-card system-task-profile" aria-label={t(kind === "title" ? "自动标题" : kind === "memory" ? "记忆提炼" : "任务进度评估")}>
-              <h2>{t(kind === "title" ? "自动标题" : kind === "memory" ? "记忆提炼" : "任务进度评估")}</h2>
-              <p className="field-hint">{kind === "memory" ? (localize("请求结束后提炼事实，整合场景知识与长期上下文。生成与读取可独立控制。", "Extract facts after requests, then consolidate scenes and stable context. Generation and reading have separate controls.")) : t(kind === "title" ? "对话完成后自动命名；适合轻量模型。" : "每轮结束后评估已关联任务；达成目标进入待验收，完成由你确认。")}</p>
-              {kind === "title" ? <label className="system-feature-toggle"><span>{t("自动运行")}</span><Input type="checkbox" role="switch" aria-label={t("自动生成对话标题")}
-                checked={draft.system?.automaticTitles ?? false} onChange={e => patchSystem({ automaticTitles: e.target.checked })} /></label> : kind === "taskProgress" ? <label className="system-feature-toggle"><span>{t("自动运行")}</span><Input type="checkbox" role="switch" aria-label={t("任务进度评估")} checked={draft.system?.automaticTaskProgress ?? true} onChange={e => patchSystem({automaticTaskProgress:e.target.checked})}/></label> : kind === "memory" && <>
-                {(["generate", "read"] as const).map(control => {
-                  const label = control === "generate" ? "请求记忆生成" : "请求记忆读取";
-                  return <label key={control} className="system-feature-toggle"><span>{t(label)}</span><Input type="checkbox" role="switch" aria-label={t(label)}
-                    checked={draft.system?.memory?.request?.[control] ?? (control === "generate" ? draft.system?.memoryCapture ?? true : true)} onChange={e => patchSystem({ memory: {
-                      ...draft.system?.memory, request: { generate: draft.system?.memoryCapture ?? true, read: true, ...draft.system?.memory?.request, [control]: e.target.checked },
-                    } })} /></label>;
-                })}
-                {!(draft.system?.memory?.request?.generate??draft.system?.memoryCapture??true)&&<Notice>{localize('生成关闭期间的新内容不会自动补记；重新开启仅处理后续内容。', 'New content is excluded while memory generation is off. Re-enabling applies to future content.')}</Notice>}
-              </>}
-              <div className="system-profile-fields">
-                <label>{t("执行端")}<Select icon="terminal" ariaLabel={t("执行端")} value={selectedCli} searchable={false} onChange={value => {
+            const title = t(kind === "title" ? "自动标题" : kind === "memory" ? "记忆提炼" : "任务进度评估");
+            const generate = draft.system?.memory?.request?.generate ?? draft.system?.memoryCapture ?? true;
+            return <SettingsGroup key={kind} className="system-task-profile" label={title} title={title} description={kind === "memory" ? localize("请求结束后提炼事实，整合场景知识与长期上下文。", "Extract facts after requests, then consolidate scenes and stable context.") : t(kind === "title" ? "对话完成后自动命名；适合轻量模型。" : "每轮结束后评估已关联任务；达成目标进入待验收，完成由你确认。")}>
+              {kind === "title" && <SettingSwitch label={t("自动运行")} ariaLabel={t("自动生成对话标题")} checked={draft.system?.automaticTitles ?? false} onChange={checked => patchSystem({ automaticTitles: checked })}/>}
+              {kind === "taskProgress" && <SettingSwitch label={t("自动运行")} ariaLabel={t("任务进度评估")} checked={draft.system?.automaticTaskProgress ?? true} onChange={checked => patchSystem({ automaticTaskProgress: checked })}/>}
+              {kind === "memory" && <SettingSwitch label={t("请求记忆生成")} ariaLabel={t("请求记忆生成")} hint={!generate ? localize('生成关闭期间的新内容不会自动补记；重新开启仅处理后续内容。', 'New content is excluded while memory generation is off. Re-enabling applies to future content.') : undefined} checked={generate} onChange={checked => patchSystem({ memory: {
+                ...draft.system?.memory, request: { read: true, ...draft.system?.memory?.request, generate: checked },
+              } })}/>}
+              <SettingRow label={t("执行端")} hint={effectiveCli && !runtimes.includes(effectiveCli) ? t("所选执行端已停用；请在执行端接入中启用，或选择其他执行端。") : undefined}><Select icon="terminal" ariaLabel={t("执行端")} value={selectedCli} searchable={false} onChange={value => {
                   if (!value) { const tasks = { ...draft.system?.tasks }; delete tasks[kind]; patchSystem({ tasks }); }
                   else patchProfile({ cli: value as Cli, model: undefined });
-                }} options={[{ value: "", label: draft.system?.cli ? `${t("沿用系统默认")} · ${runtimeLabel(draft.system.cli)}` : localize("沿用来源会话执行端", "Use the source chat runtime") }, ...runtimes.map(cli => ({ value: cli, disabled:!supportsSystemTasks(cli), label: runtimeLabel(cli), icon: <RuntimeIcon cli={cli}/> })), ...(profile && !runtimes.includes(profile.cli) ? [{ value: profile.cli, label: `${runtimeLabel(profile.cli)} · ${t("已停用")}`, disabled: true }] : [])]} /></label>
-                <div className="system-model-field"><span>{t("模型")}</span><ModelCatalogPicker catalog={effectiveCli ? catalogs[effectiveCli] : {choices:[],loading:false,error:""}} value={profile?.model ?? ""} onChange={value => {if(!value&&!profile){const tasks={...draft.system?.tasks};delete tasks[kind];patchSystem({tasks});}else patchProfile({ model: value || undefined });}}
-                  defaultLabel={profile ? t("留空，沿用原生默认模型") : `${t("沿用系统默认")} · ${draft.system?.model || t("留空，沿用原生默认模型")}`} disabled={!effectiveCli || !runtimes.includes(effectiveCli)} onRefresh={() => refreshCatalog(n => n + 1)} /></div>
-              </div>
-              {effectiveCli && !runtimes.includes(effectiveCli) && <p className="field-hint">{t("所选执行端已停用；请在执行端接入中启用，或选择其他执行端。")}</p>}
+                }} options={[{ value: "", label: draft.system?.cli ? `${t("沿用系统默认")} · ${runtimeLabel(draft.system.cli)}` : localize("沿用来源会话执行端", "Use the source chat runtime") }, ...runtimes.map(cli => ({ value: cli, disabled:!supportsSystemTasks(cli), label: runtimeLabel(cli), icon: <RuntimeIcon cli={cli}/> })), ...(profile && !runtimes.includes(profile.cli) ? [{ value: profile.cli, label: `${runtimeLabel(profile.cli)} · ${t("已停用")}`, disabled: true }] : [])]} /></SettingRow>
+              <SettingRow label={t("模型")}><ModelCatalogPicker catalog={effectiveCli ? catalogs[effectiveCli] : {choices:[],loading:false,error:""}} value={profile?.model ?? ""} onChange={value => {if(!value&&!profile){const tasks={...draft.system?.tasks};delete tasks[kind];patchSystem({tasks});}else patchProfile({ model: value || undefined });}}
+                  defaultLabel={profile ? t("留空，沿用原生默认模型") : `${t("沿用系统默认")} · ${draft.system?.model || t("留空，沿用原生默认模型")}`} disabled={!effectiveCli || !runtimes.includes(effectiveCli)} onRefresh={() => refreshCatalog(n => n + 1)} /></SettingRow>
               {kind === "memory" && <Disclosure title={localize('记忆行为说明', 'Memory behavior')}><p className="field-hint">{localize('关闭生成期间的新内容不会在重新开启后自动补记。重新开启默认只处理后续内容；已有深层记忆任务暂停后继续。', 'When generation is off, new content is excluded from automatic memory. Re-enabling applies to future content. Existing deep-memory work pauses and resumes.')}</p><p className="field-hint">{t("记忆保留工作来源，按当前权限与项目范围加载；可在记忆页纠正或撤回。")}</p></Disclosure>}
-            </section>;
+            </SettingsGroup>;
           })}
-          <MemoryRetrievalSettings/>
-          <Disclosure className="settings-help settings-card" title={<> <Icon name="settings" size={16} />{t("系统默认与运行说明")} </>}>
+          <Disclosure className="settings-help" title={<> <Icon name="info" size={16} />{t("系统默认与运行说明")} </>}>
             <p>{t("标题默认关闭，记忆生成与读取默认开启。生成任务使用所选 CLI 和模型，产生模型用量。")}</p>
             <p>{t("系统任务不加载 Project 与 Agent 能力；CLI 的全局扩展仍可能启动。")}</p>
             <p>{t("认证继续由原生 CLI 管理；此处不保存凭据或另设 API 密钥。")}</p>
@@ -350,7 +382,7 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
         {section === "mcp" && <CapabilityCatalog config={draft} savedConfig={saved} mode="mcp" onChange={patch => setDraft(d => ({ ...d, ...patch }))} />}
         {section === "skills" && <SkillLibrary config={draft} onChange={setDraft} onReload={onReloadSettings} busy={saving||JSON.stringify(draft)!==JSON.stringify(saved)} />}
       </fieldset>
-      {!showDirectory && section !== "general" && section !== "system" && section !== "agents" && section !== "runtime" && <Disclosure className="settings-help settings-page-footer" title={<> <Icon name="info" size={16} />{t("配置说明")} </>}>
+      {!showDirectory && ["projects", "runtimes", "execution-machines", "mcp", "skills"].includes(section) && <Disclosure className="settings-help settings-page-footer" title={<> <Icon name="info" size={16} />{t("配置说明")} </>}>
         <p>{t("默认执行端和模型用于新对话；职责与能力变更在下次执行前尝试加载，实际结果请查看生效状态。主工作目录变更请开启新对话。")}</p>
         <p>{t("保存配置会保存所有分类和对象的草稿修改。")}</p>
       </Disclosure>}

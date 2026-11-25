@@ -147,7 +147,7 @@ Every module page reads the same way:
 4. **Space, not rules.** No rule under the header or the toolbar.
 5. **Rules belong to lists.** Rows of one list are separated by a `--border-soft` hairline between rows only, none above the first row or below the last. Section breaks inside a page also use `--border-soft`; `--border` is for control outlines.
 6. **Cards** group only meaningful bounded content (Market items, change groups). No card nested in a card for visual separation.
-7. Settings uses the shared horizontal content navigation. Object breadcrumbs carry a real source or parent relationship. Detail views keep a reachable sidebar entry and configuration save feedback.
+7. Settings uses a grouped left rail beside the page (a horizontal strip below 768px). Object breadcrumbs carry a real source or parent relationship. Detail views keep a reachable sidebar entry and configuration save feedback.
 
 ## 7. Components
 
@@ -201,10 +201,29 @@ Bubbles are speech; bordered cards are objects. The rule is the same in every ch
 
 ### Settings
 
-- Language comes first, with English first in the built-in list. Fresh installations and context fallback use English; saved language choices are authoritative.
-- Settings and object settings (Project, Agent) are forms: groups are unboxed sections with a section heading, separated by a `--border-soft` rule, with no card frame and no card inside a group. Overview pages keep their bounded summary cards.
-- General setting groups share 16px / 600 headings and one left edge, without decorative heading icons. Display mode and Colors and background are 14px / 500 subsections of appearance. Background image lives in the theme group and is part of theme import/export.
-- Routine automatic-save banners are hidden; active file reads and unsaved or error recovery stay visible.
+Settings are grouped by who a setting affects. Each page answers one question; a setting lives on exactly one page, and other places link to it.
+
+| Group | Pages | Meaning |
+| --- | --- | --- |
+| Preferences | General, Appearance, Input and voice | How I use Mandala; mostly this device |
+| Workspace | Mandala, Defaults, System tasks, Memory | How Agents work, and what they cost |
+| Connections | CLI adapters, Remote machines, MCP, Skills, Phone and messaging | External capabilities; resource lists |
+| App | Command line, About and updates | The desktop app itself |
+
+- **Rail and page.** A grouped rail (`settings-rail`) sits beside the page; the page header names the selected page with a one-line description. Language comes first on General, with English first in the built-in list. Fresh installations and context fallback use English; saved language choices are authoritative.
+- **Groups.** Settings and object settings (Project, Agent) are forms: a group (`SettingsGroup`) is an unboxed section with a 16px / 600 heading, an optional scope tag ("This device only", "Applies from the next turn") and heading actions on the right. Groups are separated by a `--border-soft` rule; no card frame and no card inside a group. Overview pages keep their bounded summary cards.
+- **Rows.** Every setting is one of these rows (`src/ui/SettingsLayout.tsx`):
+  - *Standard row* — name (`--type-body` / 500) and an optional hint on the left, the control right-aligned. Selects and short fields are 240px.
+  - *Switch row* — every on/off setting is a right-aligned switch. Checkboxes are only for multi-select lists.
+  - *Segmented row* — two or three short choices. Four or more, or choices with icons, use a select.
+  - *Stacked row* — long text, paths and lists put a full-width control below the name.
+  - *Status row* — a status mark with text, plus an inline action (Check again, Register).
+  - *Resource row* — connections, machines and models: name and metadata on the left, state and row actions on the right; the selected row uses `--accent-bg`. Adding a resource is a heading action, never a control appended below the list.
+  - Visual choices (themes, pets) use a tile grid across the full row.
+- **Saving.** Changes save as soon as they are made; text saves on a short pause. Pages never show Save or Cancel for ordinary settings: the page header shows saving, failure and retry, and routine success stays quiet. Buttons are for actions with side effects — download, test a connection, bind, install, delete, save a secret — and sit inside their row or group heading. Connecting an external service that receives data (vector retrieval) is saved only when confirmed. Destructive actions confirm in place or in a dialog, never in a panel expanding below the page.
+- **Timing and scope.** When a change takes effect is stated with one of three phrases: "from the next turn", "from the next execution", "after restart". Where a setting is stored is a scope tag on the group, not a sentence in the hint.
+- Display mode and Colors and background are 14px / 500 subsections of the Theme group. Background image lives in the theme group and is part of theme import/export.
+- The system Agent (Mandala) is configured on its own settings page; its header button and the Agents directory open that page rather than a dialog.
 
 ### Library and Memory
 
@@ -243,6 +262,7 @@ Review is required for each changed module, independent of tests: light and dark
 
 | Date | Change |
 | --- | --- |
+| 2026-11-25 | Settings grouped into Preferences / Workspace / Connections / App with a grouped rail; one row grammar (standard, switch, segmented, stacked, status, resource) and save-as-you-go; Mandala settings move from a dialog to a page. |
 | 2026-11-25 | Chat operation cards: one header line and always-visible rows; replies summarized by Mandala with originals folded under the summary. |
 | 2026-11-05 | Design system rewritten as one current document. Visual language v2: cool neutrals, indigo interaction accent, Geist; system mode by default. Page anatomy, type roles and stylesheet guards. |
 | 2026-11-04 | Speech and objects in chat; Task lanes, one Task dialog and execution chats replace subtasks. |
