@@ -162,6 +162,8 @@
 .runtime-connection h2 small { color: var(--muted); font-size: var(--control-font-size); }
 .runtime-configuration > fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .runtime-configuration code { overflow-wrap: anywhere; }
+.runtime-setup-guide { display: grid; justify-items: start; gap: var(--space-1); font-size: var(--type-meta); color: var(--muted); }
+.runtime-setup-guide > small { font-size: inherit; }
 .runtime-connections > .settings-section-title { flex-wrap: wrap; gap: 12px; }
 
 .runtime-connections .runtime-actions .primary { color: var(--button-text); font-size: var(--control-font-size); }

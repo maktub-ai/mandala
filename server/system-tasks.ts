@@ -8,7 +8,8 @@ import type { ExecutionClient } from './execution-client';
 import { startCodex } from './codex';
 import { startOmp } from "./omp";
 import { startNativeRuntime } from "./native-runtime";
-import { systemRuntime } from "./runtime";
+import { bindLocalCatalogLauncher, systemRuntime } from "./runtime";
+import { refreshDesktopRuntimePath } from './native-spawn';
 import { createKnowledge, readKnowledge } from "./knowledge";
 import type { Store } from "./store";
 import { createTaskProgress, type ProgressTaskService, type TaskProgressRound } from "./task-progress";
@@ -81,8 +82,11 @@ export const nativeGenerate: SystemGenerator = async (config, prompt, signal, us
   try {
     if (signal.aborted) throw cancelled();
     const restrictedOptions = { ...options, model:config.model, ...systemRuntime(config.cli, config.runtimeDefaults) };
-    client = config.cli === "codex" ? await startCodex(restrictedOptions) : config.cli !== "omp" ? await startNativeRuntime(config.cli, restrictedOptions) : await startOmp({
-      ...restrictedOptions, instructions, model: config.model, ephemeral: true, extraArgs: ["--no-tools",...(config.thinking?['--thinking='+config.thinking]:[])],
+    const env = await refreshDesktopRuntimePath(config.cli, restrictedOptions.env);
+    if (signal.aborted) throw cancelled();
+    const launchOptions = env === restrictedOptions.env ? restrictedOptions : { ...restrictedOptions, env, [bindLocalCatalogLauncher]: true as const };
+    client = config.cli === "codex" ? await startCodex(launchOptions) : config.cli !== "omp" ? await startNativeRuntime(config.cli, launchOptions) : await startOmp({
+      ...launchOptions, instructions, model: config.model, ephemeral: true, extraArgs: ["--no-tools",...(config.thinking?['--thinking='+config.thinking]:[])],
     });
     if (settled || signal.aborted) { client.close(); throw cancelled(); }
     stage = "thread";

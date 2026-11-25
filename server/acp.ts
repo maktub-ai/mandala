@@ -94,7 +94,7 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
  };
  const cli=options.runtimeCli, policy=runtimeCapabilities(cli), gatewayBacked=policy.gateway;
  const setupTimeout=gatewayBacked?45000:15000,lifetime=new AbortController();
- let handle:AcpRuntimeHandle|undefined,nativeTurn:AcpRuntimeTurn|undefined,servers:AcpMcpServer[]=[],stderr='';
+ let handle:AcpRuntimeHandle|undefined,nativeTurn:AcpRuntimeTurn|undefined,servers:AcpMcpServer[]=[],stderr='',agentStarted=false;
  // Mandala persists native session IDs. acpx records only cache this connection;
  // every later attachment explicitly resumes the same native session.
  const records=new Map<string,AcpSessionRecord>();
@@ -123,7 +123,7 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
    if(!(Array.isArray(launch.stdio)&&launch.stdio[0]==='ignore')){
     if(!options.safeSystem)advertiseAcpSubagents(child.stdin);
     child.stdout=normalizeAcpSessionOutput(child.stdout,cli,(id,meta)=>subagents.owner(id,meta)===undefined);
-    child.once('spawn',()=>{if(child.pid)agentPids.add(child.pid);});
+    child.once('spawn',()=>{agentStarted=true;if(child.pid)agentPids.add(child.pid);});
    }
    const stop=()=>{child.kill('SIGTERM');};
    lifetime.signal.addEventListener('abort',stop,{once:true});
@@ -174,7 +174,7 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
  options.signal?.addEventListener('abort',abort,{once:true});
  let initialized;
  try {options.signal?.throwIfAborted();initialized=await bounded(runtime.doctor(),setupTimeout);if(!initialized.ok)throw new Error(initialized.details?.at(-1)??initialized.message);}
- catch(error){await close();throw Object.assign(new Error(runtimeError(redact(String(error)),redact(stderr))), {code: 'runtime-acp-handshake-failed'});}
+ catch(error){await close();throw Object.assign(new Error(runtimeError(redact(String(error)),redact(stderr))), {code:agentStarted?'runtime-acp-handshake-failed':'runtime-acp-launch-failed'});}
  const capabilities=initialized.agentCapabilities;
  const strictResume=options.runtimeCli==='openclaw';
  const nativeResume=Boolean(capabilities?.sessionCapabilities?.resume);

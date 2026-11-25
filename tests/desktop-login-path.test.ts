@@ -8,7 +8,7 @@ test.skipIf(process.platform === 'win32')('login PATH probe falls back when a sh
  const directory=mkdtempSync(join(tmpdir(),'mandala-path-probe-'));
  const shell=join(directory,'shell'),pidFile=join(directory,'pid');
  writeFileSync(shell,`#!${process.execPath}\nimport {writeFileSync} from 'node:fs';\nwriteFileSync(process.env.PROBE_PID,String(process.pid));\nprocess.on('SIGTERM',()=>{});\nsetInterval(()=>{},1000);\n`,{mode:0o700});
- const child=spawn(process.execPath,['--import','tsx','--input-type=module','-e',"import {loginShellPath} from './desktop/runtime.ts';process.stdout.write(loginShellPath());"],{env:{...process.env,SHELL:shell,PROBE_PID:pidFile},stdio:['ignore','pipe','ignore']});
+  const child=spawn(process.execPath,['--import','tsx','--input-type=module','-e',"import {loginShellPath} from './desktop/runtime.ts';process.stdout.write(await loginShellPath());"],{env:{...process.env,SHELL:shell,PROBE_PID:pidFile},stdio:['ignore','pipe','ignore']});
  let output='';child.stdout.on('data',data=>{output+=data;});
  const watchdog=setTimeout(()=>child.kill('SIGKILL'),13000);
  try {

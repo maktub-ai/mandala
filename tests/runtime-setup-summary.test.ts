@@ -49,6 +49,30 @@ it.each([
 });
 
 it.each([
+  ['missing', 'Launcher not found', 'PATH 中未找到启动命令'],
+  ['broken', 'link points to a missing file', '链接指向不存在的文件'],
+  ['blocked', 'not executable', '该文件不能执行'],
+] as const)('reports a %s launcher before an ACP handshake error', (executable, english, chinese) => {
+  const status = { status: 'unavailable', version: null, diagnostics: { host: 'local', executable, probe: 'failed', auth: 'not-verified', failureStage: 'handshake' } } satisfies CliStatus;
+  const element = createElement(RuntimeProbeSummary, { status });
+  const en = renderToStaticMarkup(element), zh = renderChineseMarkup(element);
+  expect(en).toContain(english);
+  expect(en).not.toContain('handshake');
+  expect(zh).toContain(chinese);
+  expect(zh).not.toContain('握手');
+});
+
+it('explains that OpenCode ships its own ACP mode and links to usage, not another installer', () => {
+  const element = createElement(RuntimeSetup, { cli: 'opencode' });
+  const en = renderToStaticMarkup(element), zh = renderChineseMarkup(element);
+  expect(en).toContain('opencode acp');
+  expect(en).toContain('no separate adapter installation is required');
+  expect(en).toContain('Official OpenCode ACP guide');
+  expect(zh).toContain('OpenCode 官方 ACP 使用说明');
+  expect(zh).not.toContain('官方安装说明');
+});
+
+it.each([
  ['hermes','https://hermes-agent.nousresearch.com/docs/user-guide/features/acp',
   'Requires the Hermes ACP extra and a running Hermes Gateway with a configured model provider',
   '需要 Hermes ACP 扩展，以及已配置模型服务且正在运行的 Hermes Gateway'],

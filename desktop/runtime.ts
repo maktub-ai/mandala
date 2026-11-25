@@ -4,6 +4,7 @@ export { claimServiceHome } from '../server/service-home-lock';
 export { desktopCliStatus, installDesktopCli } from './cli-registration';
 export { readDesktopPreferences, writeDesktopPreference } from './preferences';
 export { readDesktopAppearance, writeDesktopAppearance } from './appearance';
+export { loginShellPath } from './login-shell-path';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { existsSync, readdirSync, statSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -15,13 +16,6 @@ import { productHome } from '../cli/product-env.mjs';
 
 export function resolveDesktopHome(env: NodeJS.ProcessEnv = process.env, userHome = homedir()): string {
   return resolve(productHome('workspace', env, userHome));
-}
-export function loginShellPath(env: NodeJS.ProcessEnv = process.env): string {
-  if (process.platform === 'win32') return env.PATH ?? '';
-  try {
-    const output = execFileSync(env.SHELL || '/bin/zsh', ['-ilc', 'printf "\\nMANDALA_PATH=%s\\n" "$PATH"'], { env, encoding: 'utf8', timeout: 10000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024 });
-    return output.split('\n').find(line => line.startsWith('MANDALA_PATH='))?.slice(13) ?? env.PATH ?? '';
-  } catch { return env.PATH ?? ''; }
 }
 export function desktopEnvironment({ env = process.env, home, runtime, userHome = homedir(), platform = process.platform, loginPath = '' }: {
   env?: NodeJS.ProcessEnv; home: string; runtime: string; userHome?: string; platform?: string; loginPath?: string;

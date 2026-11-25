@@ -59,7 +59,7 @@ export const officialRuntimeSetup:Record<Cli,OfficialRuntimeSetup> = {
   omp:{method:'native-release',source:'Oh My Pi releases'},
   claude:{method:'vendor',source:'Claude Code'},
   gemini:{method:'npm',source:'@google/gemini-cli'},
-  opencode:{method:'native-release',source:'OpenCode standalone'},
+  opencode:{method:'native-release',source:'OpenCode CLI'},
   codebuddy:{method:'npm',source:'@tencent-ai/codebuddy-code',nodeMinimum:'18.20'},
   pi:{method:'npm',source:'@earendil-works/pi-coding-agent',nodeMinimum:'22.19'},
   cursor:{method:'vendor',source:'Cursor Agent CLI'},

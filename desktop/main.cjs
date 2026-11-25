@@ -132,7 +132,8 @@ async function start() {
     app.dock?.hide();
   }
   const runtime = app.isPackaged ? join(process.resourcesPath, 'runtime') : join(__dirname, '..', '.runtime');
-  const env = desktopEnvironment({ home, runtime, loginPath: loginShellPath() });
+  const env = desktopEnvironment({ home, runtime, loginPath: await loginShellPath() });
+  if (stopping || finished) return;
   const gatewayHome=join(home,'account-gateway'); prepareDesktopHome(gatewayHome);
   const build = readRuntimeBuild(runtime);
   if (app.isPackaged && !build) throw Error('The installed Mandala build information is missing or invalid.');
@@ -243,7 +244,7 @@ async function start() {
     if (event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || !allowedNavigation(event.senderFrame?.url ?? '', service.origin)) return { ok: false, error: 'Untrusted command registration request' };
     try {
       if (!request || typeof request !== 'object' || Array.isArray(request) || Object.keys(request).length !== 1 || !['status', 'install'].includes(request.action)) throw Error('Invalid command registration request');
-      const options = { runtime, home:profileHome, path: loginShellPath() };
+      const options = { runtime, home:profileHome, path: await loginShellPath() };
       return { ok: true, value: request.action === 'install' ? installDesktopCli(options) : desktopCliStatus(options) };
     } catch (error) { return { ok: false, error: error.message || 'Could not register the desktop command' }; }
   });

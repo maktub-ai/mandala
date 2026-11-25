@@ -1,4 +1,4 @@
-import {diagnoseRuntimePrerequisites} from './native-spawn';
+import {diagnoseRuntimePrerequisites, refreshDesktopRuntimePath} from './native-spawn';
 import {createBlueprintService} from './blueprint';
 import {blueprintBindings,canPublishBlueprint} from './blueprint-bindings';
 import {createBlueprintRuntime,type WorkerBlueprint} from './blueprint-runtime';
@@ -404,11 +404,16 @@ export function createSessionManager(
     const policy=configuredRuntime(cli,executionRuntimePolicy(cli,context.agent,config.runtimeDefaults));
     return {extraArgs:policy.args,...('fullAccess'in policy?{fullAccess:policy.fullAccess}:{}),...(policy.gateway?{gateway:policy.gateway}:{})};
   };
-  const startClient = async(cli:Cli,options:RuntimeOptions|OmpOptions,context:ReturnType<typeof conversationContext>|undefined,id:string,config:Config,mode:'session'|'inspect'|'fork'='session') => {
+  const startClient = async(cli:Cli,options:RuntimeOptions|OmpOptions,context:ReturnType<typeof conversationContext>|undefined,id:string,config:Config,mode:'session'|'inspect'|'fork'='session',diagnostics?:NonNullable<CliStatus['diagnostics']>) => {
     const isolated=mode!=='session',attachOnly=mode==='inspect',runtimeId=mode==='fork'?'fork-'+randomUUID():id;
     const location=context?.executionLocation;
     const remote=location&&isolated?await connectSshExecution({id:location.machineId,name:location.machineName,host:location.host},{home,conversationId:runtimeId}):context?await remoteFor(context,id):undefined;
-    if(!remote)return factory(cli)({...options,[bindLocalCatalogLauncher]:true});
+    if(!remote){
+      const env=await refreshDesktopRuntimePath(cli,options.env);
+      options.signal?.throwIfAborted();
+      if(diagnostics)Object.assign(diagnostics,diagnoseRuntimePrerequisites(cli,{...process.env,...env}));
+      return factory(cli)({...options,...(env!==options.env?{env}:{}),[bindLocalCatalogLauncher]:true});
+    }
     try{return await initialize(async()=>{
       const policy=executionRuntimePolicy(cli,context!.agent,config.runtimeDefaults);
       const client=await (attachOnly?remote.start(cli,options,policy,true):remote.start(cli,options,policy)),close=client.close.bind(client);
@@ -2106,9 +2111,6 @@ export function createSessionManager(
       const withDetails=(value:CliStatus):CliStatus=> explain?{...value,diagnostics:diag}:value;
       try {
         const options=runtimeOptions(cli,context,config,scope);
-        if(explain&&diag.host==='local'){
-          Object.assign(diag,diagnoseRuntimePrerequisites(cli,{...process.env,...options.env}));
-        }
         stage='launch';
         client = await startClient(cli,{
           cwd,
@@ -2119,7 +2121,7 @@ export function createSessionManager(
           onApproval() {},
           onExit() {},
           ...(cli === "omp" ? { ephemeral: true } : {}),
-        },context,catalogId,config);
+        },context,catalogId,config,'session',explain?diag:undefined);
         stage='probe';
         const {nativeAccountPresent,nativeVersion,capabilityIssue,...value}=await client.getStatus(explain);
         if(explain&&nativeVersion)diag.nativeVersion=nativeVersion;

@@ -2,7 +2,9 @@ import {runtimeCatalog} from '../shared/runtimes';
 import type {Cli,CliStatus} from '../shared/types';
 import { windowsSystemBinary } from '../cli/windows-system.mjs';
 import { productEnv } from '../cli/product-env.mjs';
+import { loginShellPath } from '../desktop/login-shell-path';
 import { accessSync, constants, lstatSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join, resolve, win32 } from 'node:path';
 import crossSpawn from 'cross-spawn';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +47,28 @@ export function diagnoseRuntimePrerequisites(cli: Cli, env: NodeJS.ProcessEnv = 
   const executable = resolveClaudeLauncher(env).state;
   return {executable, ...(env.CLAUDE_CODE_EXECUTABLE && executable !== 'executable' ? {requiredDependency: 'claude-override-unavailable'} : {})};
 }
+
+let pendingLoginPath: Promise<string> | undefined;
+/** Recheck a missing desktop launcher without replacing explicit runtime choices or the daemon's PATH. */
+export async function refreshDesktopRuntimePath(cli: Cli, runtimeEnv?: Record<string, string>): Promise<Record<string, string> | undefined> {
+  if (process.platform !== 'darwin' || productEnv('DESKTOP') !== '1' || Object.hasOwn(runtimeEnv ?? {}, 'PATH')) return runtimeEnv;
+  const env = { ...process.env, ...runtimeEnv };
+  if ((cli === 'claude' && env.CLAUDE_CODE_EXECUTABLE) || diagnoseRuntimePrerequisites(cli, env).executable === 'executable') return runtimeEnv;
+
+  const home = homedir();
+  if (!isAbsolute(home)) return runtimeEnv;
+  const { PATH, SHELL, USER, LOGNAME, LANG, TERM, TMPDIR, ZDOTDIR } = process.env;
+  // Concurrent checks share one probe; the next check can see newly installed
+  // tools. Never send request-specific variables or daemon secrets to the shell.
+  const discovered = await (pendingLoginPath ??= loginShellPath({ HOME: home, PATH, SHELL, USER, LOGNAME, LANG, TERM, TMPDIR, ZDOTDIR }, home)
+    .finally(() => { pendingLoginPath = undefined; }));
+  const candidates = discovered.split(delimiter).filter(isAbsolute);
+  if (cli === 'opencode') candidates.push(join(home, '.opencode', 'bin'));
+  const refreshed = [...new Set([...(env.PATH ?? '').split(delimiter).filter(Boolean), ...candidates])].join(delimiter);
+  return diagnoseRuntimePrerequisites(cli, { ...env, PATH: refreshed }).executable === 'executable'
+    ? { ...runtimeEnv, PATH: refreshed } : runtimeEnv;
+}
+
 export function resolveNativeCli(command: string, env: NodeJS.ProcessEnv = process.env): string {
   const found=diagnoseNativeCli(command,env);
   if(found.state==='executable')return found.path;
