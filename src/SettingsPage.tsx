@@ -309,7 +309,7 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
             <SettingRow label={t("系统任务模型")}><ModelCatalogPicker ariaLabel={t("系统任务模型")} catalog={draft.system?.cli ? catalogs[draft.system.cli] : {choices:[],loading:false,error:""}} value={draft.system?.model ?? ""}
               disabled={!draft.system?.cli || !runtimes.includes(draft.system.cli)} onChange={value => patchSystem({ model: value || undefined })} onRefresh={() => refreshCatalog(n => n + 1)} /></SettingRow>
           </SettingsGroup>
-          {(["title", "memory", "taskProgress"] as const).map(kind => {
+          {(["title", "memory"] as const).map(kind => {
             const profile = draft.system?.tasks?.[kind];
             const selectedCli = profile?.cli ?? "";
             const effectiveCli = profile?.cli ?? draft.system?.cli;
@@ -317,11 +317,10 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
               const cli = changes.cli ?? effectiveCli;
               if (cli) patchSystem({tasks:{...draft.system?.tasks,[kind]:{...profile,...changes,cli}}});
             };
-            const title = t(kind === "title" ? "自动标题" : kind === "memory" ? "记忆提炼" : "任务进度评估");
+            const title = t(kind === "title" ? "自动标题" : "记忆提炼");
             const generate = draft.system?.memory?.request?.generate ?? draft.system?.memoryCapture ?? true;
-            return <SettingsGroup key={kind} className="system-task-profile" label={title} title={title} description={kind === "memory" ? localize("请求结束后提炼事实，整合场景知识与长期上下文。", "Extract facts after requests, then consolidate scenes and stable context.") : t(kind === "title" ? "对话完成后自动命名；适合轻量模型。" : "每轮结束后评估已关联任务；达成目标进入待验收，完成由你确认。")}>
+            return <SettingsGroup key={kind} className="system-task-profile" label={title} title={title} description={kind === "memory" ? localize("请求结束后提炼事实，整合场景知识与长期上下文。", "Extract facts after requests, then consolidate scenes and stable context.") : t("对话完成后自动命名；适合轻量模型。")}>
               {kind === "title" && <SettingSwitch label={t("自动运行")} ariaLabel={t("自动生成对话标题")} checked={draft.system?.automaticTitles ?? false} onChange={checked => patchSystem({ automaticTitles: checked })}/>}
-              {kind === "taskProgress" && <SettingSwitch label={t("自动运行")} ariaLabel={t("任务进度评估")} checked={draft.system?.automaticTaskProgress ?? true} onChange={checked => patchSystem({ automaticTaskProgress: checked })}/>}
               {kind === "memory" && <SettingSwitch label={t("请求记忆生成")} ariaLabel={t("请求记忆生成")} hint={!generate ? localize('生成关闭期间的新内容不会自动补记；重新开启仅处理后续内容。', 'New content is excluded while memory generation is off. Re-enabling applies to future content.') : undefined} checked={generate} onChange={checked => patchSystem({ memory: {
                 ...draft.system?.memory, request: { read: true, ...draft.system?.memory?.request, generate: checked },
               } })}/>}

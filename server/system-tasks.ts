@@ -1,4 +1,3 @@
-import {taskProgressSettingsRevision} from './config';
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +11,6 @@ import { bindLocalCatalogLauncher, systemRuntime } from "./runtime";
 import { refreshDesktopRuntimePath } from './native-spawn';
 import { createKnowledge, readKnowledge } from "./knowledge";
 import type { Store } from "./store";
-import { createTaskProgress, type ProgressTaskService, type TaskProgressRound } from "./task-progress";
 import { meterGeneration, type UsageObserver } from './usage';
 import { randomUUID } from 'node:crypto';
 import { titleFromText } from "./conversation-title";
@@ -133,10 +131,9 @@ function round(events: DisplayEvent[], latest: boolean, requireCompleted = false
   return { source: `{"user":${quote(first.text)},"reply":${quote(reply ?? "")}}`, endEventId: segment.at(-1)!.id };
 }
 
-export function createSystemTasks({ store, loadConfig, home, generate = nativeGenerate, memoryRuntime, tasks }: {
-  store: Store; loadConfig: () => Promise<Config>; home: string; generate?: SystemGenerator; memoryRuntime?: import("./memory-runtime").MemoryRuntime; tasks?: ProgressTaskService;
+export function createSystemTasks({ store, loadConfig, home, generate = nativeGenerate, memoryRuntime }: {
+  store: Store; loadConfig: () => Promise<Config>; home: string; generate?: SystemGenerator; memoryRuntime?: import("./memory-runtime").MemoryRuntime;
 }) {
-  const progress = tasks ? createTaskProgress({store,loadConfig,tasks,generate,settingsRevision:()=>taskProgressSettingsRevision(home)}) : undefined;
   type Kind = "title" | "memory";
   type Job = { controller: AbortController; promise: Promise<void>; started: boolean; id: string; kind: Kind;
     provenance?: { cli: SystemTaskConfig["cli"]; model: string | null; sourceEventId: number } };
@@ -251,10 +248,10 @@ export function createSystemTasks({ store, loadConfig, home, generate = nativeGe
     return job.promise;
   }
   return {
-    hasActiveWork: () => jobs.size > 0 || captures > 0 || !!progress?.hasActiveWork(),
+    hasActiveWork: () => jobs.size > 0 || captures > 0,
     status(id: string) {
       return {
-        active: [...[...jobs.values()].filter(job=>job.id===id).map(job=>({kind:job.kind,started:job.started})), ...(progress?.status(id) ?? [])],
+        active: [...jobs.values()].filter(job=>job.id===id).map(job=>({kind:job.kind,started:job.started})),
         history: store.listEvents(id,0).filter(event=>event.kind==='metadata' &&
           ['title','memory','taskProgress'].includes((event.data as {systemTask?:string}).systemTask ?? '')),
       };
@@ -267,13 +264,11 @@ export function createSystemTasks({ store, loadConfig, home, generate = nativeGe
     async onMessage(id: string) {
       if (!closed && (await loadConfig()).system?.automaticTitles) await run(id, "title");
     },
-    async onSettled(id: string, completedRound?: TaskProgressRound) {
+    async onSettled(id: string) {
       if (closed) return;
       const captured = round(store.listEvents(id, 0).filter((event) => event.kind !== "metadata"), true, true);
-      const progressWork = progress?.evaluate(id,completedRound);
       const config = await loadConfig();
       await Promise.all([
-        ...(progressWork ? [progressWork] : []),
         ...(config.system?.automaticTitles ? [run(id, "title")] : []),
         ...(memoryRuntime ? [memoryRuntime.scan().then(()=>memoryRuntime.drain())] : config.system?.memoryCapture ? [run(id, "memory", captured)] : []),
       ]);
@@ -291,7 +286,6 @@ export function createSystemTasks({ store, loadConfig, home, generate = nativeGe
     close() {
       if (closed) return;
       closed = true;
-      progress?.close();
       for (const job of jobs.values()) {
         if (job.started) emit(job, "failed", "System task cancelled; the source conversation is unchanged.", { code: "cancelled", stage: "generation" });
         job.controller.abort(cancelled());

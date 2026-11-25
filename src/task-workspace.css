@@ -27,7 +27,6 @@
 .task-detail .task-properties .task-meta { grid-template-columns:minmax(0,1fr); gap:12px; }
 .task-properties-disclosure, .task-extra-context, .task-execution-options, .task-run-history { margin:16px 0; }
 .task-detail .task-route-choice { display:flex; align-items:center; gap:8px; padding:8px 0; border:0; margin:0 0 12px; }
-.task-detail .task-progress-toggle { margin:8px 0; padding:0; }
 .task-detail .task-run-record { border:0; border-bottom:1px solid var(--border-soft); }
 .task-detail .task-deliveries { border:0; padding:12px 0; background:transparent; border-radius:0; }
 .task-detail .task-section-heading h2 { font-size:var(--type-ui); }

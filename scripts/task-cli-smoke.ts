@@ -24,8 +24,18 @@ const factory=async(options:CodexOptions)=>{
  const rpc=createRpcClient(spawn('codex',['-c','sandbox_mode="workspace-write"','-c','sandbox_workspace_write.network_access=false','app-server','--stdio'],{cwd:options.cwd,stdio:'pipe',shell:false}),{onNotification:options.onEvent,onRequest:options.onApproval,onExit:options.onExit});
  return connectCodex(rpc,options.cwd,false);
 };
-const finalAnswers=new Map<string,string>();
-const manager=createSessionManager(store,load,factory,undefined,home,(id,round)=>{if(round)finalAnswers.set(id,round.reply);});
+const manager=createSessionManager(store,load,factory,undefined,home);
+const finalAnswer=(id:string)=>{
+ const events=store.listEvents(id,0),runId=(events.filter(event=>event.kind==='user').at(-1)?.data as {runId?:string}|undefined)?.runId;
+ if(!runId)return '';
+ const replies=events.flatMap(event=>{
+  const data=event.data as {runId?:string;method?:string;params?:{item?:{type:string;text?:string;phase?:string;stopReason?:string}}};
+  const item=data.params?.item;
+  return event.kind==='tool'&&data.runId===runId&&data.method==='item/completed'&&item?.type==='agentMessage'?[item]:[];
+ });
+ const finals=replies.filter(item=>item.phase==='final_answer'),last=replies.at(-1);
+ return finals.length?finals.map(item=>item.text).join('\n\n'):last?.phase!=='commentary'&&last?.stopReason!=='toolUse'?last?.text??'':'';
+};
 const automations=createAutomations({home,store,manager,loadConfig:load}),server=createHttpServer({requireIdentity:false,home,store,manager,automations});
 server.listen(0,'127.0.0.1');await once(server,'listening');
 const port=(server.address() as {port:number}).port,previousPort=process.env.MANDALA_PORT;
@@ -82,12 +92,12 @@ try{
  const persistedRule=store.database.prepare('SELECT data FROM automation_rules WHERE id=?').get(createdRule.id);if(!persistedRule||JSON.parse(persistedRule.data as string).enabled!==false)throw Error('Saved rule enabled unexpectedly');
  if(Number(store.database.prepare('SELECT COUNT(*) n FROM automation_occurrences').get()!.n)!==0)throw Error('Saving created an occurrence');
  if(manager.taskService.listRuns(root,task.id).length)throw Error('Task gained an unrequested execution Run');
- if(!finalAnswers.get(chat.id)?.includes('TASK_AGENT_CLI_OK'))throw Error('Real Agent did not confirm final CLI readback in its completed final answer');
+ if(!finalAnswer(chat.id).includes('TASK_AGENT_CLI_OK'))throw Error('Real Agent did not confirm final CLI readback in its completed final answer');
  console.log('PASS real '+nativeCli+' Agent Task context/create/update/link/get/runs; disabled optional automation create/list/history; scoped conversation list/history; explicit empty associations; unsupported state-patch rejection; unfinished SQLite readback');
  const closePrompt='I explicitly accept the synthetic goal '+task.id+' now. Use the exact Mandala CLI: tasks get to read its current revision; tasks mark-completed to finalize it; tasks get to verify completed and completedBy agent. Then tasks reopen with the current expectedRevision and reason Synthetic continuation; verify todo without starting work; tasks mark-completed again with its current revision and verify completed. Never start a Task Run, enable the saved schedule, or modify other records. Reply TASK_AGENT_CLOSE_OK only after final readback.';
  await cli(['conversations','send',chat.id,'--key','task-smoke-finalize','--data',JSON.stringify({text:closePrompt})]);
  await wait(()=>!['running','approval'].includes(store.getConversation(chat.id)!.status),'real Agent finalization and reopen');
- if(store.getConversation(chat.id)!.status!=='idle'||!finalAnswers.get(chat.id)?.includes('TASK_AGENT_CLOSE_OK'))throw Error('Agent did not finish completion/reopen round');
+ if(store.getConversation(chat.id)!.status!=='idle'||!finalAnswer(chat.id).includes('TASK_AGENT_CLOSE_OK'))throw Error('Agent did not finish completion/reopen round');
  const finished=manager.taskService.getTask(root,task.id);
  if(finished.state!=='completed'||finished.completion?.completedBy!=='agent'||finished.completion.completedByAgentId!=='sample-agent'||manager.taskService.listRuns(root,task.id).length)throw Error('Agent completion readback mismatch');
  for(const tool of ['task_mark_completed','task_reopen'])if(!boundCalls.some(call=>call.tool===tool&&call.ok))throw Error('Real Agent did not invoke '+tool);
@@ -95,7 +105,7 @@ try{
 
  console.log(JSON.stringify({nativeCli,sandbox:nativeCli==='codex'?'workspace-write with network disabled':'native OMP permissions',transport:nativeCli==='codex'?'private file mailbox':'loopback HTTP',home,taskId:task.id,goal:task.goal,projectId:task.projectId,conversationIds:task.conversationIds,state:finished.state,revision:finished.revision,initialState:task.state,runCount:0,automationId:createdRule.id,ruleEnabled:false,occurrenceCount:0,boundCalls}));
 }catch(error){
- console.error(JSON.stringify({diagnostics:store.listConversations().map(chat=>({id:chat.id,status:chat.status,errors:store.listEvents(chat.id,0).filter(event=>event.kind==='error').map(event=>event.data),finalAnswer:finalAnswers.get(chat.id),lastText:store.listEvents(chat.id,0).filter(event=>event.kind==='text').at(-1)?.data})),boundCalls,tasks:manager.taskService.listTasks(root)}));throw error;
+ console.error(JSON.stringify({diagnostics:store.listConversations().map(chat=>({id:chat.id,status:chat.status,errors:store.listEvents(chat.id,0).filter(event=>event.kind==='error').map(event=>event.data),finalAnswer:finalAnswer(chat.id),lastText:store.listEvents(chat.id,0).filter(event=>event.kind==='text').at(-1)?.data})),boundCalls,tasks:manager.taskService.listTasks(root)}));throw error;
 }finally{
  if(previousPort===undefined)delete process.env.MANDALA_PORT;else process.env.MANDALA_PORT=previousPort;
  automations.close();await manager.close();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));store.close();await rm(home,{recursive:true,force:true});

@@ -10,7 +10,9 @@ export type TaskInput = {
  projectIds?: string[] | null; moduleRef?: TaskModuleRef | null;
  goal: string; criteria?: Criterion[]; acceptance?: 'delivery' | 'checks' | 'human';
  projectId?: string | null; assigneeAgentId?: string | null; originConversationId?: string | null;
- participantAgentIds?: string[]; automaticProgress?: boolean;
+ participantAgentIds?: string[];
+ /** Legacy preference preserved for storage and API compatibility; has no effect on evaluations. */
+ automaticProgress?: boolean;
 };
 export type TaskState = 'todo' | 'running' | 'waiting' | 'review' | 'completed' | 'cancelled';
 export type WaitingReason = 'host_offline' | 'approval' | 'input' | 'run_failed' | 'interrupted' | 'delivery_missing' | 'check_failed';
@@ -50,7 +52,6 @@ export function sourceExecutionConversation(task:Task):string|undefined {
 }
 export type TaskProgressState = Exclude<TaskState, 'completed' | 'cancelled'>;
 export type TaskPatch = Partial<Pick<Task, 'goal' | 'criteria' | 'projectId' | 'assigneeAgentId' | 'originConversationId' | 'participantAgentIds' | 'automaticProgress'>> & Pick<TaskInput,'projectIds'|'moduleRef'> & { state?: TaskProgressState };
-export type TaskProgressSnapshot = { task: Pick<Task, 'id' | 'goal' | 'criteria' | 'state' | 'revision' | 'conversationIds'>; executions: Pick<TaskExecution, 'id' | 'conversationId' | 'request' | 'latestRun'>[] };
 export type RunIdentity = { runId: string; hostId: string; nativeSessionId: string; nativeTurnId: string };
 export type TerminalRunEvent = RunIdentity & { eventKey: string; outcome: 'succeeded' | 'failed' | 'interrupted'; summary: string; artifactVersions: VersionRef[] };
 export type Continuation = { taskId: string; conversationId: string; epoch: number; policy: 'notify' | 'resume' };

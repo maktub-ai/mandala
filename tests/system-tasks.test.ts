@@ -579,29 +579,21 @@ it('queries and stops one system transformation without aborting other conversat
  service.stop(other,'title');await two;
 });
 
-it('settled task progress calls the restricted native generator with only the explicit final round and separate profile',async()=>{
- config.responseStyle='explanatory';config.agents[0].responseStyle='concise';
- let callbacks:any;
- native.codex.mockImplementation(async(options)=>{
-  callbacks=options;
-  return {startThread:vi.fn(async()=> 'progress-ephemeral'),startTurn:vi.fn(async()=>{
-   callbacks.onEvent({method:'item/agentMessage/delta',params:{delta:'[]'}});
-   callbacks.onEvent({method:'turn/completed',params:{turn:{status:'completed'}}});return 'progress-turn';
-  }),close:vi.fn()};
- });
- config.system={cli:'omp',model:'fallback',tasks:{taskProgress:{cli:'codex',model:'judge-model'}}};
- const task:import('../shared/tasks').Task={projectIds:[],projectIdsMode:'auto',moduleRef:null,automaticProgress:true,originConversationId:null,executions:[],id:'linked',goal:'Verify weekly list',criteria:[],state:'todo',revision:1,conversationIds:[id],ownerUserId:'local',creatorAgentId:null,acceptance:'human',projectId:null,assigneeAgentId:null,participantAgentIds:[],waitingReason:null,continuationEpoch:0,futureAutoResume:false,completion:null,legacyId:null,createdAt:new Date().toISOString()};
- const apply=vi.fn();
- const service=createSystemTasks({home,store,loadConfig:async()=>config,tasks:{snapshotProgress:()=>[{task,executions:[]}],applyTaskProgress:apply,applyTaskProgressBatch:()=>[]}});services.push(service);
- const sourceEventId=store.listEvents(id,0).at(-1)!.id;
- await service.onSettled(id,{sourceEventId,user:'Only this round input',reply:'Only the completed final answer'});
- expect(native.codex).toHaveBeenCalledOnce();expect(native.omp).not.toHaveBeenCalled();
- const client=await native.codex.mock.results[0].value;
- expect(client.startThread).toHaveBeenCalledWith(expect.objectContaining({model:'judge-model',safeSystem:true,ephemeral:true}));
- expect(client.startThread.mock.calls[0][0].instructions).not.toContain('Response style:');
- const prompt=client.startTurn.mock.calls[0][1];expect(prompt).toContain('Only this round input');expect(prompt).toContain('Only the completed final answer');expect(prompt).not.toContain('I will inspect');
- expect(apply).not.toHaveBeenCalled();
- expect(store.listEvents(id,0).at(-1)?.data).toMatchObject({systemTask:'taskProgress',status:'completed',applied:0});
+it('reads legacy evaluation history without resuming pending jobs or writing history',async()=>{
+ const source=store.listEvents(id,0).at(-1)!;
+ const diagnostic={systemTask:'taskProgress',status:'running',sourceEventId:source.id};
+ const historical=store.appendEvent(id,'metadata',diagnostic);
+ store.database.exec(`CREATE TABLE task_progress_evaluations(source_event_id INTEGER PRIMARY KEY,conversation_id TEXT NOT NULL,status TEXT NOT NULL,snapshot TEXT NOT NULL,diagnostic TEXT,created_at TEXT NOT NULL);
+ CREATE TABLE task_progress_heads(task_id TEXT PRIMARY KEY,source_event_id INTEGER NOT NULL);`);
+ store.database.prepare('INSERT INTO task_progress_evaluations VALUES (?,?,?,?,?,?)').run(source.id,id,'running','[]',JSON.stringify(diagnostic),source.createdAt);
+ store.database.prepare('INSERT INTO task_progress_heads VALUES (?,?)').run('legacy',source.id);
+ const evaluations=store.database.prepare('SELECT * FROM task_progress_evaluations'),heads=store.database.prepare('SELECT * FROM task_progress_heads');
+ const before=[evaluations.all(),heads.all()];
+ config.system={automaticTaskProgress:true,tasks:{taskProgress:{cli:'codex',model:'legacy-judge'}}};
+ const service=setup();await service.onSettled(id);service.close();
+ expect(native.codex).not.toHaveBeenCalled();expect(native.omp).not.toHaveBeenCalled();
+ expect(service.hasActiveWork()).toBe(false);expect(service.status(id)).toEqual({active:[],history:[historical]});
+ expect([evaluations.all(),heads.all()]).toEqual(before);
 });
 
 it.each(['claude','gemini','opencode'] as const)('generates restricted %s system output using only global connection settings',async cli=>{

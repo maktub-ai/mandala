@@ -98,14 +98,13 @@ const manager = createSessionManager(
   },
   undefined,
   home,
-  (id, round) => { void systemTasks.onSettled(id, round).catch(() => {}); },
+  id => { void systemTasks.onSettled(id).catch(() => {}); },
   id => { void systemTasks.onMessage(id).catch(() => {}); },
   memoryRuntime,
   {routeGenerate:async(_config,prompt)=>{const {projects}=JSON.parse(prompt.split('SOURCE_JSON:\n')[1]);const p=projects[0];return JSON.stringify({projectId:p.id,lane:p.modules[0]??null,assigneeAgentId:p.observers[0]?.id??null});}, wikiGenerate:wikiFixtureGenerate,generate:async(_config,prompt)=>prompt.includes('skill-learning-fixture')?JSON.stringify({action:'new',name:'dialogue-inspect',content:'---\nname: dialogue-inspect\ndescription: Inspect a persisted fixture result\n---\nRead back stored state and verify related states.'}):JSON.stringify({action:'skip'})},
 );
- const systemTasks = createSystemTasks({ home, store, memoryRuntime, tasks:manager.taskService, loadConfig: async () => (await readConfig(home)).config,
+ const systemTasks = createSystemTasks({ home, store, memoryRuntime, loadConfig: async () => (await readConfig(home)).config,
   generate: async (_config, prompt) => {
-    if(prompt.includes('Evaluate progress toward each explicitly linked task'))return '[]';
     const source = JSON.parse(prompt.split("SOURCE_JSON:\n")[1]);
     return prompt.includes("conversation title") ? "Synthetic title: " + source.user.slice(0, 40) :
       JSON.stringify([{ title: "Synthetic reusable conclusion", content: source.reply }]);

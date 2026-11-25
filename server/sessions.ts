@@ -100,7 +100,6 @@ import { normalizeHookEvent } from "../shared/hooks";
 import { memoryHistoryReferences, type MemoryRuntime } from "./memory-runtime";
 import { validateTaskConfiguration } from './task-input';
 import { createUsageRecorder, recoverUsage } from './usage';
-import type {TaskProgressRound} from './task-progress';
 import type { MemoryHit } from "../shared/memory";
 import { recallMemory } from "./knowledge";
 import { planMemoryRecall } from "./memory-retrieval-policy";
@@ -187,7 +186,7 @@ export function createSessionManager(
   clientFactory: typeof startCodex = startCodex,
   ompFactory: typeof startOmp = startOmp,
   home = productEnv('HOME') ?? "",
-  onSettled?: (id: string, round?: TaskProgressRound) => void,
+  onSettled?: (id: string) => void,
   onMessage?: (id: string) => void,
   memoryRuntime?: MemoryRuntime,
   skillOptions?: { generate?:SystemGenerator; wikiGenerate?:SystemGenerator; routeGenerate?:SystemGenerator },
@@ -1225,11 +1224,9 @@ export function createSessionManager(
               finishTask(id, status === "idle");
               if (status === "idle") {
                 const events=store.listEvents(id,0),user=events.filter(e=>e.kind==='user'&&(e.data as {runId?:string}).runId===invocation.invocationId).at(-1);
-                const reply=invocationAnswer(id,invocation.invocationId,true),userText=(user?.data as {text?:string})?.text;
-                const sourceEvent=events.filter(e=>e.kind==='status'&&(e.data as {status?:string}).status==='idle').at(-1);
-                const round=userText?.trim()&&reply&&sourceEvent?{sourceEventId:sourceEvent.id,user:userText,reply}:undefined;
+                const userText=(user?.data as {text?:string})?.text;
                 void skillLearning?.capture(id,/沉淀|整理.*技能|(?:save|register|distill).{0,30}skill/i.test(userText??'')).then(()=>skillLearning.drain()).catch(()=>{});
-                onSettled?.(id,round);
+                onSettled?.(id);
               }
             } else if (event.method === "error")
               store.appendEvent(id, "error", {

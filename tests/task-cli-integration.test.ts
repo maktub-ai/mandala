@@ -8,9 +8,9 @@ const settled=vi.fn(),generate=vi.fn();
 beforeEach(async()=>{
  home=mkdtempSync(join(tmpdir(),'mana-task-cli-'));const initial=await readConfig(home);
  await writeConfig(home,{...initial.config,system:{cli:'codex',memoryCapture:false},agents:['a','b'].map(id=>({id,name:id,instructions:'',defaultCli:'codex' as const,models:{},mcp:[],skills:[]})),projects:[{id:'p',name:'P',cwd:'',agentIds:['a','b'],resources:[],mcp:[],skills:[]}]},initial.revision);
- store=openStore(home);turn=0;settled.mockReset();generate.mockReset().mockResolvedValue(JSON.stringify([{taskId:'placeholder',state:'review',evidence:'Goal met'}]));
- manager=createSessionManager(store,async()=>(await readConfig(home)).config,async(options):Promise<CodexClient>=>{native=options;return{getStatus:async()=>({status:'ready',version:'fake'}),listModels:async()=>[],startThread:async p=>{token=businessCliContext(p.instructions).token;return's';},resumeThread:async(_id,_mcp,instructions)=>{token=businessCliContext(instructions).token;},startTurn:async()=>`t${++turn}`,interrupt:async()=>{},replyApproval(){},close(){}};},undefined,home,(id,round)=>{settled(id,round);void system.onSettled(id,round).catch(()=>{});});
- system=createSystemTasks({store,home,loadConfig:async()=>(await readConfig(home)).config,tasks:manager.taskService,generate});
+ store=openStore(home);turn=0;settled.mockReset().mockImplementation(id=>system.onSettled(id));generate.mockReset();
+ manager=createSessionManager(store,async()=>(await readConfig(home)).config,async(options):Promise<CodexClient>=>{native=options;return{getStatus:async()=>({status:'ready',version:'fake'}),listModels:async()=>[],startThread:async p=>{token=businessCliContext(p.instructions).token;return's';},resumeThread:async(_id,_mcp,instructions)=>{token=businessCliContext(instructions).token;},startTurn:async()=>`t${++turn}`,interrupt:async()=>{},replyApproval(){},close(){}};},undefined,home,id=>{void settled(id).catch(()=>{});});
+ system=createSystemTasks({store,home,loadConfig:async()=>(await readConfig(home)).config,generate});
  server=createHttpServer({requireIdentity:false,store,home,manager,systemTasks:system});server.listen(0,'127.0.0.1');await once(server,'listening');base=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
 });
 afterEach(async()=>{system.close();await manager.close();server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));store.close();rmSync(home,{recursive:true,force:true});});
@@ -107,21 +107,24 @@ test('a worker in an inferred project sees its labels and lane only during curre
  await setMembership(['b']);
  expect(JSON.stringify(await read())).not.toContain('restricted');
 });
-test('ordinary successful native final turn actually schedules linked Task assessment with exact final answer',async()=>{
- const chat=await manager.create('p','a',undefined,undefined,{workspaceId:null});const task=createTaskWithExecutions(store,manager.taskService,{userId:'local'},{goal:'Goal',criteria:[],acceptance:'human',projectId:null,assigneeAgentId:null},[chat.id],'goal');
- generate.mockResolvedValue(JSON.stringify([{taskId:task.id,state:'review',evidence:'Goal met'}]));await manager.send(chat.id,'This round user input');
- native.onEvent({method:'item/completed',params:{threadId:'s',turnId:'t1',item:{id:'comment',type:'agentMessage',phase:'commentary',text:'Midway'}}});
+test('successful Chat with a final answer never invokes the legacy evaluator or changes its linked Task',async()=>{
+ const {config,revision}=await readConfig(home);
+ await writeConfig(home,{...config,system:{...config.system,automaticTaskProgress:true,tasks:{taskProgress:{cli:'codex',model:'legacy-judge'}}}},revision);
+ const owner={userId:'local'},chat=await manager.create('p','a',undefined,undefined,{workspaceId:null});
+ const task=createTaskWithExecutions(store,manager.taskService,owner,{goal:'Goal',automaticProgress:true},[chat.id],'goal');
+ await manager.send(chat.id,'This round user input');
  native.onEvent({method:'item/completed',params:{threadId:'s',turnId:'t1',item:{id:'answer',type:'agentMessage',phase:'final_answer',text:'Final goal evidence'}}});
  native.onEvent({method:'turn/completed',params:{threadId:'s',turn:{id:'t1',status:'completed'}}});
- expect(settled).toHaveBeenCalledWith(chat.id,expect.objectContaining({user:'This round user input',reply:'Final goal evidence',sourceEventId:expect.any(Number)}));
- await vi.waitFor(()=>expect(generate).toHaveBeenCalledTimes(1));await vi.waitFor(()=>expect(manager.taskService.getTask({userId:'local'},task.id).state).toBe('review'));
- expect(generate.mock.calls[0][1]).not.toContain('Midway');expect(manager.taskService.getTask({userId:'local'},task.id).completion).toBeNull();
+ expect(settled).toHaveBeenCalledWith(chat.id);await settled.mock.results[0].value;
+ expect(generate).not.toHaveBeenCalled();expect(system.status(chat.id)).toEqual({active:[],history:[]});
+ expect(manager.taskService.getTask(owner,task.id)).toMatchObject({state:'todo',revision:task.revision,completion:null});
+ expect(manager.taskService.listReceipts(owner,task.id)).toEqual([]);
 });
 
 test('successful turn with only commentary does not evaluate linked Tasks',async()=>{
  const chat=await manager.create('p','a',undefined,undefined,{workspaceId:null});const task=createTaskWithExecutions(store,manager.taskService,{userId:'local'},{goal:'Goal'},[chat.id],'no-final');
  await manager.send(chat.id,'Input');native.onEvent({method:'item/completed',params:{threadId:'s',turnId:'t1',item:{id:'comment',type:'agentMessage',phase:'commentary',text:'I am working'}}});
- native.onEvent({method:'turn/completed',params:{threadId:'s',turn:{id:'t1',status:'completed'}}});await new Promise(r=>setTimeout(r,20));
+ native.onEvent({method:'turn/completed',params:{threadId:'s',turn:{id:'t1',status:'completed'}}});expect(settled).toHaveBeenCalledWith(chat.id);await settled.mock.results[0].value;
  expect(generate).not.toHaveBeenCalled();expect(manager.taskService.getTask({userId:'local'},task.id).state).toBe('todo');
 });
 test('context endpoint is descriptive and never associates an independent Task',async()=>{
@@ -156,13 +159,6 @@ test.each(['q',null])('Task project edited to %s starts a fresh execution in the
  const next=await manager.startDurableTask(task.id,edited.revision,'new-start');expect(next.routing!.executionConversationId).not.toBe(run.routing!.executionConversationId);
  expect(store.getConversation(next.routing!.executionConversationId)!.projectId).toBe(projectId??'');expect(next.attempt).toBe(2);
 });
-test('real settled hook records Task evaluation configuration failure without changing progress',async()=>{
- system.close();system=createSystemTasks({store,home,tasks:manager.taskService,loadConfig:async()=>{throw Error('Synthetic configuration failure');},generate});
- const chat=await manager.create('p','a',undefined,undefined,{workspaceId:null}),task=createTaskWithExecutions(store,manager.taskService,{userId:'local'},{goal:'Goal'},[chat.id],'bad-profile');
- await manager.send(chat.id,'Input');native.onEvent({method:'item/completed',params:{threadId:'s',turnId:'t1',item:{id:'final',type:'agentMessage',phase:'final_answer',text:'Final answer'}}});native.onEvent({method:'turn/completed',params:{threadId:'s',turn:{id:'t1',status:'completed'}}});
- await vi.waitFor(()=>expect(system.status(chat.id).history.some(e=>(e.data as any).systemTask==='taskProgress'&&(e.data as any).code==='configuration-failed')).toBe(true));
- expect(manager.taskService.getTask({userId:'local'},task.id).state).toBe('todo');expect(generate).not.toHaveBeenCalled();
-});
 test('bound Agent creates a disabled rule for its Task, lists history and explicitly starts/stops queued work',async()=>{const {createAutomations}=await import('../server/automations');const service=createAutomations({home,store,manager,loadConfig:async()=>(await readConfig(home)).config});try{const source=await manager.create('p','a',undefined,undefined,{workspaceId:null});await manager.send(source.id,'Work');const invocationToken=token;const task=await manager.callBoundTool(invocationToken,'task_create',{goal:'Daily check',projectId:'p',assigneeAgentId:'a'},'rule-task') as any;const rule=await manager.callBoundTool(invocationToken,'automation_create',{taskId:task.id,name:'Daily',instructions:'Daily check',projectId:'p',agentId:'a',cli:'codex',enabled:true,schedule:{kind:'daily',time:'09:00',timeZone:'Asia/Singapore'}},'create-rule') as any;expect(rule).toMatchObject({taskId:task.id,enabled:false});expect((await manager.callBoundTool(invocationToken,'automation_list',{},'list') as any).automations).toHaveLength(1);const run=await manager.callBoundTool(invocationToken,'task_start',{taskId:task.id,expectedRevision:task.revision,conversationId:source.id},'explicit-start') as any;expect(run.state).toBe('queued');await manager.callBoundTool(invocationToken,'task_stop',{taskId:task.id,expectedRevision:task.revision+1},'explicit-stop');expect(manager.taskService.getRun({userId:'local'},run.id).state).toBe('interrupted');expect(await manager.callBoundTool(invocationToken,'task_runs',{taskId:task.id},'run-history')).toMatchObject([{id:run.id,state:'interrupted'}]);expect((await service.list()).automations[0].enabled).toBe(false);}finally{service.close();}});
 test('bound Agent may save an unassigned disabled rule but blank Agent cannot bypass assignment or Task authorization',async()=>{const {createAutomations}=await import('../server/automations');const service=createAutomations({home,store,manager,loadConfig:async()=>(await readConfig(home)).config});try{const source=await manager.create('p','a',undefined,undefined,{workspaceId:null});await manager.send(source.id,'Rule save sample');const invocationToken=token;const task=await manager.callBoundTool(invocationToken,'task_create',{goal:'Unassigned',projectId:null,assigneeAgentId:null},'unassigned-rule-task') as any;const input={name:'Pending rule',instructions:'Unassigned',projectId:'',agentId:'',cli:'codex',enabled:false,schedule:{kind:'daily',time:'09:00',timeZone:'Asia/Singapore'}};expect(await manager.callBoundTool(invocationToken,'automation_create',{...input,taskId:task.id},'blank-rule')).toMatchObject({taskId:task.id,enabled:false,agentId:''});expect(manager.taskService.listRuns({userId:'local'},task.id)).toEqual([]);const assigned=await manager.callBoundTool(invocationToken,'task_create',{goal:'Assigned',projectId:null,assigneeAgentId:'a'},'assigned-rule-task') as any;await expect(manager.callBoundTool(invocationToken,'automation_create',{...input,taskId:assigned.id},'blank-assigned-denied')).rejects.toMatchObject({status:403});const foreign=manager.taskService.createTask({userId:'local'},{goal:'Foreign',projectId:null,assigneeAgentId:'b'},'foreign-task');await expect(manager.callBoundTool(invocationToken,'automation_create',{...input,taskId:foreign.id},'foreign-rule-denied')).rejects.toMatchObject({status:403});expect((await service.list()).automations).toHaveLength(1);}finally{service.close();}});
 
@@ -185,6 +181,7 @@ test('executing Agent explicitly requests own Task completion and successful fin
  expect(await manager.callBoundTool(ownToken,'task_mark_completed',{taskId:task.id,expectedRevision:current.revision},'own-complete')).toMatchObject({state:'running',completionRequested:true,completion:null});
  native.onEvent({method:'item/completed',params:{threadId:'s',turnId:'t1',item:{id:'own-final',type:'agentMessage',phase:'final_answer',text:'Goal delivered and checked'}}});native.onEvent({method:'turn/completed',params:{threadId:'s',turn:{id:'t1',status:'completed'}}});
  await vi.waitFor(()=>expect(manager.taskService.getTask(owner,task.id)).toMatchObject({state:'completed',completion:{completedBy:'agent',completedByAgentId:'a',sourceRunId:run.id}}));
+ expect(manager.taskService.listReceipts(owner,task.id)).toMatchObject([{sourceRunId:run.id,summary:'Goal delivered and checked'}]);
  await expect(manager.callBoundTool(ownToken,'task_reopen',{taskId:task.id,expectedRevision:manager.taskService.getTask(owner,task.id).revision},'expired-reopen')).rejects.toMatchObject({status:403});
 });
 test('bound executor cancellation explicitly interrupts its own active Run and invalidates completion intent',async()=>{

@@ -61,12 +61,12 @@ const manager = createSessionManager(
   undefined,
   undefined,
   home,
-  (id, round) => trackSystemWork(systemTasks.onSettled(id, round)),
+  id => trackSystemWork(systemTasks.onSettled(id)),
   id => trackSystemWork(systemTasks.onMessage(id)),
   memoryRuntime,
 );
  await memoryRuntime.initialize();
- const systemTasks = createSystemTasks({ home, store, memoryRuntime, tasks:manager.taskService, loadConfig: async () => (await readConfig(home)).config });
+ const systemTasks = createSystemTasks({ home, store, memoryRuntime, loadConfig: async () => (await readConfig(home)).config });
 memoryRuntime.start();
 manager.fileMaintenance.start();
 manager.knowledgeBase.start();

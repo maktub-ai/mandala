@@ -575,8 +575,6 @@ export const english = {
   "外部记忆服务的身份可通过其支持的环境变量或 CLI 参数传入。": "External memory identities can be supplied through supported environment variables or CLI arguments.",
   "使用自定义模型 ID": "Use custom model ID",
   "自动标题": "Automatic titles",
-  "任务进度评估": "Task progress evaluation",
-  "每轮结束后评估已关联任务；达成目标进入待验收，完成由你确认。": "Evaluate linked tasks after each round. Reached goals await review; you confirm completion.",
   "记忆提炼": "Memory extraction",
   "自动运行": "Run automatically",
   "沿用系统默认": "Use system defaults",

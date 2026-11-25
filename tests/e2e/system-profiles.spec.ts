@@ -4,8 +4,8 @@ import { test, expect } from '@playwright/test';
 import { chooseOption, enterModelId, expectSelection } from './helpers/select';
 
 test('background tasks save separate CLI and model profiles without changing Agent models', async ({ page, request }) => {
-  const { revision } = await (await request.get('/api/config')).json();
-  expect((await putRuntimeConfig(request, { version: 2, system:{cli:'codex',memory:{language:'en'}},
+  const legacyProfile={cli:'omp',model:'synthetic-progress'} as const;
+  expect((await putRuntimeConfig(request, { version: 2, system:{cli:'codex',memory:{language:'en'},automaticTaskProgress:true,tasks:{taskProgress:legacyProfile}},
     projects: [{ id: 'profiles', name: 'Synthetic profiles', cwd: '/tmp', agentIds: ['worker'], resources: [], mcp: [], skills: [] }],
     agents: [{ id: 'worker', name: 'Worker', instructions: '', defaultCli: 'codex', models: {}, mcp: [], skills: [] }],
   })).ok()).toBe(true);
@@ -13,30 +13,25 @@ test('background tasks save separate CLI and model profiles without changing Age
   const title = page.getByRole('region', { name: '自动标题', exact: true });
   const memory = page.getByRole('region', { name: '记忆提炼', exact: true });
   const progress = page.getByRole('region', { name: '任务进度评估', exact: true });
-  await expect(title).toBeVisible();
-  const progressToggle=progress.getByRole('switch',{name:'任务进度评估',exact:true});
-  await expect(progressToggle).toBeChecked();await progressToggle.uncheck();await waitForAutosave(page);
-  expect((await(await request.get('/api/config')).json()).config.system.automaticTaskProgress).toBe(false);
-  await page.reload();await expect(progressToggle).not.toBeChecked();await progressToggle.check();await waitForAutosave(page);
+  await expect(title).toBeVisible();await expect(memory).toBeVisible();await expect(progress).toHaveCount(0);
   await chooseOption(page, title.getByRole('combobox', { name: '执行端', exact: true }), 'omp');
   await enterModelId(page,title.getByLabel('模型',{exact:true}),'synthetic-small');
   await chooseOption(page, memory.getByRole('combobox', { name: '执行端', exact: true }), 'codex');
   await enterModelId(page,memory.getByLabel('模型',{exact:true}),'synthetic-balanced');
-  await expect(progress).toBeVisible();await chooseOption(page,progress.getByRole('combobox',{name:'执行端',exact:true}),'omp');await enterModelId(page,progress.getByLabel('模型',{exact:true}),'synthetic-progress');
   await page.getByLabel('自动生成对话标题', { exact: true }).check();
   await expect(memory.getByLabel('请求记忆生成',{exact:true})).toBeChecked();
   await memory.getByLabel('请求记忆生成', {exact:true}).uncheck();
   await memory.getByLabel('请求记忆生成', {exact:true}).check();
   await waitForAutosave(page);
   const saved = (await (await request.get('/api/config')).json()).config;
-  expect(saved.system.tasks).toEqual({ title: { cli: 'omp', model: 'synthetic-small' }, memory: { cli: 'codex', model: 'synthetic-balanced' }, taskProgress:{cli:'omp',model:'synthetic-progress'} });
+  expect(saved.system.tasks).toEqual({ title: { cli: 'omp', model: 'synthetic-small' }, memory: { cli: 'codex', model: 'synthetic-balanced' }, taskProgress:legacyProfile });
+  expect(saved.system.automaticTaskProgress).toBe(true);
   expect(saved.system.memory).toMatchObject({language:'en',request:{generate:true,read:true}});
   expect(saved.agents[0].models).toEqual({});
   await page.reload();
   await expectSelection(title.getByLabel('模型',{exact:true}),'synthetic-small');
   await expectSelection(memory.getByLabel('模型',{exact:true}),'synthetic-balanced');
-  await expectSelection(progress.getByLabel('模型',{exact:true}),'synthetic-progress');
-  await chooseOption(page,progress.getByRole('combobox',{name:'执行端',exact:true}),'');await waitForAutosave(page);expect((await(await request.get('/api/config')).json()).config.system.tasks.taskProgress).toBeUndefined();await expectSelection(progress.getByLabel('模型',{exact:true}),'');
+  await expect(progress).toHaveCount(0);
   await expect(memory.getByLabel('请求记忆生成',{exact:true})).toBeChecked();
   await page.goto('/settings/memory');await expect(page.getByRole('switch',{name:'请求记忆读取',exact:true})).toBeChecked();
   await page.setViewportSize({ width: 390, height: 844 });

@@ -47,14 +47,21 @@ test('board drag persists status without starting a run; completion and reopenin
  await card.dragTo(page.getByRole('region',{name:'需要你处理',exact:true}),{sourcePosition:{x:6,y:6}});await expect(page.getByRole('region',{name:'需要你处理',exact:true}).locator(`[data-task-id="${task.id}"]`)).toBeVisible();await expect(page.getByRole('dialog')).toHaveCount(0);
  expect((await(await request.get('/api/v2/tasks/'+task.id)).json()).runs).toHaveLength(0);
 });
-test('task progress preference is saved from creation and detail',async({page,request})=>{
+test('task creation and detail omit automatic evaluation but preserve explicit review and acceptance',async({page,request})=>{
  await page.goto('/tasks?action=create');await page.getByRole('button',{name:'手动填写',exact:true}).click();
  const editor=page.locator('.task-creation-panel:visible');await editor.getByLabel('任务标题',{exact:true}).fill('手动跟进');
- await editor.getByRole('switch',{name:/自动评估进度/}).uncheck();await page.getByRole('button',{name:'创建任务',exact:true}).click();
+ await expect(editor.getByText('自动评估进度',{exact:true})).toHaveCount(0);
+ const creation=page.waitForRequest(req=>req.method()==='POST'&&new URL(req.url()).pathname==='/api/v2/tasks');
+ await page.getByRole('button',{name:'创建任务',exact:true}).click();expect((await creation).postDataJSON()).not.toHaveProperty('automaticProgress');
  await expect(page.getByRole('heading',{name:'手动跟进',exact:true})).toBeVisible();
- await page.locator('.task-execution-options > summary').click();const control=page.getByRole('switch',{name:/自动评估进度/});await expect(control).not.toBeChecked();await control.check();
- await page.reload();await page.locator('.task-execution-options > summary').click();await expect(control).toBeChecked();
- const detail=await(await request.get('/api/v2/tasks/'+new URL(page.url()).pathname.split('/').at(-1))).json();expect(detail.task.automaticProgress).toBe(true);
+ await page.locator('.task-execution-process > summary').click();await page.locator('.task-execution-options > summary').click();
+ await expect(page.getByRole('combobox',{name:'执行会话',exact:true})).toBeVisible();
+ await expect(page.locator('.task-detail').getByText('自动评估进度',{exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'提交验收',exact:true}).click();
+ await page.getByRole('button',{name:'确认完成',exact:true}).click();
+ await expect(page.getByRole('button',{name:'重新打开',exact:true})).toBeVisible();
+ await expect(page.locator('.task-execution-options')).toHaveCount(0);
+ const detail=await(await request.get('/api/v2/tasks/'+new URL(page.url()).pathname.split('/').at(-1))).json();expect(detail).toMatchObject({task:{state:'completed',completion:{completedBy:'user'}},runs:[]});
 });
 test('board keyboard moves handle rejection and terminal reopen without starting execution',async({page,request})=>{
  const task=await(await request.post('/api/v2/tasks',{headers:{'Idempotency-Key':'board-keyboard'},data:{goal:'键盘移动任务'}})).json();

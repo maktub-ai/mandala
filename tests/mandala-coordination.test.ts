@@ -69,15 +69,13 @@ it('creates a coordination goal under the authenticated owner claimed after serv
   await memoryRuntime.close();
  }
 });
-it('reference gives no participation; explicit takeover persists authority and suppresses side assessment',async()=>{
+it('reference gives no participation; explicit takeover persists authority',async()=>{
  const p={userId:store.ownerUserId},agent={...p,agentId:source.agentId};
  const ordinary=store.createConversation({projectId:'',agentId:'worker',cli:'codex',model:null});
  const task=createTaskWithExecutions(store,tasks,p,{goal:'Existing'},[ordinary.id],'existing');
  expect(()=>tasks.getTask(agent,task.id)).toThrow();expect(service.list()).toEqual([]);
  const adopted=await service.takeover(source,{taskId:task.id,expectedRevision:task.revision,criteria},'take');
  expect(adopted.participantAgentIds).toContain(source.agentId);expect(service.list()[0]).toMatchObject({taskId:task.id,relation:'taken-over',sourceEventId:source.humanEventId});
- expect(tasks.snapshotProgress(p,ordinary.id)).toEqual([]);
- const other=store.createConversation({projectId:'',agentId:'worker',cli:'codex',model:null}),ordinaryTask=createTaskWithExecutions(store,tasks,p,{goal:'ordinary'},[other.id],'ordinary');expect(tasks.snapshotProgress(p,other.id).map(s=>s.task.id)).toEqual([ordinaryTask.id]);
 });
 it('rejects ordinary identities and nonhuman or foreign provenance for takeover',async()=>{
  const task=tasks.createTask({userId:store.ownerUserId},{goal:'private'},'private');

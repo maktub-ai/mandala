@@ -340,8 +340,6 @@ export async function readConfig(
 const writes = new Map<string, Promise<unknown>>();
 const codeGraphRevisions = new Map<string,number>();
 export const codeGraphConfigurationAuthority = (home:string) => ({revision:codeGraphRevisions.get(home)??0,pending:writes.has(home)});
-const progressRevisions = new Map<string,number>();
-export const taskProgressSettingsRevision = (home:string) => progressRevisions.get(home) ?? 0;
 export async function writeConfig(
   home: string,
   value: Config | LegacyConfig,
@@ -415,8 +413,7 @@ export async function writeConfig(
           if (hash(await readFile(destination, "utf8")) !== expectedRevision)
             throw new Error("configuration changed");
           assertAuthorized?.();
-          // Invalidate any evaluations that started before this publication attempt.
-          if(config.system?.automaticTaskProgress===false)progressRevisions.set(home,taskProgressSettingsRevision(home)+1);
+          // Invalidate skill learning that started before this publication attempt.
           if(config.system?.skillLearning===false){
             const store=openStore(home);try{store.database.exec('CREATE TABLE IF NOT EXISTS skill_learning_policy(id INTEGER PRIMARY KEY,epoch INTEGER NOT NULL); INSERT INTO skill_learning_policy VALUES(1,1) ON CONFLICT(id) DO UPDATE SET epoch=epoch+1');}finally{store.close();}
           }

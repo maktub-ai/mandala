@@ -148,10 +148,6 @@
 @media(max-width:600px) { .task-row > time { order:4; margin-left:40px; width:calc(100% - 40px); }.task-filters label { min-width:0; } }
 
 @media(max-width:720px) { .task-list-toolbar .task-filters { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); width:100%; gap:12px; }.task-list-toolbar .task-filters label { min-width:0; width:100%; }.task-list-toolbar .task-filters .ui-select { min-width:0; width:100%; } }
-.task-progress-toggle { display:flex !important; align-items:center; gap:12px; padding:12px 0; }
-.task-progress-toggle > input { flex:none; width:34px; height:20px; }
-.task-progress-toggle > span { display:grid; gap:4px; font-size:var(--type-ui); }
-.task-progress-toggle small { color:var(--muted); font-size:var(--type-meta); font-weight:400; }
 .task-board { flex:1; min-height:240px; grid-auto-flow:column; grid-template-columns:none; grid-auto-columns:minmax(200px,1fr); grid-auto-rows:minmax(0,1fr); }
 .task-board-hint { margin:0 0 16px; color:var(--muted); font-size:var(--type-meta); }
 .task-board .task-group { display:flex; flex-direction:column; min-width:0; min-height:0; transition:background-color 120ms,border-color 120ms; }

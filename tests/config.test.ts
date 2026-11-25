@@ -260,15 +260,13 @@ it('rejects unsupported memory language preferences',async()=>{
  await expect(writeConfig(home,{...config,system:{cli:'codex',memory:{language:'unsupported'}}} as unknown as Config,revision)).rejects.toThrow();
 });
 
-it('progress disable revision survives re-enable and ignores rejected saves',async()=>{
- const {taskProgressSettingsRevision}=await import('../server/config');
- let saved=await readConfig(home);const initial=taskProgressSettingsRevision(home);
- await expect(writeConfig(home,{...saved.config,system:{cli:'codex',automaticTaskProgress:false}},'stale')).rejects.toThrow();
- expect(taskProgressSettingsRevision(home)).toBe(initial);
- await writeConfig(home,{...saved.config,system:{cli:'codex',automaticTaskProgress:false}},saved.revision);
- const disabled=taskProgressSettingsRevision(home);expect(disabled).toBeGreaterThan(initial);
- saved=await readConfig(home);await writeConfig(home,{...saved.config,system:{...saved.config.system!,automaticTaskProgress:true}},saved.revision);
- expect(taskProgressSettingsRevision(home)).toBe(disabled);
+it.each([true,false])('round-trips the retired progress preference (%s) alongside active system settings',async automaticTaskProgress=>{
+ const {config,revision}=await readConfig(home);
+ const legacy={automaticTaskProgress,tasks:{taskProgress:{cli:'codex' as const,model:'legacy-judge'}}};
+ await writeConfig(home,{...config,system:legacy},revision);
+ const saved=await readConfig(home);expect(saved.config.system).toMatchObject(legacy);
+ await writeConfig(home,{...saved.config,system:{...saved.config.system,automaticTitles:true}},saved.revision);
+ expect((await readConfig(home)).config.system).toMatchObject({...legacy,automaticTitles:true});
 });
 
 it("round-trips emoji and icon symbols for Agents and Projects", async () => {

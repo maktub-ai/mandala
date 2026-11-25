@@ -5,7 +5,7 @@ import { retainNativeOccupancy } from './task-recovery';
 import {taskActivity} from './task-progress-view';
 import type { createAssets } from './assets';
 import { initializeTaskSchema } from './task-schema';
-import type { TaskExecution, TaskExecutionInput, Criterion, ContextSnapshot, Continuation, Receipt, Run, RunControl, RunIdentity, RunRouting, Task, TaskInput, TaskPatch, TaskProgressSnapshot, TaskProgressState, PlanStepInput, TerminalRunEvent, ExpectedOutput } from '../shared/tasks';
+import type { TaskExecution, TaskExecutionInput, Criterion, ContextSnapshot, Continuation, Receipt, Run, RunControl, RunIdentity, RunRouting, Task, TaskInput, TaskPatch, PlanStepInput, TerminalRunEvent, ExpectedOutput } from '../shared/tasks';
 import {isHumanInput,projectTaskExecutions} from '../shared/tasks';
 import { DomainError, type Principal, type VersionRef } from '../shared/workspace-contracts';
 
@@ -359,15 +359,10 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
   db.prepare('DELETE FROM task_participants WHERE task_id=?').run(id);
   for(const agentId of input.participantAgentIds)db.prepare('INSERT INTO task_participants VALUES (?,?)').run(id,agentId);
  };
- const progressSnapshot = (p:Principal,id:string):TaskProgressSnapshot => {
-  const task=getTask(p,id);
-  return {task:{id:task.id,goal:task.goal,criteria:task.criteria,state:task.state,revision:task.revision,conversationIds:task.conversationIds},executions:task.executions.map(({id,conversationId,request,latestRun})=>({id,conversationId,request,latestRun}))};
- };
  const listTasks = (p:Principal):Task[] => {
   if(!nonempty(p.userId))fail('forbidden',403);
   return db.prepare('SELECT * FROM work_tasks WHERE owner_user_id=? ORDER BY created_at DESC,id').all(p.userId).map(taskRow).filter(task=>p.agentId===undefined||p.agentId===task.creatorAgentId||p.agentId===task.assigneeAgentId||task.participantAgentIds.includes(p.agentId)||task.executions.some(execution=>execution.agentId===p.agentId));
  };
- const listLinkedTasks = (p:Principal,conversationId:string,includeSource=false):Task[] => {authorizeConversation(p,conversationId);return listTasks(p).filter(task=>task.conversationIds.includes(conversationId)||includeSource&&task.originConversationId===conversationId);};
  const prepareCreate = (p: Principal, submitted: TaskInput, commandKey: string, creationSource?:'system', sourceChat?:string) => {
    if(!submitted||typeof submitted!=='object'||Array.isArray(submitted)||Object.keys(submitted).some(key=>!['goal','criteria','acceptance','projectId','assigneeAgentId','originConversationId','participantAgentIds','automaticProgress','projectIds','moduleRef'].includes(key)))fail('invalid_task',422);
    validateProjectFields(p,submitted);
@@ -424,17 +419,6 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
     writeLinks(id,updated);saveCommand(p,commandKey,body,id,null);
     store.enqueueOutbox({type:'task.updated',aggregateId:id,aggregateRevision:revision+1,causationId:commandKey,payload:{taskId:id,...(state!==task.state?{state}:{})}});
     return loadTask(id);
- };
- const isMandalaOwned=(id:string)=>Boolean(db.prepare("SELECT name FROM sqlite_master WHERE name='mandala_ownership'").get()&&db.prepare('SELECT task_id FROM mandala_ownership WHERE task_id=?').get(id));
- const commitTaskProgress = (p:Principal,snapshot:TaskProgressSnapshot,nextState:TaskProgressState,guard?:()=>boolean):boolean => {
-    if(!['todo','running','waiting','review'].includes(nextState))fail('invalid_task',422);
-    const current=progressSnapshot(p,snapshot.task.id);
-    if(isMandalaOwned(snapshot.task.id)||!getTask(p,snapshot.task.id).automaticProgress||['completed','cancelled'].includes(current.task.state)||canonical(current)!==canonical(snapshot)||guard&&!guard())return false;
-    if(current.task.state===nextState)return false;
-    db.prepare('UPDATE work_tasks SET state=?,waiting_reason=?,revision=revision+1 WHERE id=?').run(nextState,nextState==='waiting'?'input':null,current.task.id);
-    store.enqueueOutbox({type:'task.progress_updated',aggregateId:current.task.id,aggregateRevision:current.task.revision+1,causationId:`progress:${current.task.id}:${current.task.revision}`,payload:{taskId:current.task.id,state:nextState}});
-
-    return true;
  };
  const loadReceipt = (id:string):Receipt => {
   const row=db.prepare('SELECT * FROM task_receipts WHERE id=?').get(id);
@@ -529,13 +513,9 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
   listExecutions(p:Principal,taskId:string):TaskExecution[] {return visibleExecutions(p,getTask(p,taskId));},
   planVersions,
   listTasks(p:Principal):Task[] {return listTasks(p).map(task=>taskView(p,task));},
-  listLinkedTasks(p:Principal,id:string):Task[] {return listLinkedTasks(p,id,true).map(task=>taskView(p,task));},
-  snapshotProgress(p:Principal,conversationId:string):TaskProgressSnapshot[] {return listLinkedTasks(p,conversationId).filter(task=>task.automaticProgress&&!isMandalaOwned(task.id)&&!['completed','cancelled'].includes(task.state)).map(task=>progressSnapshot(p,task.id));},
-  applyTaskProgress(p:Principal,snapshot:TaskProgressSnapshot,nextState:TaskProgressState,guard?:()=>boolean):boolean {
-   requireRoot(p);return store.transaction(()=>commitTaskProgress(p,snapshot,nextState,guard));
-  },
-  applyTaskProgressBatch(p:Principal,entries:{snapshot:TaskProgressSnapshot;state:TaskProgressState;guard?:()=>boolean}[]):boolean[] {
-   requireRoot(p);return store.transaction(()=>entries.map(entry=>commitTaskProgress(p,entry.snapshot,entry.state,entry.guard)));
+  listLinkedTasks(p:Principal,id:string):Task[] {
+   authorizeConversation(p,id);
+   return listTasks(p).filter(task=>task.conversationIds.includes(id)||task.originConversationId===id).map(task=>taskView(p,task));
   },
   moveTask(p:Principal,id:string,revision:number,state:Task['state'],reason:string|null,commandKey:string):Task {
    if(!['todo','running','waiting','review','completed','cancelled'].includes(state)||!Number.isSafeInteger(revision)||revision<1)fail('invalid_task',422);

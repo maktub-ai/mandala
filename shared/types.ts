@@ -28,8 +28,11 @@ export type KnowledgeAccess = { mode: "owner" | "private" | "selected" | "all"; 
 export type RuntimeConfig = Partial<Record<Cli, { args?: string[]; env?: Record<string, string>; approvalMode?: ApprovalMode; fullAccess?: boolean; gateway?: 'native' | 'unavailable' }>>;
 export type SystemTaskConfig = { cli: Cli; model?: string };
 export type SystemConfig = Partial<SystemTaskConfig> & {
-  skillLearning?: boolean; automaticTitles?: boolean; automaticTaskProgress?: boolean; memoryCapture?: boolean;
+  skillLearning?: boolean; automaticTitles?: boolean; memoryCapture?: boolean;
+  /** Preserved for legacy configuration round-trips; no longer schedules evaluations. */
+  automaticTaskProgress?: boolean;
   memory?: { language?: "zh-CN" | "en"; request?: { generate?: boolean; read?: boolean }; session?: { generate?: boolean; read?: boolean }; idleHours?: number };
+  /** The legacy taskProgress profile is accepted but unused. */
   tasks?: Partial<Record<"title" | "memory" | "taskProgress", SystemTaskConfig>>;
 };
 export type KnowledgeEntry = {

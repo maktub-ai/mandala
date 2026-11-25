@@ -50,8 +50,16 @@ test('obsolete Task input is rejected rather than silently ignored',()=>{
 });
 test.each([false,true])('linked-chat migration backs up before clearing and retains data if backup fails=%s',failure=>{
  const {home,store,p,tasks,chat}=setup(),c=chat(),task=tasks.createTask(p,{goal:'Legacy'},'legacy');store.database.exec('CREATE TABLE IF NOT EXISTS task_conversation_links(task_id TEXT,conversation_id TEXT)');store.database.prepare('INSERT INTO task_conversation_links VALUES (?,?)').run(task.id,c.id);
+ store.database.exec(`CREATE TABLE task_progress_evaluations(source_event_id INTEGER PRIMARY KEY,conversation_id TEXT NOT NULL,status TEXT NOT NULL,snapshot TEXT NOT NULL,diagnostic TEXT,created_at TEXT NOT NULL);
+ CREATE TABLE task_progress_heads(task_id TEXT PRIMARY KEY,source_event_id INTEGER NOT NULL);`);
+ const event=store.appendEvent(c.id,'metadata',{systemTask:'taskProgress',status:'completed'});
+ store.database.prepare('INSERT INTO task_progress_evaluations VALUES (?,?,?,?,?,?)').run(event.id,c.id,'completed','[]',JSON.stringify(event.data),event.createdAt);
+ store.database.prepare('INSERT INTO task_progress_heads VALUES (?,?)').run(task.id,event.id);
+ const evaluations=store.database.prepare('SELECT * FROM task_progress_evaluations').all(),heads=store.database.prepare('SELECT * FROM task_progress_heads').all();
  if(failure){writeFileSync(join(home,'backups'),'blocked');expect(()=>createTasks(store)).toThrow();expect(tasks.getTask(p,task.id).goal).toBe('Legacy');return;}
  const migrated=createTasks(store);expect(migrated.listTasks(p)).toEqual([]);expect(store.getConversation(c.id)).toBeTruthy();const backups=readdirSync(join(home,'backups'));expect(backups).toHaveLength(1);const snapshot=new DatabaseSync(join(home,'backups',backups[0]));try{expect(snapshot.prepare('SELECT goal FROM work_tasks').get()?.goal).toBe('Legacy');}finally{snapshot.close();}expect(store.database.prepare("SELECT name FROM sqlite_master WHERE name='task_conversation_links'").get()).toBeUndefined();createTasks(store);expect(readdirSync(join(home,'backups'))).toEqual(backups);
+ expect(store.database.prepare('SELECT * FROM task_progress_evaluations').all()).toEqual(evaluations);
+ expect(store.database.prepare('SELECT * FROM task_progress_heads').all()).toEqual(heads);
 });
 
 test('all never-run executions leave task todo and expose no completed delivery',()=>{

@@ -33,31 +33,11 @@ test('association authorization rolls back every edit including origin changes',
  expect(()=>tasks.updateTask(p,task.id,1,{originConversationId:denied.id},'origin-denied')).toThrow('conversation denied');
  expect(()=>tasks.attachExecution(p,task.id,1,'missing','missing')).toThrow(expect.objectContaining({code:'conversation_not_found'}));
 });
-test('progress applies only exact links, revision and full execution snapshot under transactional source guard',()=>{
- const {store,tasks}=setup(),chat=store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null}),executionChat=store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null});
- const task=createTaskWithExecutions(store,tasks,p,{goal:'Goal'},[chat.id],'goal');
- const [snapshot]=tasks.snapshotProgress(p,chat.id);expect(snapshot.executions).toMatchObject([{conversationId:chat.id,latestRun:null}]);
- expect(tasks.applyTaskProgress(p,snapshot,'review',()=>{expect(store.database.isTransaction).toBe(true);return false;})).toBe(false);
- const execution=tasks.createExecution(p,task.id,{conversationId:executionChat.id,agentId:'a',projectId:'p',request:'Collect evidence'},'execution');
- expect(tasks.applyTaskProgress(p,snapshot,'review',()=>true)).toBe(false);
- const [fresh]=tasks.snapshotProgress(p,chat.id);expect(fresh.executions).toEqual(expect.arrayContaining([expect.objectContaining({id:execution.id,conversationId:executionChat.id,request:'Collect evidence',latestRun:null})]));
- expect(tasks.applyTaskProgress(p,fresh,'waiting',()=>true)).toBe(true);expect(tasks.getTask(p,task.id)).toMatchObject({state:'waiting',waitingReason:'input'});
- const [waiting]=tasks.snapshotProgress(p,chat.id);expect(tasks.applyTaskProgress(p,waiting,'review',()=>true)).toBe(true);
- const current=tasks.getTask(p,task.id);tasks.userCommand(p,task.id,current.revision,'accept');expect(tasks.applyTaskProgress(p,waiting,'running',()=>true)).toBe(false);expect(tasks.snapshotProgress(p,chat.id)).toEqual([]);
-});
-test('unlink, task edits and new executions invalidate progress; repeated state has no revision churn',()=>{
- const {store,tasks}=setup(),chat=store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null}),task=createTaskWithExecutions(store,tasks,p,{goal:'Goal'},[chat.id],'new');
- const [initial]=tasks.snapshotProgress(p,chat.id);tasks.updateTask(p,task.id,1,{goal:'Edited'},'edit');expect(tasks.applyTaskProgress(p,initial,'review',()=>true)).toBe(false);
- const [edited]=tasks.snapshotProgress(p,chat.id),executionChat=store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null});tasks.createExecution(p,task.id,{conversationId:executionChat.id,agentId:'a',projectId:'p',request:'New work'},'execution');expect(tasks.applyTaskProgress(p,edited,'review',()=>true)).toBe(false);
- const [current]=tasks.snapshotProgress(p,chat.id);expect(tasks.applyTaskProgress(p,current,'todo',()=>true)).toBe(false);expect(tasks.getTask(p,task.id).revision).toBe(2);
- tasks.removeExecution(p,task.id,2,task.executions[0].id,'remove');expect(tasks.applyTaskProgress(p,current,'review',()=>true)).toBe(false);
-});
 test('explicit links persist and additive migration never rewrites historical completed records',()=>{
  const {store,tasks}=setup(),chat=store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null}),task=createTaskWithExecutions(store,tasks,p,{goal:'Old goal',participantAgentIds:['b']},[chat.id],'new');
  const historical={completedBy:'delivery',sourceRunId:null,artifactVersions:[],acceptedAt:'2025-01-01T00:00:00Z'};
  store.database.prepare("UPDATE work_tasks SET state='completed',completion=? WHERE id=?").run(JSON.stringify(historical),task.id);
  const reopened=createTasks(store);expect(reopened.getTask(p,task.id)).toMatchObject({state:'completed',completion:historical,revision:1,participantAgentIds:['b'],conversationIds:[chat.id]});
- expect(reopened.snapshotProgress(p,chat.id)).toEqual([]);
 });
 test('Agent may explicitly select review but cannot complete or resurrect user-terminal task',()=>{
  const {tasks}=setup(),agent={...p,agentId:'a'},task=tasks.createTask(agent,{goal:'Goal'},'new');
@@ -74,15 +54,15 @@ test('participant metadata edits do not require reading existing other-Agent con
  expect(tasks.getTask(b,task.id).revision).toBe(2);
 });
 
-test('per-task progress preference persists and invalidates already running evaluations',()=>{
+test('legacy per-task progress preference round-trips without changing task state',()=>{
  const {store,tasks}=setup(),chat=store.createConversation({projectId:'p',agentId:'a',cli:'codex',model:null});
  const task=createTaskWithExecutions(store,tasks,p,{goal:'Manual progress',automaticProgress:false},[chat.id],'manual');
- expect(task.automaticProgress).toBe(false);expect(tasks.snapshotProgress(p,chat.id)).toEqual([]);
+ expect(task.automaticProgress).toBe(false);
  const enabled=tasks.updateTask(p,task.id,task.revision,{automaticProgress:true},'enable');
- const [snapshot]=tasks.snapshotProgress(p,chat.id);expect(snapshot).toBeDefined();
+ expect(enabled).toMatchObject({automaticProgress:true,state:'todo'});
  const disabled=tasks.updateTask(p,task.id,enabled.revision,{automaticProgress:false},'disable');
- expect(tasks.applyTaskProgress(p,snapshot,'review')).toBe(false);
- expect(createTasks(store).getTask(p,task.id).automaticProgress).toBe(false);
+ const edited=tasks.updateTask(p,task.id,disabled.revision,{goal:'Edited without the legacy field'},'edit');
+ expect(createTasks(store).getTask(p,task.id)).toMatchObject({automaticProgress:false,state:'todo',revision:edited.revision});
  expect(()=>tasks.updateTask(p,task.id,disabled.revision,{automaticProgress:'yes'} as never,'bad')).toThrow();
 });
 

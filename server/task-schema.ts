@@ -57,7 +57,8 @@ export function initializeTaskSchema(store:Store){
    preserveTaskMemory(store,beforeEvents);
    if(exists('artifact_links'))for(const runId of oldRuns)db.prepare('DELETE FROM artifact_links WHERE run_id=?').run(runId);
 
-   const tables=['task_receipt_inputs','task_run_observations','task_progress_evaluations','task_progress_heads','mandala_ownership','mandala_delegations','task_completion_intents','task_inquiry_waits','task_plan_commands','task_plan_steps','task_creation_sources','task_participants','task_conversation_links','conversation_task_provenance','task_event_diagnostics','task_legacy_sources','task_command_dedup','task_dependencies','task_context_versions','task_output_versions','context_snapshots','task_receipts','task_runs','task_executions','work_tasks'];
+   // The retired evaluator's history and heads are no longer written; leave existing tables intact.
+   const tables=['task_receipt_inputs','task_run_observations','mandala_ownership','mandala_delegations','task_completion_intents','task_inquiry_waits','task_plan_commands','task_plan_steps','task_creation_sources','task_participants','task_conversation_links','conversation_task_provenance','task_event_diagnostics','task_legacy_sources','task_command_dedup','task_dependencies','task_context_versions','task_output_versions','context_snapshots','task_receipts','task_runs','task_executions','work_tasks'];
    for(const table of tables)db.exec(`DROP TABLE IF EXISTS ${table}`);
    db.exec("DELETE FROM schema_migrations WHERE key IN ('durable_tasks_001_schema','durable_tasks_001_legacy','durable_tasks_002_scheduler','durable_tasks_005_native_uncertainty','durable_tasks_006_conversation_provenance','durable_tasks_007_explicit_links','durable_tasks_008_participants','task_execution_001_snapshots','task_progress_002_preference','task_project_attribution_001','flat_tasks_001_schema','flat_tasks_002_schema')");
   });}finally{db.exec('PRAGMA foreign_keys=ON');}
