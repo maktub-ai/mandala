@@ -15,15 +15,15 @@ import {businessCliContext} from './business-cli-context';
 import * as discovery from '../server/work-directory-discovery';
 import * as capabilities from '../server/team-capability-discovery';
 const cleanup:(()=>Promise<void>)[]=[];afterEach(async()=>{for(const c of cleanup.splice(0).reverse())await c();vi.restoreAllMocks();});
-async function setup(){
+async function setup(hooks:{prepareChild?:(options:CodexOptions)=>void;startChild?:()=>void}={}){
  const home=await mkdtemp(join(tmpdir(),'mandala-bound-')),store=openStore(home);const first=await ensureConfiguredMandala(home);
  await writeConfig(home,{...first.config,agents:[...first.config.agents,...['worker','temp'].map(id=>({id,name:id,instructions:'Execute',defaultCli:'codex' as const,models:{},mcp:[],skills:[],...(id==='temp'?{temporary:true}:{})}))]},first.revision);
  const entries:{options:CodexOptions;token:string;native:string}[]=[];
- const factory=async(options:CodexOptions):Promise<CodexClient>=>{const entry={options,token:'',native:'native-'+entries.length};entries.push(entry);return {getStatus:async()=>({status:'ready',version:'fixture'}),listModels:async()=>[],startThread:async p=>{entry.token=businessCliContext(p.instructions).token;return entry.native;},resumeThread:async(_id,_m,instructions)=>{entry.token=businessCliContext(instructions).token;},startTurn:async()=>entry.native+'-turn',interrupt:async()=>{},replyApproval(){},close(){}};};
+ const factory=async(options:CodexOptions):Promise<CodexClient>=>{const entry={options,token:'',native:'native-'+entries.length};entries.push(entry);return {getStatus:async()=>({status:'ready',version:'fixture'}),listModels:async()=>[],startThread:async p=>{entry.token=businessCliContext(p.instructions).token;return entry.native;},resumeThread:async(_id,_m,instructions)=>{entry.token=businessCliContext(instructions).token;},prepareTurn:async()=>{if(entry.native!=='native-0')hooks.prepareChild?.(options);},startTurn:async()=>{if(entry.native!=='native-0')hooks.startChild?.();return entry.native+'-turn';},interrupt:async()=>{},replyApproval(){},close(){}};};
  const manager=createSessionManager(store,async()=>(await readConfig(home)).config,factory,undefined,home);cleanup.push(async()=>{await manager.close();store.close();await rm(home,{recursive:true,force:true});});
  const chat=ensureMandalaConversation(store,(await readConfig(home)).config);
  const finish=(entry=entries[0])=>entry.options.onEvent({method:'turn/completed',params:{threadId:entry.native,turn:{id:entry.native+'-turn',status:'completed'}}});
- return {home,store,manager,chat,entries,finish};
+ return {home,store,manager,chat,entries,finish,factory};
 }
 const criteria=[{id:'ok',text:'Deliver answer',checkRef:null}];
 it('records real task and automation no-ops without hiding subsequent changes',async()=>{
@@ -488,6 +488,96 @@ it('selects the scoped unnamed specialist and dispatches the same one-off inquir
   expect(persisted.prepare('SELECT count(*) AS count FROM agent_messages').get()?.count).toBe(3);
  }finally{persisted.close();}
 
+});
+
+it('accepts a single automatic inquiry per human request across rewritten payloads and reused keys',async()=>{
+ const {home,store,manager,chat,entries,finish}=await setup();
+ const state=await readConfig(home);
+ await writeConfig(home,{...state.config,agents:state.config.agents.map(a=>a.id==='worker'?{...a,routingRemit:'Histogram captions'}:a)},state.revision);
+ await manager.send(chat.id,'Ask a specialist for a histogram caption');
+ const args={automatic:true,targetAgentId:'worker',targetProjectId:null,text:'Write a histogram caption',policy:'notify'};
+ const token=entries[0].token;
+ const [first,replay]=await Promise.all([
+  manager.callBoundTool(token,'message_ask',args,'choose'),
+  manager.callBoundTool(token,'message_ask',{...args,text:'Compose the requested caption'},'retry'),
+ ]) as import('../shared/agent-messages').AgentMessage[];
+ expect(replay.id).toBe(first.id);
+ await expect(manager.callBoundTool(token,'message_ask',{...args,automatic:undefined,text:'Another caption'},'unmarked'))
+  .rejects.toMatchObject({code:'automatic_inquiry_exists'});
+ expect(store.database.prepare('SELECT count(*) AS count FROM agent_messages').get()?.count).toBe(1);
+ finish();
+ await manager.send(chat.id,'Please ask again for another caption');
+ const later=await manager.callBoundTool(entries.at(-1)!.token,'message_ask',args,'choose') as typeof first;
+ expect(later.id).not.toBe(first.id);
+ expect(later.sourceRequestEventId).not.toBe(first.sourceRequestEventId);
+});
+
+it('allows an explicit retry of a proven pre-submission failure under the same request identity',async()=>{
+ let fail=true;
+ const {home,store,manager,chat,entries,finish,factory}=await setup({prepareChild:()=>{
+  if(fail)throw new Error('Native preparation failed');
+ }});
+ const state=await readConfig(home);
+ await writeConfig(home,{...state.config,agents:state.config.agents.map(a=>a.id==='worker'?{...a,routingRemit:'Histogram captions'}:a)},state.revision);
+ await manager.send(chat.id,'Ask a specialist to draft a caption');
+ const args={automatic:true,targetAgentId:'worker',targetProjectId:null,text:'Write a caption',policy:'notify'};
+ const first=await manager.callBoundTool(entries[0].token,'message_ask',args,'choose') as import('../shared/agent-messages').AgentMessage;
+ finish();
+ await vi.waitFor(()=>expect(manager.getAgentMessage(first.id)).toMatchObject({state:'failed',submissionState:'not_submitted',retryAttemptId:expect.any(String)}));
+ const retryId=manager.getAgentMessage(first.id).retryAttemptId!;
+ expect(store.listEvents(first.targetConversationId,0).filter(e=>e.kind==='error').at(-1)?.data).toMatchObject({nativeTurnSubmitted:false});
+ await manager.close();
+ const reopened=openStore(home);
+ const resumedManager=createSessionManager(reopened,async()=>(await readConfig(home)).config,factory,undefined,home);
+ cleanup.push(async()=>{await resumedManager.close();reopened.close();});
+ expect(resumedManager.getAgentMessage(first.id)).toMatchObject({state:'failed',retryAttemptId:retryId});
+ fail=false;
+ const [retry,replay]=await Promise.all([resumedManager.retryAgentMessage(first.id,retryId),resumedManager.retryAgentMessage(first.id,retryId)]);
+ expect(retry.id).toBe(first.id);
+ expect(replay.id).toBe(first.id);
+ await vi.waitFor(()=>expect(resumedManager.getAgentMessage(first.id)).toMatchObject({state:'running',submissionState:'submitted'}));
+ const worker=entries.at(-1)!;
+ const target=store.getConversation(first.targetConversationId)!;
+ worker.options.onEvent({method:'item/completed',params:{threadId:target.nativeId,turnId:target.turnId,item:{id:'caption',type:'agentMessage',phase:'final_answer',text:'Verified caption'}}});
+ worker.options.onEvent({method:'turn/completed',params:{threadId:target.nativeId,turn:{id:target.turnId,status:'completed'}}});
+ await vi.waitFor(()=>expect(resumedManager.getAgentMessage(first.id)).toMatchObject({state:'succeeded',submissionState:'submitted',reply:'Verified caption'}));
+ expect(store.listEvents(chat.id,0).some(e=>(e.data as {agentMessage?:{id:string;reply:string}}).agentMessage?.reply==='Verified caption')).toBe(true);
+ expect(store.database.prepare('SELECT count(*) AS count FROM agent_messages').get()?.count).toBe(1);
+ expect(entries).toHaveLength(3);
+});
+
+it('records a native process exit during preparation as a proven unsubmitted inquiry',async()=>{
+ const {home,store,manager,chat,entries,finish}=await setup({prepareChild:options=>{
+  options.onExit('Fixture exited during preparation');
+  throw new Error('Native client closed');
+ }});
+ const state=await readConfig(home);
+ await writeConfig(home,{...state.config,agents:state.config.agents.map(a=>a.id==='worker'?{...a,routingRemit:'Histogram captions'}:a)},state.revision);
+ await manager.send(chat.id,'Ask a specialist for a caption');
+ const first=await manager.callBoundTool(entries[0].token,'message_ask',{
+  automatic:true,targetAgentId:'worker',targetProjectId:null,text:'Write a caption',
+ },'choose') as import('../shared/agent-messages').AgentMessage;
+ finish();
+ await vi.waitFor(()=>expect(manager.getAgentMessage(first.id)).toMatchObject({
+  state:'failed',submissionState:'not_submitted',retryAttemptId:expect.any(String),
+ }));
+ expect(store.listEvents(first.targetConversationId,0).filter(e=>e.kind==='error').at(-1)?.data).toMatchObject({nativeTurnSubmitted:false});
+ expect(entries).toHaveLength(2);
+});
+
+it('keeps a lost native submission acknowledgement unknown without offering a retry',async()=>{
+ const {home,store,manager,chat,entries,finish}=await setup({startChild:()=>{throw new Error('Lost native response');}});
+ const state=await readConfig(home);
+ await writeConfig(home,{...state.config,agents:state.config.agents.map(a=>a.id==='worker'?{...a,routingRemit:'Histogram captions'}:a)},state.revision);
+ await manager.send(chat.id,'Ask a specialist for a caption');
+ const args={automatic:true,targetAgentId:'worker',targetProjectId:null,text:'Write a caption',policy:'notify'};
+ const token=entries[0].token;
+ const first=await manager.callBoundTool(token,'message_ask',args,'choose') as import('../shared/agent-messages').AgentMessage;
+ finish();
+ await vi.waitFor(()=>expect(manager.getAgentMessage(first.id)).toMatchObject({state:'unknown',submissionState:'unknown'}));
+ expect(manager.getAgentMessage(first.id).retryAttemptId).toBeUndefined();
+ expect(store.listEvents(chat.id,0).some(e=>(e.data as {agentMessage?:{id:string;state:string}}).agentMessage?.state==='unknown')).toBe(true);
+ expect(entries).toHaveLength(2);
 });
 
 it('routes using current Project membership and rejects expired lookup authority',async()=>{

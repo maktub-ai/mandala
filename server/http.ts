@@ -636,6 +636,11 @@ export function createHttpServer({
       }
       const agentMessagePath=path.match(/^\/api\/agent-messages\/([a-zA-Z0-9_-]+)$/);
       if(agentMessagePath&&method==='GET')return json(res,200,manager.getAgentMessage(agentMessagePath[1]));
+      const agentMessageRetryPath=path.match(/^\/api\/agent-messages\/([a-zA-Z0-9_-]+)\/retry$/);
+      if(agentMessageRetryPath&&method==='POST'){
+        const body=await requestBody(req);
+        return json(res,200,await manager.retryAgentMessage(agentMessageRetryPath[1],string(body?.attemptId)));
+      }
       if (path === "/api/tasks") {
         if (method === "GET") return json(res, 200, readScope(()=>manager.listTasks(url.searchParams.get("projectId") ?? undefined,url.searchParams.get("view")==="control")));
         if (method === "POST") {

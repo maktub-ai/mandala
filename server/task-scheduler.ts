@@ -194,13 +194,14 @@ export function createTaskScheduler(store: Store, tasks: ReturnType<typeof creat
    });
   },
   reconcileInput(id:string, terminal:boolean) {
-   root();store.transaction(()=>{const input=loadInput(id);
+   root();const reconcile=()=>{const input=loadInput(id);
     if(terminal)db.prepare("DELETE FROM task_native_uncertainty WHERE kind='input' AND claim_id=?").run(id);
     else retainNativeOccupancy(store,'input',id,input.conversationId);
     if(!['running','unknown'].includes(input.state))return;
     db.prepare('UPDATE task_user_inputs SET state=? WHERE id=?').run(terminal?'completed':'unknown',id);
     event('task.user_input_reconciled',id,{inputId:id,state:terminal?'completed':'unknown'});
-   });
+   };
+   if(db.isTransaction)reconcile();else store.transaction(reconcile);
   },
   resolveUnknownInput(id:string, action:'dismiss'|'retry', commandKey:string):QueuedInput {
    root();const input=loadInput(id);if(input.state!=='unknown')fail('input_not_unknown',409);

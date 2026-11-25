@@ -1,7 +1,7 @@
 import {diagnoseRuntimePrerequisites} from './native-spawn';
 import { createConversationApprovals, type ConversationApprovalScope } from './conversation-approvals';
 import { supportsConversationApproval } from '../shared/approvals';
-import {mandalaDirectory,mandalaRoutingDirectory} from './mandala-directory';
+import {isRoutingSpecialist,mandalaDirectory,mandalaRoutingDirectory} from './mandala-directory';
 import {boundTaskCriteria} from './task-criteria';
 import {hasOperationOutcome,projectOperationOutcome} from './operation-results';
 import {isDeepStrictEqual} from 'node:util';
@@ -134,6 +134,7 @@ export interface SessionManager {
   getVerification(id: string): { mcp: Record<string, string | null>; skills: { name: string; path: string }[]; loadedSignature: string; loadedRuntimeSignature?: string } | null;
   askAgent(sourceId:string,input:AgentMessageInput,options:{commandKey:string;boundInvocationId?:string}):Promise<AgentMessage>;
   getAgentMessage(id:string,agentId?:string):AgentMessage;
+  retryAgentMessage(id:string,attemptId:string):Promise<AgentMessage>;
   createTask(sourceId: string, targetAgentId: string, request: string, targetId?: string, options?: { policy?: "notify" | "resume"; commandKey?: string; boundInvocationId?: string }): Promise<Task>;
   enqueueUserInput(id: string, text: string, commandKey: string, attachments?: string[], references?: ComposerReferenceSelection[]): QueuedInput;
   enqueueTelegramInput(id:string,text:string,requestId:string,attachments:string[]):QueuedInput;
@@ -568,6 +569,13 @@ export function createSessionManager(
       (!completedOnly || last?.completed) && last?.phase !== "commentary" && last?.stopReason !== "toolUse" ? last?.text ?? "" : "").trim();
   };
   const inquirySettlementCandidates=new Set<string>();
+  const closingFailedInquiries=new Set<string>();
+  const failUnsubmittedInquiry=(inputId:string)=>{
+    store.transaction(()=>{
+      scheduler.reconcileInput(inputId,true);
+      messages.failBeforeSubmission(inputId);
+    });
+  };
   const finishMessageInput=(inputId:string,outcome:'succeeded'|'failed'|'unknown',answer:string)=>{
     for(const id of messages.finish(inputId,outcome,answer)){
       const message=messages.get(id);
@@ -1137,16 +1145,24 @@ export function createSessionManager(
             current.client = undefined;
             const nativeSubmissionState = before.cli==='codex' && current.invocation && !current.preparing
               ? current.invocation.nativeTurnId ? 'accepted' : 'unknown' : undefined;
+            const failedAutomaticInput=current.preparing&&current.queuedInputId&&messages.isAutomaticRequest(current.queuedInputId)
+              ? current.queuedInputId : undefined;
             current.preparing = false;
             if(current.directoryOwner)resources.releaseUnsubmitted(current.directoryOwner.kind,current.directoryOwner.id);
             current.approvals.clear();
             store.appendEvent(id, "error", { message: reason,
               ...(nativeSubmissionState ? {nativeSubmissionState} : {}),
+              ...(failedAutomaticInput ? {nativeTurnSubmitted:false} : {}),
             });
             state(id, "interrupted",'native_disconnected');
             current.finishStop?.();
             if(current.durableRun){tasks.markUnknown(current.durableRun.id);current.durableRun=undefined;}
-            if(current.queuedInputId){messages.finish(current.queuedInputId,'unknown','');scheduler.reconcileInput(current.queuedInputId,false);current.queuedInputId=undefined;}
+            if(failedAutomaticInput){
+              failUnsubmittedInquiry(failedAutomaticInput);
+              current.queuedInputId=undefined;
+              live.delete(id);
+              queueMicrotask(()=>{void wakeDirectories();});
+            }else if(current.queuedInputId){messages.finish(current.queuedInputId,'unknown','');scheduler.reconcileInput(current.queuedInputId,false);current.queuedInputId=undefined;}
           },
         };
         await validateHandoff();
@@ -1266,6 +1282,7 @@ export function createSessionManager(
       if(owner.kind!=='invocation')retainNativeOccupancy(store,owner.kind,owner.id,id);
       current.preparing = false;
       turnSubmitted = true;
+      if(queuedInputId)messages.submitting(queuedInputId);
       const turnId = await current.client.startTurn(invocation.nativeSessionId, text,
         before.cli === "codex" ? approvalMode === "strict" ? "strict" : approvalMode === "auto" ? "auto" : previousMode?.approvalMode === "auto" || previousMode?.approvalMode === "strict" ? "default" : undefined : before.cli === "omp" ? undefined : approvalMode,
         before.cli === "codex" ? nativeRoots : undefined,
@@ -1343,6 +1360,12 @@ export function createSessionManager(
           ...(before.cli==='codex' && turnSubmitted ? { nativeSubmissionState: submittedInvocation?.nativeTurnId ? 'accepted' : 'unknown' } : {}),
           ...(reloadBlocked?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy',nativeId:before.nativeId}:mailboxFailure?{code:mailboxFailure.code,...mailboxSetupDetails}:{}) });
       }
+      const failedAutomaticInput = !turnSubmitted&&current.queuedInputId&&messages.isAutomaticRequest(current.queuedInputId)
+        ? current.queuedInputId : undefined;
+      if(failedAutomaticInput){
+        failUnsubmittedInquiry(failedAutomaticInput);
+        current.queuedInputId=undefined;
+      }
       if (current.queuedInputId && !turnSubmitted && error instanceof DomainError && ["reference_changed", "invalid_references"].includes(error.code)) {
         scheduler.rejectUnsubmittedInput(current.queuedInputId);
         current.queuedInputId = undefined;
@@ -1351,7 +1374,8 @@ export function createSessionManager(
       if(reloadBlocked){
         if(current.queuedInputId){finishMessageInput(current.queuedInputId,'failed',error.message);scheduler.rejectUnsubmittedInput(current.queuedInputId,(error as DomainError).code as 'native_background_active'|'native_background_check_failed');current.queuedInputId=undefined;}
         if(task){store.transaction(()=>tasks.rejectQueuedRun(root,task.id,(error as DomainError).code as 'native_background_active'|'native_background_check_failed'));presentTaskReceipts(task.taskId,id,false);}
-        current.preparing=false;current.directoryOwner=undefined;current.durableRun=undefined;current.invocation=undefined;current.usage?.finish('failed');state(id,'error');throw e;
+        current.preparing=false;current.directoryOwner=undefined;current.durableRun=undefined;current.invocation=undefined;current.usage?.finish('failed');state(id,'error');
+        throw e;
       }
       const uncertainTurn =
         turnSubmitted &&
@@ -1361,11 +1385,20 @@ export function createSessionManager(
         current.usage?.finish(current.stopRequested ? 'interrupted' : 'failed');
         finishTask(id, false);
         live.delete(id);
-        await current.client?.close();
-        current.client = undefined;
-        current.approvals.clear();
-        current.finishStop?.();
-        if (chat(id).status !== "interrupted") state(id, current.stopRequested ? "interrupted" : "error");
+        if(failedAutomaticInput){
+          closingFailedInquiries.add(id);
+          if(chat(id).status!=='interrupted')state(id,current.stopRequested?'interrupted':'error');
+        }
+        try{await current.client?.close();}
+        finally{
+          current.client = undefined;
+          current.approvals.clear();
+          current.finishStop?.();
+          if(failedAutomaticInput){
+            closingFailedInquiries.delete(id);
+            if(!closed&&chat(id).status==='idle')queueMicrotask(()=>{void pump(id);});
+          }else if(chat(id).status!=='interrupted')state(id,current.stopRequested?'interrupted':'error');
+        }
       }
       if((recoveredReceipt||deferredReceipt)&&!current.stopRequested){state(id,'idle');queueMicrotask(()=>{void pump(id);});}
       throw error;
@@ -1384,7 +1417,7 @@ export function createSessionManager(
     return pending;
   };
   const pumpConversation = async (id: string) => {
-    if (closed || queuedSendPending(id) || continuity.blocked(id) || branching.has(id) || chat(id).status !== "idle") return;
+    if (closed || closingFailedInquiries.has(id) || queuedSendPending(id) || continuity.blocked(id) || branching.has(id) || chat(id).status !== "idle") return;
     let config:Config;
     try{config=await loadConfig();}catch(error){if(closed)return;throw error;}
     if(closed)return;
@@ -1476,7 +1509,10 @@ export function createSessionManager(
     return false;
   };
   // Acceptance may queue a human request while busy. Retirement occurs only at the safe execution boundary.
-  const authorizeHumanContinuation = (id:string) => {if(!hasRevokedReceiptHistory(id))authorizeExecutionHistory(id);};
+  const authorizeHumanContinuation = (id:string) => {
+    if(closingFailedInquiries.has(id))throw new DomainError('conversation_busy',409,'Receiving Agent is finishing cleanup');
+    if(!hasRevokedReceiptHistory(id))authorizeExecutionHistory(id);
+  };
   const resetRevokedContext = async (id:string,inputId?:string) => {
     const c=chat(id),runtime=live.get(id);
     const occupied=()=>runtime?.preparing||runtime?.invocation||['running','approval'].includes(chat(id).status)||
@@ -2071,28 +2107,43 @@ export function createSessionManager(
       return this.listTasks().find(item => item.id === task.id&&item.targetConversationId===target!.id)!;
     },
     async askAgent(sourceId,input,options){
-      if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['targetAgentId','targetProjectId','text','targetConversationId','policy'].includes(k))||typeof input.targetAgentId!=='string'||input.targetProjectId!==undefined&&input.targetProjectId!==null&&(typeof input.targetProjectId!=='string'||!input.targetProjectId.trim())||typeof input.text!=='string'||!input.text.trim()||input.text.length>65536||input.targetConversationId!==undefined&&typeof input.targetConversationId!=='string'||input.policy!==undefined&&!['notify','resume'].includes(input.policy)||!options.commandKey?.trim()||options.commandKey.length>200)throw new DomainError('invalid_message',422,'Invalid Agent message');
+      if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['targetAgentId','targetProjectId','text','targetConversationId','policy','automatic'].includes(k))||input.automatic!==undefined&&input.automatic!==true||typeof input.targetAgentId!=='string'||input.targetProjectId!==undefined&&input.targetProjectId!==null&&(typeof input.targetProjectId!=='string'||!input.targetProjectId.trim())||typeof input.text!=='string'||!input.text.trim()||input.text.length>65536||input.targetConversationId!==undefined&&typeof input.targetConversationId!=='string'||input.policy!==undefined&&!['notify','resume'].includes(input.policy)||!options.commandKey?.trim()||options.commandKey.length>200)throw new DomainError('invalid_message',422,'Invalid Agent message');
       const source=chat(sourceId);
       const validate=()=>{if(closed)throw new Error('service closed');if(options.boundInvocationId){const runtime=live.get(sourceId);if(runtime?.runId!==options.boundInvocationId||!runtime.invocation||runtime.stopRequested)throw new DomainError('forbidden',403,'Expired tool binding');}};
       validate();
       const primary=source.purpose==='mandala-main',runtime=live.get(sourceId);
-      if(primary?input.targetProjectId===undefined:!source.projectId||!source.agentId||input.targetProjectId!==undefined)
+      if(primary?input.targetProjectId===undefined:!source.projectId||!source.agentId||input.targetProjectId!==undefined||input.automatic)
         throw new DomainError('invalid_message_source',422,'Primary inquiries require explicit targetProjectId (null when unbound); ordinary inquiries use their source Project');
       if(primary){
         if(!options.boundInvocationId||!runtime||input.targetConversationId!==undefined)throw new DomainError('forbidden',403,'Primary inquiries require a current bound invocation and a fresh target chat');
         await coordination.verify({agentId:source.agentId,conversationId:sourceId,invocationId:options.boundInvocationId,humanEventId:runtime.humanEventId,assertActive:validate},true);
       }
       const config=await loadConfig();validate();
+      const humanEventId=primary?runtime?.humanEventId:undefined;
+      const automaticPrior=()=>{
+        const existing=humanEventId===undefined?undefined:messages.findAutomatic(sourceId,humanEventId);
+        if(existing&&!input.automatic)throw new DomainError('automatic_inquiry_exists',409,'This human request already has an automatic inquiry');
+        return existing?manager.getAgentMessage(existing.id):undefined;
+      };
+      const existing=automaticPrior();
+      if(existing)return existing;
       const targetProject=primary?input.targetProjectId??'':source.projectId;
       if(primary)assertPrimaryInquiryScope(config,source,input.targetAgentId,targetProject);
       const {agent,project,workspace,executionLocation}=conversationContext(config,{projectId:targetProject,agentId:input.targetAgentId},'');
+      if(input.automatic&&(!agent.routingRemit?.trim()||!isRoutingSpecialist(config,agent)))
+        throw new DomainError('specialist_unavailable',422,'Specialist or routing remit unavailable');
       if(!primary){
         assertExecutionAvailable(config,{projectId:source.projectId,agentId:input.targetAgentId});
         if(!project.agentIds.includes(source.agentId)&&!isSystemAgent(config,source.agentId))throw new DomainError('forbidden',403,'Source unavailable');
       }
-      const prior=messages.prior(sourceId,options.commandKey,input);if(prior)return prior;
-      const origin=runtime?.queuedInputId?messages.metadata(runtime.queuedInputId):undefined;
-      const event=origin?.direction==='reply'?store.listEvents(sourceId,0).find(e=>e.id===origin.sourceRequestEventId):store.listEvents(sourceId,0).filter(e=>e.kind==='user'&&(!runtime?.runId||(e.data as {runId?:string}).runId===runtime.runId)).at(-1);
+      const key=input.automatic?`automatic-inquiry:${humanEventId}`:options.commandKey;
+      if(!input.automatic&&key.startsWith('automatic-inquiry:'))throw new DomainError('invalid_message',422,'Reserved Agent message key');
+      const prior=messages.prior(sourceId,key,input);if(prior)return prior;
+      const previousOrigin=runtime?.queuedInputId?messages.metadata(runtime.queuedInputId):undefined;
+      const events=store.listEvents(sourceId,0);
+      const event=humanEventId!==undefined ? events.find(e=>e.id===humanEventId&&e.kind==='user')
+        : previousOrigin?.direction==='reply' ? events.find(e=>e.id===previousOrigin.sourceRequestEventId)
+        : events.filter(e=>e.kind==='user'&&(!runtime?.runId||(e.data as {runId?:string}).runId===runtime.runId)).at(-1);
       if(!event)throw new DomainError('message_source_missing',422,'Submitted source request required');
       let target=input.targetConversationId?chat(input.targetConversationId):undefined;
       if(target?.purpose==='mandala-main')throw new DomainError('primary_conversation',422,'Primary chat cannot execute messages');
@@ -2105,12 +2156,14 @@ export function createSessionManager(
       // No awaits between the last binding check and atomic acceptance.
       const {message,acceptedNew}=store.transaction(()=>{
         const origin={eventId:event.id,invocationId:runtime?.runId??String(event.id)};
-        if(primary){
-          const existing=messages.reusePrimaryInquiry(sourceId,origin,input,options.commandKey);
+        if(input.automatic&&messages.hasSourceRequest(sourceId,origin.eventId))
+          throw new DomainError('automatic_inquiry_exists',409,'This human request already has an inquiry');
+        if(primary&&!input.automatic){
+          const existing=messages.reusePrimaryInquiry(sourceId,origin,input,key);
           if(existing)return {message:existing,acceptedNew:false};
         }
         target??=store.createConversation({...(agent.systemRole==="mandala"?{purpose:"mandala-background" as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,cli:agent.defaultCli,model:agent.models[agent.defaultCli]??null,...location});
-        const accepted=messages.create(sourceId,target.id,input,origin,options.commandKey);
+        const accepted=messages.create(sourceId,target.id,input,origin,key);
         if(input.targetConversationId&&messages.isDedicated(target.id))markConversationProgress(store,target.id,false);
         return {message:accepted,acceptedNew:true};
       });
@@ -2120,6 +2173,30 @@ export function createSessionManager(
       const message=messages.get(id),source=chat(message.sourceConversationId),target=chat(message.targetConversationId);
       if(agentId&&agentId!==source.agentId&&agentId!==target.agentId||!mayDeliverInquiry(source.id,target.id))throw new DomainError('forbidden',403,'Message unavailable');
       authorizeConversationRead(agentId===target.agentId?target.id:source.id,true);return message;
+    },
+    async retryAgentMessage(id,attemptId){
+      if(typeof attemptId!=='string'||!/^[a-f0-9-]{36}$/.test(attemptId))throw new DomainError('invalid_message',422,'Invalid inquiry attempt');
+      const message=manager.getAgentMessage(id),source=chat(message.sourceConversationId),target=chat(message.targetConversationId);
+      const config=await loadConfig();
+      if(closed||source.purpose!=='mandala-main')throw new DomainError('inquiry_retry_unavailable',409,'Agent inquiry cannot be retried');
+      assertPrimaryInquiryScope(config,source,target.agentId,target.projectId);
+      const agent=config.agents.find(a=>a.id===target.agentId)!;
+      if(!isRoutingSpecialist(config,agent))throw new DomainError('specialist_unavailable',422,'Specialist unavailable');
+      authorizeConversationRead(target.id,true);
+      const result=store.transaction(()=>{
+        const current=messages.get(id);
+        if(current.retryAttemptId===attemptId){
+          const runtime=live.get(target.id);
+          if(runtime?.invocation||runtime?.preparing||hasUnprovenNativeOccupancy(store,target.id)||
+             store.database.prepare('SELECT 1 FROM task_directory_claims WHERE conversation_id=? AND submitted=1').get(target.id))
+            throw new DomainError('conversation_busy',409,'Receiving Agent has an active or unconfirmed execution');
+        }
+        const next=messages.retry(id,attemptId);
+        if(next.acceptedNew&&['error','interrupted'].includes(chat(target.id).status))state(target.id,'idle');
+        return next;
+      });
+      if(result.acceptedNew)setImmediate(()=>{if(!closed)void pump(target.id);});
+      return result.message;
     },
     listTasks(projectId, controlOnly = false) {
       const projected = store.database.prepare("SELECT id FROM work_tasks WHERE owner_user_id=? ORDER BY created_at DESC").all(root.userId).flatMap(row => {
@@ -2835,7 +2912,8 @@ export function createSessionManager(
         if(!active)throw error;
         // A retry/conflict after durable acceptance must not contradict its
         // existing card. Inspect only presence within this origin and key.
-        const accepted=messages.hasKey(bound.conversationId,commandKey);
+        const accepted=messages.hasKey(bound.conversationId,commandKey)||
+          sourceEventId!==null&&!!messages.findAutomatic(bound.conversationId,sourceEventId);
         if(accepted)throw error;
       }
       if(!(error instanceof DomainError&&error.status===403)||active){const outcome=inquiry?inquiryOutcome:projectOperationOutcome(name,{},null);if(outcome)record(outcome,error instanceof DomainError&&[400,403,404,409,422].includes(error.status)?'failed':'unknown',error instanceof DomainError?error.code:'result_unconfirmed');}

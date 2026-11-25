@@ -19,6 +19,11 @@ export function createAgentMessages(store:Store,enqueue:(conversationId:string,t
    source_conversation_id TEXT NOT NULL REFERENCES conversations(id),
    command_key TEXT NOT NULL, message_id TEXT NOT NULL REFERENCES agent_messages(id) ON DELETE CASCADE,
    PRIMARY KEY(source_conversation_id,command_key));
+  CREATE TABLE IF NOT EXISTS automatic_agent_inquiries (
+   message_id TEXT PRIMARY KEY REFERENCES agent_messages(id) ON DELETE CASCADE,
+   source_conversation_id TEXT NOT NULL REFERENCES conversations(id), source_request_event_id INTEGER NOT NULL,
+   failed_before_submission INTEGER NOT NULL DEFAULT 0,
+   UNIQUE(source_conversation_id,source_request_event_id));
   CREATE TABLE IF NOT EXISTS agent_inquiry_conversations (conversation_id TEXT PRIMARY KEY REFERENCES conversations(id));`);
  const atomic=<T>(fn:()=>T)=>db.isTransaction?fn():store.transaction(fn);
  const row=(id:string)=>{
@@ -32,7 +37,17 @@ export function createAgentMessages(store:Store,enqueue:(conversationId:string,t
   const source=db.prepare('SELECT data FROM events WHERE conversationId=? AND id=? AND superseded=0').get(r.source_conversation_id as string,r.source_request_event_id as number);
   return source?{data:JSON.parse(source.data as string) as {text?:string;queuedInputId?:string}}:undefined;
  };
- const decode=(r:ReturnType<typeof row>):AgentMessage=>({id:r.id as string,sourceConversationId:r.source_conversation_id as string,targetConversationId:r.target_conversation_id as string,sourceRequestEventId:Number(r.source_request_event_id),sourceAgentId:store.getConversation(r.source_conversation_id as string)?.agentId,targetAgentId:store.getConversation(r.target_conversation_id as string)?.agentId,createdAt:r.created_at as string,text:r.text as string,policy:r.policy as AgentMessage['policy'],state:r.state as AgentMessage['state'],reply:r.reply as string|null,replyState:r.reply_state as AgentMessage['replyState']});
+ const automatic=(id:string)=>db.prepare('SELECT failed_before_submission FROM automatic_agent_inquiries WHERE message_id=?').get(id);
+ const submission=(r:ReturnType<typeof row>):Pick<AgentMessage,'submissionState'|'retryAttemptId'>=>{
+  const routing=automatic(r.id as string);
+  if(!routing)return {};
+  if(db.prepare('SELECT 1 FROM task_input_invocations WHERE input_id=? AND native_turn_id IS NOT NULL').get(r.request_input_id as string)||
+     ['running','succeeded'].includes(r.state as string))return {submissionState:'submitted'};
+  if(routing.failed_before_submission===1)return {submissionState:'not_submitted',retryAttemptId:r.request_input_id as string};
+  const submittedClaim=db.prepare("SELECT 1 FROM task_directory_claims WHERE kind='input' AND owner_id=? AND submitted=1").get(r.request_input_id as string);
+  return {submissionState:r.state==='queued'&&!submittedClaim?'not_submitted':'unknown'};
+ };
+ const decode=(r:ReturnType<typeof row>):AgentMessage=>({...submission(r),id:r.id as string,sourceConversationId:r.source_conversation_id as string,targetConversationId:r.target_conversation_id as string,sourceRequestEventId:Number(r.source_request_event_id),sourceAgentId:store.getConversation(r.source_conversation_id as string)?.agentId,targetAgentId:store.getConversation(r.target_conversation_id as string)?.agentId,createdAt:r.created_at as string,text:r.text as string,policy:r.policy as AgentMessage['policy'],state:r.state as AgentMessage['state'],reply:r.reply as string|null,replyState:r.reply_state as AgentMessage['replyState']});
  const emit=(r:ReturnType<typeof row>,direction:'request'|'reply'|'sent')=>{
   const message=decode(r),id=direction==='request'?message.targetConversationId:message.sourceConversationId;
   store.appendEvent(id,'metadata',{agentMessage:{...message,direction,autoResumeAllowed:Boolean(r.auto_resume_allowed)}});
@@ -76,6 +91,14 @@ export function createAgentMessages(store:Store,enqueue:(conversationId:string,t
    if(r.text!==input.text.trim()||target?.agentId!==input.targetAgentId||input.targetProjectId!==undefined&&target?.projectId!==(input.targetProjectId??'')||input.targetConversationId&&r.target_conversation_id!==input.targetConversationId||input.policy!==undefined&&r.policy!==input.policy)throw new DomainError('idempotency_conflict',409,'Message key already used');
    return decode(r);
   },
+  findAutomatic(sourceId:string,eventId:number){
+   const prior=db.prepare(`SELECT m.* FROM automatic_agent_inquiries a JOIN agent_messages m ON m.id=a.message_id
+    WHERE a.source_conversation_id=? AND a.source_request_event_id=?`).get(sourceId,eventId);
+   return prior?decode(prior):undefined;
+  },
+  hasSourceRequest(sourceId:string,eventId:number){
+   return Boolean(db.prepare('SELECT 1 FROM agent_messages WHERE source_conversation_id=? AND source_request_event_id=?').get(sourceId,eventId));
+  },
   reusePrimaryInquiry(sourceId:string,origin:{eventId:number;invocationId:string},input:AgentMessageInput,key:string){
    const rows=db.prepare(`SELECT * FROM agent_messages WHERE source_conversation_id=? AND source_request_event_id=?
      AND source_invocation_id=? AND text=? AND policy=? ORDER BY rowid`)
@@ -90,8 +113,9 @@ export function createAgentMessages(store:Store,enqueue:(conversationId:string,t
   },
   create(sourceId:string,targetId:string,input:AgentMessageInput,origin:{eventId:number;invocationId:string},key:string){
    return atomic(()=>{
-    const id=randomUUID(),queued=enqueue(targetId,input.text.trim(),'message-request:'+id),policy=input.policy??'resume';
+    const id=randomUUID(),queued=enqueue(targetId,input.text.trim(),'message-request:'+id),policy=input.policy??(input.automatic?'notify':'resume');
     db.prepare('INSERT INTO agent_messages VALUES (?,?,?,?,?,?,?,?,NULL,?,?,?,NULL,?,?)').run(id,sourceId,targetId,origin.eventId,origin.invocationId,input.text.trim(),policy,'queued','pending',Number(policy==='resume'),queued.id,key,new Date().toISOString());
+    if(input.automatic)db.prepare('INSERT INTO automatic_agent_inquiries(message_id,source_conversation_id,source_request_event_id) VALUES (?,?,?)').run(id,sourceId,origin.eventId);
     if(!input.targetConversationId)db.prepare('INSERT INTO agent_inquiry_conversations VALUES (?)').run(targetId);
     const message=row(id);emit(message,'request');store.appendEvent(sourceId,'metadata',{agentMessage:{...decode(message),direction:'sent',autoResumeAllowed:policy==='resume'}});return decode(message);
    });
@@ -102,10 +126,46 @@ export function createAgentMessages(store:Store,enqueue:(conversationId:string,t
    const allowed=!!source&&(marker.direction==='request'||r.auto_resume_allowed===1&&r.reply_state==='queued');
    if(!allowed&&marker.direction==='reply')atomic(()=>cancelReply(r));return allowed;
   },
+  submitting(inputId:string){
+   const marker=metadata(inputId);
+   if(marker?.direction!=='request'||!automatic(marker.id))return;
+   const message=row(marker.id);
+   emit(message,'request');emit(message,'sent');
+  },
   started(inputId:string){const marker=metadata(inputId);if(marker?.direction==='request')atomic(()=>{
    const changed=db.prepare("UPDATE agent_messages SET state='running' WHERE id=? AND state='queued'").run(marker.id);
    if(changed.changes){const message=row(marker.id);emit(message,'request');emit(message,'sent');}
   });},
+  isAutomaticRequest(inputId:string){
+   const marker=metadata(inputId);
+   return marker?.direction==='request'&&Boolean(automatic(marker.id));
+  },
+  failBeforeSubmission(inputId:string){
+   const marker=metadata(inputId);
+   if(marker?.direction!=='request'||!automatic(marker.id))return false;
+   return atomic(()=>{
+    const r=row(marker.id);
+    if(r.state!=='queued')return false;
+    if(!deliveryAllowed(r)){parkRevokedReply(r);return true;}
+    db.prepare('UPDATE automatic_agent_inquiries SET failed_before_submission=1 WHERE message_id=?').run(marker.id);
+    db.prepare("UPDATE agent_messages SET state='failed',reply='无法启动接收智能体',reply_state='parked' WHERE id=?").run(marker.id);
+    const failed=row(marker.id);emit(failed,'request');emit(failed,'reply');
+    return true;
+   });
+  },
+  retry(id:string,attemptId:string){
+   return atomic(()=>{
+    const r=row(id),message=decode(r);
+    if(!automatic(id)||!sourceRequest(r))throw new DomainError('inquiry_retry_unavailable',409,'Agent inquiry cannot be retried');
+    if(r.request_input_id!==attemptId)return {message,acceptedNew:false};
+    if(message.retryAttemptId!==attemptId)throw new DomainError('inquiry_retry_unavailable',409,'Agent inquiry cannot be retried');
+    const input=enqueue(message.targetConversationId,message.text,'message-retry:'+attemptId);
+    db.prepare('UPDATE automatic_agent_inquiries SET failed_before_submission=0 WHERE message_id=?').run(id);
+    db.prepare("UPDATE agent_messages SET request_input_id=?,state='queued',reply=NULL,reply_state=? WHERE id=?").run(input.id,r.auto_resume_allowed===1?'pending':'parked',id);
+    const queued=row(id);emit(queued,'request');emit(queued,'sent');
+    return {message:decode(queued),acceptedNew:true};
+   });
+  },
   finish(inputId:string,outcome:'succeeded'|'failed'|'unknown',answer:string):string[]{
    const marker=metadata(inputId);if(!marker)return [];
    return atomic(()=>{

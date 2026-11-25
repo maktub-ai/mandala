@@ -58,6 +58,12 @@ const routingTokens=(value:string)=>{
  return tokens;
 };
 
+export function isRoutingSpecialist(config:Config,agent:Agent) {
+ return !agent.systemRole&&agent.id!==config.mandala?.agentId&&!agent.temporary&&!agent.archivedAt&&
+  enabledRuntimes(config).includes(agent.defaultCli)&&
+  effectiveRuntime(agent.defaultCli,agent.runtime,config.runtimeDefaults).gateway!=='unavailable';
+}
+
 export function mandalaRoutingDirectory(config:Config,input:{query?:unknown;projectId?:unknown}) {
  const {query,projectId}=input;
  if(typeof query!=='string'||!query.trim()||query.length>200||/[\p{Cc}\p{Zl}\p{Zp}]/u.test(query)||
@@ -66,11 +72,9 @@ export function mandalaRoutingDirectory(config:Config,input:{query?:unknown;proj
  const unbound=projectId===null;
  const projects=unbound?[]:config.projects.filter(p=>!p.archivedAt&&(projectId===undefined||p.id===projectId));
  if(projectId!=null&&!projects.length)throw new DomainError('project_not_found',404,'Project is not available for routing');
- const enabled=enabledRuntimes(config),queryTokens=routingTokens(query);
+ const queryTokens=routingTokens(query);
  const ordered=config.agents.flatMap(agent=>{
-  if(agent.systemRole||agent.id===config.mandala?.agentId||agent.temporary||agent.archivedAt||
-     !enabled.includes(agent.defaultCli)||
-     effectiveRuntime(agent.defaultCli,agent.runtime,config.runtimeDefaults).gateway==='unavailable')return [];
+  if(!isRoutingSpecialist(config,agent))return [];
   const membership=projects.filter(p=>p.agentIds.includes(agent.id)).map(p=>p.id).sort();
   if(!unbound&&!membership.length)return [];
   const routingRemit=agent.routingRemit?.trim()||null;
