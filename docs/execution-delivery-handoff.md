@@ -1,6 +1,6 @@
 # Mandala 执行端与自动分派工程交接
 
-2026-11-25（新加坡时间）核对 [Mandala & Omino · 交付看板](https://github.com/orgs/maktub-ai/projects/1) 和 Mandala 主线 `f142429a3f7c3732c5eab62ddebf3980b61efec2`。三张卡均为进行中。源码入口和历史证据以下述基线为准，实际开工从当时的最新主线起步。
+2026-11-25（新加坡时间）更新本机 v1.0.5 范围。开工及最终打包分别核对当时的最新主线，已有证据以各自的构建提交为准。见 [Mandala & Omino · 交付看板](https://github.com/orgs/maktub-ai/projects/1)。
 
 ## 本轮分派范围与 v1.0.5
 
@@ -8,17 +8,17 @@
 | --- | --- | --- |
 | 第一组 | [M05](https://github.com/orgs/maktub-ai/projects/1?pane=issue&itemId=316149775) | 十四个执行端共用 Mandala 执行接口，复用已装厂商 CLI，逐端验证 Mac arm64 安装版。 |
 | 第一组 | [M09](https://github.com/orgs/maktub-ai/projects/1?pane=issue&itemId=316149917) | Codex 写锁持续占用时，保住原 Mandala 对话并提供用户明确选择的继续方式。 |
+| 第二组 | [M04](https://github.com/orgs/maktub-ai/projects/1?pane=issue&itemId=316149765) | 在 Mac 上按职责真实分派一次，用户无需点名，原对话显示可核对的回执或失败。 |
 
-M05 与 M09 并行开发、独立验收，目标是供早间验收的本机 Mandala v1.0.5。Windows 全部工作与实机验收，以及 [M04 子 Agent 自动分派](https://github.com/orgs/maktub-ai/projects/1?pane=issue&itemId=316149765)均暂缓。双平台矩阵继续保留 Windows 状态供后续交付。
+两组可并行推进，三张卡独立验收，统一交付同一份本机 Mandala v1.0.5。Windows 相关修复、构建、实机验收和应用内更新均暂缓。双平台矩阵继续保留 Windows 状态供后续交付。
 
 ## M05 十四个执行端接入
 
 ### 已有证据
 
-- [执行端目录](../shared/runtimes.ts) 登记了 14 条路径。[会话管理](../server/sessions.ts) 已通过共用客户端、启动分派和本机／SSH 路由接入它们。现有客户端和选项类型仍名为 `CodexClient`、`CodexOptions`，也已被原生、RPC、ACP 和流式适配器复用。设置检查与模型列表已复用会话启动入口的一部分，仍有诊断和厂商逻辑分散在会话管理及界面。见[接口](../server/codex.ts)、[原生执行端分派](../server/native-runtime.ts)、[SSH 执行服务](../server/ssh-service.ts)和[配置页](../src/RuntimeSetup.tsx)。
+- [执行端目录](../shared/runtimes.ts) 登记了 14 条路径。M05 主线提交 `83d278b` 已包含[共用执行接口](../server/execution-client.ts)和 Mandala 管理的 Claude ACP 桥。[会话管理](../server/sessions.ts)接入本机和 SSH 执行，原生、RPC、ACP 和流式路径保留各自能力。见[原生执行端分派](../server/native-runtime.ts)、[SSH 执行服务](../server/ssh-service.ts)和[配置页](../src/RuntimeSetup.tsx)。
 - **ACP/acpx（9）** 为 Claude Code、Gemini CLI、OpenCode、CodeBuddy、Kimi Code、DSH、Grok、Hermes Agent、OpenClaw。Claude 走独立厂商桥。其余使用已登记 CLI 的协议模式，Hermes 的部分发行还需要 ACP 扩展，Hermes 与 OpenClaw 各有同机 Gateway 前置。**原生直连（5）** 为 Codex app-server、OMP/Pi RPC、Cursor/Antigravity stream-json。Pi 使用 Mandala 随包权限扩展，OMP 个别辅助能力走 ACP。模型、审批、MCP、分叉和压缩等以[现有能力表](cli-adapters.md#当前能力表)及适配器实际能力为准。
-- **Claude 1.0.4 复现。** 使用安装版前后端、临时 HOME 和 Chromium，已确认 Claude Code 本体存在。详细配置页报缺少 `claude-agent-acp`，实际启动为 `ENOENT`，尚未到 ACP 握手。acpx 已随包，独立厂商桥仍缺。固定版本和双平台可信交付尚待验证。见 [ACP 启动路径](../server/acp.ts)和[已装 CLI 复用发布门槛](runtime-release-acceptance.md#installed-vendor-cli-and-mandala-owned-integration-release-gate)。
-- **包与平台基线。** Mac arm64 的 1.0.4 暂存包 `62da90a` 以包内后台完成 14/14 合成启动、缺失控制和合成首轮。Windows x64 已有源码模拟，当前候选的双平台真实厂商首轮和 Windows 安装包仍待验。过往个别执行端实测按原版本留档。见[平台矩阵及历史证据](runtime-release-acceptance.md)。
+- **Mac 候选 `149cb3f`。** 合成矩阵曾探测超时，同一候选复跑通过 14/14 合成启动、缺失对照和合成首轮。在该候选上使用已有 Claude Code 2.1.330 和随包桥，通过真实认证、ACP 握手和一次真实模型首轮。其余执行端真实首轮、逐端旧会话和矩阵稳定性仍待核对。早期 1.0.4 的缺桥复现是修前基线。见 [ACP 启动路径](../server/acp.ts)和[平台矩阵](runtime-release-acceptance.md)。
 
 ### 实施边界
 
@@ -41,7 +41,7 @@ Claude 优先交付兼容现有本机 Claude 的可信桥，验证实际启动�
 
 ### 已有证据
 
-已确认原生未提交的直接或排队输入可在原对话恢复。合成浏览器回归覆盖重新加载、原文、附件和引用；隔离实验用真实 Codex 0.167.0 验证测试写入方正常释放后可恢复同一原生 ID。主对话已有版本化执行边界的兼容读取，此基线没有启用写入。长期持锁时，用户主动在原可见对话内关联合规新原生会话的路径仍待交付。见 [M09 进度](https://github.com/orgs/maktub-ai/projects/1?pane=issue&itemId=316149917)、[对话恢复测试](../tests/e2e/chat-resilience.spec.ts)和[执行边界读取](../server/mandala.ts)。
+Mac 候选 `149cb3f` 的本机《M09-验收》回执记录了 M09.1–M09.4。隔离 Electron 使用真实 Codex CLI，模型响应来自本机回环夹具。锁释放后恢复原 ID，持续持锁时经用户确认只关联一个新 ID，关联阶段提交零轮。后台换端口重启后可回读原文、附件和引用。隔离旧数据由 1.0.4、1.0.5 打包后台验证升级、回退及再升级，部分异常分支由合成测试覆盖。下一份联合候选须复测。见 [M09 进度](https://github.com/orgs/maktub-ai/projects/1?pane=issue&itemId=316149917)、[对话恢复测试](../tests/e2e/chat-resilience.spec.ts)和[执行边界读取](../server/mandala.ts)。
 
 ### 实施边界
 
@@ -56,13 +56,21 @@ Claude 优先交付兼容现有本机 Claude 的可信桥，验证实际启动�
 - [ ] **M09.3 显式继续。** 用户拒绝时零创建。确认后只在同一可见对话关联一个隔离的新原生会话。核对 UI 边界说明、实际上下文与权限、原 ID 保留、关联时零隐式附加。手动发送对照验证只带入用户明确选定且授权仍有效的内容。重复确认、连接中断或部分失败不得产生第二次创建或发送，未知结果可见且能核对。
 - [ ] **M09.4 数据和平台。** 用真实旧数据结构的脱敏夹具验证升级、关闭与重新打开、受支持版本回退及再升级。检查旧历史可读、新旧关联稳定，权限和上下文边界不会回退失效。Mac arm64 附实际安装版与真实 Codex 的冲突、释放恢复、持续冲突和用户显式继续的结果。合成测试单列。
 
-## 留待后续
+## M04 Mac 不点名的真实子 Agent 分派
 
-Windows 的 M05 安装包与真实首轮、M09 实机用例以及 M08 应用内更新留待后续。M04 已有只读 Codex 在提交前退出的复现和诊断，原路径修复、真实自动选人及原对话回执尚待交付。既有事项和证据见[上版交接](https://github.com/maktub-ai/mandala/blob/86a2bc6f505f7dca9f85a3644d294d3db3f21afb/docs/execution-delivery-handoff.md)。
+已有分派入口、原对话回执和合成去重覆盖。Mac 已通过真实 Codex 只读会话准备，完整的真实选人到原对话回执仍待验。路径和权限沿用[协调器分派约定](mandala-coordinator.md)。
+
+- [ ] **M04.1 按职责选人。** 在 Mac arm64 候选中使用经授权的真实原生执行器和模型。用户只描述工作，无名称、ID 或引用指定目标。按职责选择符合项目和权限的候选并实际分派一次。交换候选职责后选择随职责变化。跳过停用候选，有合适替代则选择替代，无合适候选则零派发并在原对话说明原因。
+- [ ] **M04.2 状态与去重。** 区分确认未提交、已提交、结果未知及最终成功／失败。各状态均禁止隐式重试。验证重连、重启、换重试键或丢失回执时，同一请求最多实际分派一次，已有回执时复用原回执。不同人工请求各自保留身份。保持父子 Agent 的项目和权限边界。
+- [ ] **M04.3 原对话闭环。** Mac 实际运行 v1.0.5，核对用户请求、所选目标、子 Agent 真实执行及原对话的可审计回执或失败。记录同一请求的分派计数，以及可关联的脱敏原生事件和界面证据。合成、启动探测、真实端到端与实际安装结果分别回执。
+
+### 留待后续的 Windows 工作
+
+Windows 的 M04 只读 Codex 提交前退出已复现并有诊断。该原生路径修复、Windows 实机与安装包验收、M05/M09 的 Windows 用例，以及 M08 应用内更新均暂缓。见[历史交接](https://github.com/maktub-ai/mandala/blob/86a2bc6f505f7dca9f85a3644d294d3db3f21afb/docs/execution-delivery-handoff.md)。
 
 ## 并行施工与共享边界
 
-- M05 的依赖解析、桥和 Mac 矩阵与 M09 的会话恢复、持久化及交互可并行推进。每张卡用新任务工作树，有独立的改动和验收记录。
+- 第一组推进 M05 的依赖解析、桥和 Mac 矩阵，以及 M09 的会话恢复、持久化及交互。第二组推进 M04 的 Mac 自动分派与原对话回执。各卡独立工作树、审阅及验收。
 - M05 负责共用执行接口与适配器契约，M09 负责锁冲突与同一可见会话的原生关联。涉及[会话管理](../server/sessions.ts)、[Codex 适配器](../server/codex.ts)、队列、事件或旧数据读取时，先约定改动归属、状态和兼容顺序。共享接口改动单独审阅，合入最新主线后再验证。联合回归核对原生 ID、原生提交确认、停止终态、权限、草稿与去重。
 
 ## 交付回执与完成判定
@@ -76,9 +84,9 @@ Windows 的 M05 安装包与真实首轮、M09 实机用例以及 M08 应用内�
 | 原始证据索引 | 测试输出及通过／失败／跳过数量，脱敏启动及协议事件，必要时附安装版界面、回执、持锁状态、原生 ID 与轮次计数。用稳定的脱敏标识关联同一运行；真实运行截图、私人路径、数据和凭据保存在受控位置，仓库只放可公开的脱敏摘要。 |
 | 失败及复测 | 记录首个失败阶段、错误、是否已提交、已完成的检查及复现步骤。失败项关联修复提交，受阻项写明具体依赖与解除条件。对同平台、相同触发条件和修复候选复测，保留修前／修后证据及仍受影响的验收项。 |
 
-- [ ] **独立验收。** M05 和 M09 分别逐项勾选。失败、受阻、未测试以及缺少证据的 Mac 必验项继续保持未验。两卡分别回执，Windows 留在后续验收范围。
-- [ ] **固定源码。** 按[分支与审阅流程](collaboration.md#分支与审阅)分别完成 M05 和 M09 实现及源码验证。核对两份交付提交已合入并推送 `origin/main`。从包含两份交付的干净、同步的 `main` 固定同一个 SHA 做本机联合验证。主线若前进，重新核对并验证后再构建。
+- [ ] **独立验收。** M05、M09 和 M04 按卡逐项勾选。失败、受阻、未测试和缺少证据的 Mac 必验项保留各自状态。三卡分别回执，Windows 留在后续验收范围。
+- [ ] **固定源码。** 按[分支与审阅流程](collaboration.md#分支与审阅)完成三个 Mac 目标的实现与源码验证，核对对应交付均已合入并推送 `origin/main`。从包含三项交付的干净、同步的 `main` 固定同一个 SHA 做本机联合验证。主线若前进，重新核对并验证后再构建。
 - [ ] **本机 v1.0.5 打包。** 使用 [Mac 桌面构建入口](desktop.md#build-and-install)执行 `MANDALA_VERSION=1.0.5 npm run desktop:build`。记录 arm64 DMG 与 ZIP、摘要和签名校验，核对实际候选包内的版本、架构与完整构建 SHA。候选的临时 HOME 验证单独回执。
-- [ ] **备份与实际安装。** 核实没有活动工作，用「停止运行时并退出」等到后台完全停止。备份当前 App 和实际使用的 Mandala HOME，核对备份完整性、可回退的旧版构建与恢复路径。再安装已验的候选。启动后确认实际运行版本为 v1.0.5、运行器 SHA 与固定主线一致，核对实际界面、旧对话、任务、记忆和外观偏好。两卡分别提供 Mac 真实关键路径证据，附 App 及 HOME 备份位置和回退依据。见[桌面包路线](collaboration.md#桌面包路线)和[备份及恢复命令](desktop.md#versioned-release-and-manual-upgrades)。
+- [ ] **备份与实际安装。** 核实没有活动工作，用「停止运行时并退出」等到后台完全停止。备份当前 App 和实际使用的 Mandala HOME，核对备份完整性、可回退的旧版构建与恢复路径。再安装已验的候选。启动后确认实际运行版本为 v1.0.5、运行器 SHA 与固定主线一致，核对实际界面、旧对话、任务、记忆和外观偏好。三卡分别提供 Mac 真实关键路径证据，附 App 及 HOME 备份位置和回退依据。见[桌面包路线](collaboration.md#桌面包路线)和[备份及恢复命令](desktop.md#versioned-release-and-manual-upgrades)。
 
 本机更新和 GitHub 主线同步是本轮交付目标。公开 Release 与云端 CI/CD 不在本轮范围。
