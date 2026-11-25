@@ -1,8 +1,19 @@
-import { test, expect } from 'vitest';
+import { test, expect, vi } from 'vitest';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+test.skipIf(process.platform === 'win32')('a synchronous shell spawn rejection falls back without breaking launcher diagnostics', async () => {
+  vi.doMock('node:child_process', async importOriginal => ({
+    ...await importOriginal<typeof import('node:child_process')>(),
+    execFile: () => { throw Object.assign(new Error('Sandbox denied process creation'), { code: 'EPERM' }); },
+  }));
+  try {
+    const { loginShellPath } = await import('../desktop/login-shell-path');
+    await expect(loginShellPath({ PATH: '/usr/bin:/bin' })).resolves.toBe('/usr/bin:/bin');
+  } finally { vi.doUnmock('node:child_process'); }
+});
 
 test.skipIf(process.platform === 'win32')('login PATH probe falls back when a shell ignores the timeout termination signal', async () => {
  const directory=mkdtempSync(join(tmpdir(),'mandala-path-probe-'));
