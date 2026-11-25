@@ -91,6 +91,14 @@ try {
   await expect(guide).toHaveCount(0);
   await page.unroute('**/api/cli/status?*');
   const composer = page.getByRole('textbox', { name: /^(Message|消息)$/ }); await expect(composer).toBeEnabled();
+  const cdp = await page.context().newCDPSession(page);
+  const { root } = await cdp.send('DOM.getDocument');
+  const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: 'input[type=file]' });
+  await cdp.send('DOM.setFileInputFiles', { nodeId, files: [selectedDirectory] });
+  const folder = page.locator('.composer-attachments [data-source=directory]');
+  await expect(composer).toHaveValue(''); await expect(folder).toHaveAttribute('title', selectedDirectory);
+  await folder.locator('.attachment-remove').click(); await expect(folder).toHaveCount(0); await cdp.detach();
+  await page.goto(origin + '/mandala');
   const settingsButton = page.locator('.mandala-header-identity button');
   const details = page.getByRole('checkbox', { name: /^(Show execution details|显示执行详情)$/ });
   await settingsButton.click();
@@ -102,13 +110,7 @@ try {
   await expect(details).toBeChecked();
   await details.uncheck();
   await page.getByRole('button', { name: /^(Save|保存)$/ }).click();
-  const cdp = await page.context().newCDPSession(page);
-  const { root } = await cdp.send('DOM.getDocument');
-  const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: 'input[type=file]' });
-  await cdp.send('DOM.setFileInputFiles', { nodeId, files: [selectedDirectory] });
-  const folder = page.locator('.composer-attachments [data-source=directory]');
-  await expect(composer).toHaveValue(''); await expect(folder).toHaveAttribute('title', selectedDirectory);
-  await folder.locator('.attachment-remove').click(); await expect(folder).toHaveCount(0); await cdp.detach();
+  await page.goto(origin + '/');
   const product = process.env.MANDALA_DESKTOP_PRODUCT_CHECK === '1' ? await (await import('./desktop-product-smoke.mjs')).verifyDesktopProduct(page, origin, home, { artifactDirectory }) : null;
   // Observe the validated native request without opening a remote page or browser.
   await application.evaluate(({ shell }) => { globalThis.externalUrls = []; shell.openExternal = async url => { globalThis.externalUrls.push(url); }; });
