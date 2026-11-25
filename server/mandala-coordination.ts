@@ -1,3 +1,4 @@
+import {createBlueprintRouting} from './blueprint-routing';
 import {managedChangeFields,managedValueText} from '../shared/mandala-coordination';
 import {enabledRuntimes} from '../shared/runtimes';
 import {randomUUID,createHash} from 'node:crypto';
@@ -13,7 +14,7 @@ import {workspacePrincipal} from './workspace-identity';
 // This source is constructed by SessionManager from its current live invocation, never from tool arguments.
 export type CoordinationSource={agentId:string;conversationId:string;invocationId:string;humanEventId?:number;assertActive?:()=>void};
 const fail=(code:string,status=403):never=>{throw new DomainError(code,status,code);};
-export function createMandalaCoordination({home,store,tasks}:{home:string;store:Store;tasks:ReturnType<typeof createTasks>}) {
+export function createMandalaCoordination({home,store,tasks,routeGenerate}:{home:string;store:Store;tasks:ReturnType<typeof createTasks>;routeGenerate?:import('./system-tasks').SystemGenerator}) {
  const db=store.database,root=workspacePrincipal(store);
  db.exec(`CREATE TABLE IF NOT EXISTS mandala_ownership(task_id TEXT PRIMARY KEY REFERENCES work_tasks(id),data TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS mandala_temporary_agents(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
@@ -33,6 +34,14 @@ export function createMandalaCoordination({home,store,tasks}:{home:string;store:
   if(!ownership(task.id))db.prepare('INSERT INTO mandala_ownership VALUES (?,?)').run(task.id,JSON.stringify({taskId:task.id,agentId:source.agentId,relation,conversationId:source.conversationId,sourceEventId:source.humanEventId??null,invocationId:source.invocationId,createdAt:new Date().toISOString(),blockedReason:null} satisfies MandalaOwnership));
   return task;
  };
+ const routes=createBlueprintRouting(home,store,tasks,(source,task)=>record(source,task,'created'),routeGenerate);
+ const suggest=async(source:CoordinationSource,input:import('../shared/tasks').TaskInput,key:string,managed:boolean)=>{
+  await verify(source);
+  const {assertActive,...identity}=source;
+  const review=await routes.preview(input,key,{...identity,managed},assertActive);
+  assertActive?.();
+  return review?{status:review.status==='pending'?'awaiting_confirmation':review.status,reviewId:review.id,...(review.taskId?{taskId:review.taskId}:{})}:null;
+ };
  const applyChange=(config:Config,change:ManagedChange):Config=>{
   if(!change||!['agent','project'].includes(change.kind)||!['create','update','archive','promote'].includes(change.action)||Object.keys(change).some(k=>!['kind','action','id','values'].includes(k)))fail('invalid_management_change',422);
   const collection=change.kind==='agent'?'agents':'projects',items=config[collection],old=items.find(a=>a.id===change.id);
@@ -50,7 +59,30 @@ export function createMandalaCoordination({home,store,tasks}:{home:string;store:
  const decisions=new Map<string,Promise<ManagementProposal>>();
  const proposal=(id:string):ManagementProposal=>{const r=db.prepare('SELECT data FROM mandala_management WHERE id=?').get(id);return r?JSON.parse(r.data as string):fail('proposal_not_found',404);};
  return {
-  ownership,list,verify,requireOwned,
+  ownership,list,verify,requireOwned,routes,suggest,
+  delegatedChats(sourceId:string,filter:{taskId:string}|{conversationId:string}){
+   const byTask='taskId' in filter;
+   // A task's origin can be edited and start keys are shared across entry points.
+   // A regular assignment needs both the creator's receipt and its actual start of this dedicated Run.
+   return db.prepare(`SELECT r.id AS runId,e.conversation_id AS targetConversationId,e.agent_id AS targetAgentId,e.project_id AS targetProjectId
+    FROM task_runs r JOIN task_executions e ON e.id=r.execution_id JOIN work_tasks t ON t.id=r.task_id
+    JOIN conversations c ON c.id=e.conversation_id JOIN conversations source ON source.id=$source
+    LEFT JOIN mandala_ownership o ON o.task_id=t.id
+    WHERE ${byTask?'r.task_id':'e.conversation_id'}=$id AND json_extract(c.data,'$.archivedAt') IS NULL
+     AND json_extract(r.routing,'$.executionConversationId')=e.conversation_id AND e.superseded_by_execution_id IS NULL
+     AND ((json_extract(o.data,'$.conversationId')=$source AND json_extract(r.continuation,'$.conversationId')=$source
+        AND e.created_by_agent_id=json_extract(o.data,'$.agentId'))
+      OR (t.origin_conversation_id=$source AND t.creator_agent_id=json_extract(source.data,'$.agentId')
+        AND e.agent_id=t.assignee_agent_id AND e.project_id IS t.project_id AND json_extract(r.routing,'$.mode')='dedicated'
+        AND EXISTS(SELECT 1 FROM events a WHERE a.conversationId=$source AND a.kind='metadata' AND a.superseded=0
+         AND json_extract(a.data,'$.operationResult.command')='task_create' AND json_extract(a.data,'$.operationResult.state')='succeeded'
+         AND json_extract(a.data,'$.operationResult.path')='/tasks/'||t.id)
+        AND EXISTS(SELECT 1 FROM events a JOIN task_command_dedup d ON d.task_id=t.id AND d.run_id=r.id AND d.command_key=e.command_key
+         WHERE a.conversationId=$source AND a.kind='metadata' AND a.superseded=0 AND json_extract(a.data,'$.operationResult.command')='task_start'
+          AND json_extract(a.data,'$.operationResult.state')='succeeded' AND json_extract(a.data,'$.operationResult.facts.unchanged') IS NOT 'true'
+          AND json_extract(a.data,'$.operationResult.id')='task_start:'||d.command_key AND json_extract(a.data,'$.operationResult.path')='/tasks/'||t.id)))`)
+    .all({$source:sourceId,$id:byTask?filter.taskId:filter.conversationId}) as {runId:string;targetConversationId:string;targetAgentId:string;targetProjectId:string|null}[];
+  },
   managedTaskIds():Set<string>{return new Set(list().map(item=>item.taskId));},
   pauseDelivery(id:string){db.prepare('INSERT OR IGNORE INTO mandala_delivery_pause VALUES (?)').run(id);},
   resumeDelivery(id:string){db.prepare('DELETE FROM mandala_delivery_pause WHERE conversation_id=?').run(id);},
@@ -58,15 +90,22 @@ export function createMandalaCoordination({home,store,tasks}:{home:string;store:
 
   async create(source:CoordinationSource,input:{goal:string;criteria:Criterion[];projectId:string|null},key:string){
    const config=await verify(source);if(!Array.isArray(input.criteria)||!input.criteria.length||!Object.hasOwn(input,'projectId')||input.projectId!==null&&!config.projects.some(p=>p.id===input.projectId&&!p.archivedAt))fail('invalid_goal',422);
-   return store.transaction(()=>record(source,tasks.prepareCreate({...root,agentId:source.agentId},{goal:input.goal,criteria:input.criteria,projectId:input.projectId,participantAgentIds:[source.agentId],originConversationId:source.conversationId,acceptance:'human'},key).commit(),'created'));
+   const executionSource=store.getConversation(source.conversationId)?.purpose==='mandala-main'?undefined:source.conversationId;
+   return store.transaction(()=>record(source,tasks.prepareCreate({...root,agentId:source.agentId},{goal:input.goal,criteria:input.criteria,projectId:input.projectId,participantAgentIds:[source.agentId],originConversationId:source.conversationId,acceptance:'human'},key,undefined,executionSource).commit(),'created'));
+  },
+  async requestCreation(source:CoordinationSource,input:{goal:string;criteria:Criterion[];projectId:string|null},key:string){
+   if(!Array.isArray(input.criteria)||!input.criteria.length||!Object.hasOwn(input,'projectId'))fail('invalid_goal',422);
+   const pending=await suggest(source,{...input,participantAgentIds:[source.agentId],originConversationId:source.conversationId,acceptance:'human'},key,true);
+   return pending??this.create(source,input,key);
   },
   async takeover(source:CoordinationSource,input:{taskId:string;expectedRevision:number;criteria:Criterion[]},key:string){
    await verify(source,true);if(!Array.isArray(input.criteria)||!input.criteria.length)fail('criteria_required',422);
-   return store.transaction(()=>{const task=tasks.getTask(root,input.taskId);const result=tasks.prepareUpdate(root,task.id,input.expectedRevision,{criteria:input.criteria,originConversationId:source.conversationId,participantAgentIds:[...new Set([...task.participantAgentIds,source.agentId])]},key).commit();return record(source,result,'taken-over');});
+   return store.transaction(()=>{const task=tasks.getTask(root,input.taskId);const result=tasks.prepareUpdate(root,task.id,input.expectedRevision,{criteria:input.criteria,originConversationId:source.conversationId,participantAgentIds:[...new Set([...task.participantAgentIds,source.agentId])]},key).commit();return record(source,tasks.getTask({...root,agentId:source.agentId},result.id),'taken-over');});
   },
   async request(source:CoordinationSource,input:{taskId:string;expectedRevision:number;text:string;blocked?:boolean},key:string){
    await verify(source);const task=requireOwned(source,input.taskId);if(typeof input.text!=='string'||!input.text.trim()||input.text.length>4000||input.blocked!==undefined&&typeof input.blocked!=='boolean')fail('invalid_request',422);
-   return store.transaction(()=>{const previous=store.listEvents(source.conversationId,0).find(e=>e.kind==='metadata'&&(e.data as {mandalaRequestKey?:string}).mandalaRequestKey===key);if(previous){const data=previous.data as {mandalaRequest:unknown};if(JSON.stringify(data.mandalaRequest)!==JSON.stringify({taskId:task.id,text:input.text,blocked:input.blocked??false}))fail('idempotency_conflict',409);return task;}const updated=tasks.prepareUpdate({...root,agentId:source.agentId},task.id,input.expectedRevision,{state:'waiting'},key).commit();const own=ownership(task.id)!;db.prepare('UPDATE mandala_ownership SET data=? WHERE task_id=?').run(JSON.stringify({...own,blockedReason:input.blocked?input.text:null}),task.id);store.appendEvent(source.conversationId,'metadata',{mandalaRequestKey:key,mandalaRequest:{taskId:task.id,text:input.text,blocked:input.blocked??false},mandalaRequestRevision:updated.revision,invocationId:source.invocationId});return updated;});
+   return store.transaction(()=>{const previous=store.listEvents(source.conversationId,0).find(e=>e.kind==='metadata'&&(e.data as {mandalaRequestKey?:string}).mandalaRequestKey===key);if(previous){const data=previous.data as {mandalaRequest:unknown};if(JSON.stringify(data.mandalaRequest)!==JSON.stringify({taskId:task.id,text:input.text,blocked:input.blocked??false}))fail('idempotency_conflict',409);return task;}const updated=tasks.prepareUpdate({...root,agentId:source.agentId},task.id,input.expectedRevision,{state:'waiting'},key).commit();const own=ownership(task.id)!;db.prepare('UPDATE mandala_ownership SET data=? WHERE task_id=?').run(JSON.stringify({...own,blockedReason:input.blocked?input.text:null}),task.id);const event=store.appendEvent(source.conversationId,'metadata',{mandalaRequestKey:key,mandalaRequest:{taskId:task.id,text:input.text,blocked:input.blocked??false},mandalaRequestRevision:updated.revision,invocationId:source.invocationId});
+    store.enqueueOutbox({type:'task.input_requested',aggregateId:task.id,aggregateRevision:updated.revision,causationId:key,payload:{taskId:task.id,conversationId:source.conversationId,eventId:event.id}});return updated;});
   },
   async configure(source:CoordinationSource,change:ManagedChange,mode:'direct'|'propose',key:string,assertActive:()=>void):Promise<ManagementProposal>{
    await verify(source,mode==='direct');assertActive();if(!['direct','propose'].includes(mode)||!key?.trim()||key.length>200)fail('invalid_management_change',422);

@@ -31,11 +31,11 @@ export default function ConversationContextPopover({conversationId,executionLoca
  const [summary,setSummary]=useState<{id:string;value:ConversationReferenceSummary}|null>(null);
  const [abilities,setAbilities]=useState<{key:string;value:Capabilities}|null>(null);
  useEffect(()=>{
+  if(!open)return;
   const controller=new AbortController();
-  // The trigger stays useful without the summary, so a failed read only hides the numbers.
   void requestJson<Environment>('/api/conversations/'+encodeURIComponent(conversationId)+'/environment',{signal:controller.signal}).then(value=>{if(!controller.signal.aborted)setPlace({id:conversationId,value});}).catch(()=>{});
   return()=>controller.abort();
- },[conversationId,activityVersion]);
+ },[open,conversationId,activityVersion]);
  useEffect(()=>{
   if(!open)return;
   const controller=new AbortController();

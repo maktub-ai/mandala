@@ -1,3 +1,4 @@
+import type { EncryptedComposerRecord, RemoteComposerCodec } from './remote-composer-cache';
 import nacl from 'tweetnacl';
 import { createContext, useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ComposerReferenceItem } from '../shared/composer-references';
@@ -18,7 +19,7 @@ type AttachmentName = DraftAttachment;
 export type ComposerDraftValue = {text:string;files:File[];references:ComposerReferenceItem[];missingAttachments:AttachmentName[]};
 type StoredDraft = {text:string;references:ComposerReferenceItem[];attachments:AttachmentName[]};
 type Stored<T> = {revision:number;updatedAt?:string} & T;
-type CacheValue = {draft?:StoredDraft;files?:File[];pending?:PendingComposerSubmission|null;revision?:number;pendingRevision?:number;unsaved?:boolean};
+export type ComposerCacheValue = {draft?:StoredDraft;files?:File[];pending?:PendingComposerSubmission|null;revision?:number;pendingRevision?:number;unsaved?:boolean};
 const emptyDraft = ():ComposerDraftValue => ({text:'',files:[],references:[],missingAttachments:[]});
 const scopeKey = (scope:ComposerDraftScope) => JSON.stringify(scope.kind === 'task' ? {kind:scope.kind,taskId:scope.taskId,conversationId:scope.conversationId} : scope.conversationId ? {kind:scope.kind,conversationId:scope.conversationId} : scope);
 export function composerDraftFingerprint(value:ComposerDraftValue):string {
@@ -36,13 +37,31 @@ function browserDatabase() {
   request.onsuccess=()=>resolve(request.result); request.onerror=()=>{database=undefined;reject(request.error);};
  });
 }
-async function cacheRead(key:string):Promise<CacheValue|undefined> {
+async function cacheRead(key:string):Promise<ComposerCacheValue|undefined> {
  const db=await browserDatabase();return new Promise((resolve,reject)=>{const request=db.transaction('drafts').objectStore('drafts').get(key);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
 }
-async function cacheWrite(key:string,value:CacheValue) {
- const db=await browserDatabase();return new Promise<void>((resolve,reject)=>{const transaction=db.transaction('drafts','readwrite');transaction.objectStore('drafts').put(value,key);transaction.oncomplete=()=>resolve();transaction.onerror=()=>reject(transaction.error);transaction.onabort=()=>reject(transaction.error);});
+async function cacheWrite(key:string,value:ComposerCacheValue|EncryptedComposerRecord,ownsEditor?:()=>boolean) {
+ const db=await browserDatabase();if(ownsEditor&&!ownsEditor())throw Error('Remote editing is locked');return new Promise<void>((resolve,reject)=>{const transaction=db.transaction('drafts','readwrite');transaction.objectStore('drafts').put(value,key);transaction.oncomplete=()=>resolve();transaction.onerror=()=>reject(transaction.error);transaction.onabort=()=>reject(transaction.error);});
 }
-async function cachePatch(key:string,patch:Partial<CacheValue>) {
+async function readEncryptedDraft(key:string,codec:RemoteComposerCodec) {
+ const value=await cacheRead(key) as ComposerCacheValue|EncryptedComposerRecord|undefined;
+ if(!value)return;
+ if('format' in value){if(value.format!=='remote-composer-v1')throw Error('Unrecognized encrypted draft');return codec.decode(key,value);}
+ if(!('draft' in value||'pending' in value||'files' in value))throw Error('Unrecognized saved draft');
+ if(codec.ownsEditor())await cacheWrite(key,await codec.encode(key,value),codec.ownsEditor);
+ return value;
+}
+
+export async function migrateRemoteComposerDrafts(identity:string, codec:RemoteComposerCodec) {
+ const db=await browserDatabase(), prefix=JSON.stringify(['remote',identity,'remote']).slice(0,-1)+',';
+ const keys=await new Promise<IDBValidKey[]>((resolve,reject)=>{const read=db.transaction('drafts').objectStore('drafts').getAllKeys(IDBKeyRange.bound(prefix,prefix+'\uffff'));read.onsuccess=()=>resolve(read.result);read.onerror=()=>reject(read.error);});
+ for(const key of keys) {
+  if(!codec.ownsEditor())return;
+  const value=await cacheRead(String(key));
+  if(value&&!('format' in value))await readEncryptedDraft(String(key),codec);
+ }
+}
+async function cachePatch(key:string,patch:Partial<ComposerCacheValue>) {
  const db=await browserDatabase();return new Promise<void>((resolve,reject)=>{
   const transaction=db.transaction('drafts','readwrite'),store=transaction.objectStore('drafts'),read=store.get(key);
   read.onsuccess=()=>store.put({...read.result,...patch},key);transaction.oncomplete=()=>resolve();transaction.onerror=()=>reject(transaction.error);transaction.onabort=()=>reject(transaction.error);
@@ -63,7 +82,7 @@ const restore=(value:StoredDraft|null|undefined,files:File[]=[]):ComposerDraftVa
  return {text:value.text,references:(value.references??[]).map(item=>({...item,name:item.name??item.id,source:item.source??'',detail:item.detail??'',status:item.status??''})),files:available,missingAttachments:metadata.filter(item=>!available.some(file=>file.name===item.name&&file.size===item.size&&file.type===item.type&&file.lastModified===item.lastModified))};
 };
 
-async function restoreLocalFiles(value:StoredDraft|undefined|null, cache:CacheValue|undefined, conversationId:string):Promise<ComposerDraftValue>{
+async function restoreLocalFiles(value:StoredDraft|undefined|null, cache:ComposerCacheValue|undefined, conversationId:string):Promise<ComposerDraftValue>{
  const cached=cache?.files??[];
  if(!value||!conversationId||!value.attachments?.some(item=>item.storageId))return restore(value,cached);
  const files:File[]=[],missingAttachments:AttachmentName[]=[];
@@ -85,21 +104,29 @@ async function restoreLocalFiles(value:StoredDraft|undefined|null, cache:CacheVa
 }
 
 /** Local HOME is authoritative; IndexedDB is a truthful offline buffer and remote authority. */
-export function useComposerDraft(scope:ComposerDraftScope, identity:string, remote=false, enabled=true) {
+export function useComposerDraft(scope:ComposerDraftScope, identity:string, remote:false|RemoteComposerCodec=false, enabled=true) {
  const key=scopeKey(scope),conversationId=remote?'':scope.conversationId;
- const session=useMemo(()=>({loaded:false,revision:0,pendingRevision:0,cacheKey:'',cache:{} as CacheValue,chain:Promise.resolve(),conflicted:false,latest:emptyDraft(),preloadTextChanged:false,preloadReferencesChanged:false,preloadReplace:false,sequence:0,savedSequence:0,completion:null as {revision:number;fingerprint:string}|null,pendingUpdate:null as {revision:number;pending:PendingComposerSubmission|null}|null,redirects:new Map<string,{revision:number;cacheKey:string;cache:CacheValue}>()}),[key,identity,remote,enabled]);
+ const session=useMemo(()=>({loaded:false,revision:0,pendingRevision:0,cacheKey:'',cache:{} as ComposerCacheValue,chain:Promise.resolve(),conflicted:false,latest:emptyDraft(),preloadTextChanged:false,preloadReferencesChanged:false,preloadReplace:false,sequence:0,savedSequence:0,completion:null as {revision:number;fingerprint:string}|null,pendingUpdate:null as {revision:number;pending:PendingComposerSubmission|null}|null,redirects:new Map<string,{revision:number;cacheKey:string;cache:ComposerCacheValue}>()}),[key,identity,remote,enabled]);
  const active=useRef(session);active.current=session;
  const [value,setValueState]=useState<ComposerDraftValue>(emptyDraft),[loaded,setLoaded]=useState(false),[status,setStatus]=useState<'loading'|'saving'|'saved'|'buffered'|'error'|'conflict'>('loading'),[error,setError]=useState(''),[pending,setPendingState]=useState<PendingComposerSubmission|null>(null);
  const report=useCallback((state:typeof status,message='')=>{if(active.current===session){setStatus(state);setError(message);}},[session]);
+ const writeBuffer=useCallback((value:ComposerCacheValue)=>{
+  if(!remote)return cacheWrite(session.cacheKey,value);
+  // Serialize encrypted snapshots so a slow attachment cannot overtake its receipt.
+  return remote.ordered(session.cacheKey,async()=>{
+   if(!remote.ownsEditor())throw Error('Remote editing is locked');
+   await cacheWrite(session.cacheKey,await remote.encode(session.cacheKey,value),remote.ownsEditor);
+  });
+ },[remote,session]);
  const buffer=useCallback(async(next:ComposerDraftValue)=>{
   if(!session.cacheKey)return;
   session.cache={...session.cache,draft:serialize(next,conversationId),revision:session.revision,unsaved:!remote,files:next.files};
-  await cacheWrite(session.cacheKey,session.cache);
- },[session,remote,conversationId]);
+  await writeBuffer(session.cache);
+ },[session,remote,conversationId,writeBuffer]);
  const save=useCallback(async(next:ComposerDraftValue,requireDurable=false)=>{
   if(!session.loaded||!enabled||!session.cacheKey)return;
   const serial=session.sequence;
-  if(remote){try{await buffer(next);}catch(reason){report('error',(reason as Error).message);throw reason;}session.savedSequence=serial;report('saved');return;}
+  if(remote){if(!remote.ownsEditor())return;try{await buffer(next);}catch(reason){report('error',(reason as Error).message);throw reason;}session.savedSequence=serial;report('saved');return;}
   if(session.conflicted){if(requireDurable)throw Error('Draft changed in another window');return;}
   report('saving');
   const work=session.chain.catch(()=>{}).then(async()=>{
@@ -136,7 +163,7 @@ export function useComposerDraft(scope:ComposerDraftScope, identity:string, remo
    let device='remote';
    if(!remote){try{device=(await requestJson<{deviceId:string}>('/api/drafts/meta')).deviceId;localStorage.setItem('mandala-draft-device:'+identity,device);}catch{device=localStorage.getItem('mandala-draft-device:'+identity)??'';}}
    session.cacheKey=JSON.stringify([remote?'remote':'local',identity,device,key]);
-   const storedBuffer=await cacheRead(session.cacheKey).catch(()=>undefined);
+   const storedBuffer=remote?await remote.ordered(session.cacheKey,()=>readEncryptedDraft(session.cacheKey,remote)):await cacheRead(session.cacheKey).catch(()=>undefined);
    let draft=storedBuffer?.draft,receipt=storedBuffer?.pending??null,state:typeof status=remote?'saved':'buffered',message='';
    session.revision=storedBuffer?.revision??0;session.pendingRevision=storedBuffer?.pendingRevision??0;
    if(!remote){try{
@@ -160,31 +187,36 @@ export function useComposerDraft(scope:ComposerDraftScope, identity:string, remo
    if(session.completion&&session.revision<=session.completion.revision){session.latest=clearAcceptedComposerDraft(session.latest,session.completion.fingerprint);session.revision=session.completion.revision;}session.loaded=true;
    if(session.sequence){try{await buffer(session.latest);}catch(reason){state='error';message=(reason as Error).message;}if(active.current!==session)void save(session.latest);}
    if(active.current===session){setValueState(session.latest);setPendingState(receipt);setLoaded(true);setStatus(state);setError(message);}
-  })().catch(reason=>{if(active.current===session){setLoaded(true);report('error',(reason as Error).message);}});
-  return()=>{removeEventListener('mandala-draft-completed',completed);removeEventListener('mandala-draft-pending',pendingUpdated);if(session.loaded&&session.sequence!==session.savedSequence)void save(session.latest);};
+  })().catch(reason=>{if(active.current===session){setLoaded(!remote);report('error',(reason as Error).message);}});
+  return()=>{removeEventListener('mandala-draft-completed',completed);removeEventListener('mandala-draft-pending',pendingUpdated);if(session.loaded&&session.sequence!==session.savedSequence)void save(session.latest).catch(()=>{});};
  },[session,key,identity,remote,enabled,save,buffer,report,conversationId]);
  const setValue=useCallback((next:ComposerDraftValue|((old:ComposerDraftValue)=>ComposerDraftValue))=>{
+  if(remote&&(!remote.ownsEditor()||!session.loaded))return;
   const previous=session.latest,updated=typeof next==='function'?next(previous):next;if(!session.loaded){session.preloadTextChanged||=updated.text!==previous.text;session.preloadReferencesChanged||=updated.references!==previous.references;}session.latest=updated;session.sequence++;
   if(active.current===session){setValueState(updated);report('saving');}
   // Commit browser bytes immediately; a scope switch must not wait for the HTTP debounce.
   const serial=session.sequence;void buffer(updated).then(()=>{if(remote&&serial===session.sequence){session.savedSequence=serial;report('saved');}}).catch(reason=>report('error',(reason as Error).message));
  },[session,buffer,report,remote]);
- useEffect(()=>{if(!loaded||!session.loaded||session.sequence===session.savedSequence)return;const timer=setTimeout(()=>void save(session.latest),180);return()=>clearTimeout(timer);},[value,loaded,session,save]);
+ useEffect(()=>{if(!loaded||!session.loaded||session.sequence===session.savedSequence)return;const timer=setTimeout(()=>void save(session.latest).catch(()=>{}),180);return()=>clearTimeout(timer);},[value,loaded,session,save]);
  const savePending=useCallback(async(next:PendingComposerSubmission|null,targetConversationId?:string)=>{
   if(!session.loaded||!session.cacheKey)throw Error('Draft recovery is still loading');
-  let pendingKey=key,holder:{revision:number;cacheKey:string;cache:CacheValue}|null=null;
+  let pendingKey=key,holder:{revision:number;cacheKey:string;cache:ComposerCacheValue}|null=null;
   if(targetConversationId && JSON.parse(key).kind==='chat' && JSON.parse(key).conversationId!==targetConversationId){
    pendingKey=scopeKey({kind:'chat',conversationId:targetConversationId});holder=session.redirects.get(pendingKey)??null;
    if(!holder){const parts=JSON.parse(session.cacheKey);parts[3]=pendingKey;const saved=await requestJson<Stored<{pending:PendingComposerSubmission|null}>>('/api/drafts/pending?scope='+encodeURIComponent(pendingKey));holder={revision:saved.revision,cacheKey:JSON.stringify(parts),cache:{pending:saved.pending,pendingRevision:saved.revision}};session.redirects.set(pendingKey,holder);}
   }
-  let nextCache:CacheValue;
-  if(remote){nextCache={...session.cache,pending:next};session.cache=nextCache;await cacheWrite(session.cacheKey,nextCache);}
+  let nextCache:ComposerCacheValue;
+  if(remote){
+   const previous=session.cache.pending;
+   session.cache={...session.cache,pending:next};
+   try{await writeBuffer(session.cache);}catch(reason){if(session.cache.pending===next)session.cache={...session.cache,pending:previous};throw reason;}
+  }
   else{
    const saved=await requestJson<Stored<{pending:PendingComposerSubmission|null}>>('/api/drafts/pending',{method:next?'PUT':'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:JSON.parse(pendingKey),expectedRevision:holder?holder.revision:session.pendingRevision,...next?{pending:next}:{}})});
    if(holder){holder.revision=saved.revision;holder.cache={...holder.cache,pending:next,pendingRevision:saved.revision};await cachePatch(holder.cacheKey,{pending:next,pendingRevision:saved.revision}).catch(()=>{});dispatchEvent(new CustomEvent('mandala-draft-pending',{detail:{identity,key:pendingKey,revision:saved.revision,pending:next}}));}else{session.pendingRevision=saved.revision;nextCache={...session.cache,pending:next,pendingRevision:saved.revision};session.cache=nextCache;await cacheWrite(session.cacheKey,nextCache).catch(()=>{});}
   }
   if(!holder&&active.current===session)setPendingState(next);
- },[session,key,remote,identity]);
+ },[session,key,remote,identity,writeBuffer]);
  const reload=useCallback(async()=>{
   if(remote)return;
   const sequence=session.sequence;

@@ -35,7 +35,7 @@ export function createSkillManagement(home:string,store:Store){
     assertProposal(skill,suggestion,snapshot.config);
     const candidate={...skill,path:'',content:suggestion.content,humanMaintained:true,...(suggestion.source?{source:suggestion.source}:{}),...(skill.path?{externalSource:skill.path}:{})};
     const next={...snapshot.config,skillLibrary:snapshot.config.skillLibrary!.map(item=>item.id===id?candidate:item)};
-    await writeConfig(home,next,snapshot.revision,()=>{const current=JSON.parse(readFileSync(join(home,'config.json'),'utf8')) as Config;assertProposal(skill,suggestion,current);catalog.assertEvidence(candidate,candidate.source,undefined,current);});
+    await writeConfig(home,next,snapshot.revision,()=>{const current=JSON.parse(readFileSync(join(home,'config.json'),'utf8')) as Config;assertProposal(skill,suggestion,current);catalog.assertEvidence(candidate,candidate.source,undefined,current);},undefined,skill.path?new Map([[skill.id,skill.path]]):undefined);
    }
    suggestion.status=action==='accept'?'accepted':'rejected';store.database.prepare('UPDATE skill_suggestions SET data=? WHERE id=?').run(JSON.stringify(suggestion),suggestionId);
    return {skill:(await readConfig(home)).config.skillLibrary!.find(item=>item.id===id)!,suggestion};

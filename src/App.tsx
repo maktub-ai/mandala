@@ -1,9 +1,10 @@
 import VoiceInput from './VoiceInput';
 import {appendVoiceText} from '../shared/voice';
 import { useUiExtensions } from './UiExtensions';
-import ExecutionResults,{useExecutionResults} from './ExecutionResults';
+import ExecutionResults,{ChatReviewRequests,useExecutionResults} from './ExecutionResults';
 import PageErrorBoundary from './PageErrorBoundary';
 import MandalaPanels,{referenceDragType} from "./MandalaPanels";
+import {collabFocusEvent} from "./mandala-collab";
 import { useDesktopPetBridge } from "./MandalaPet";
 import MandalaCoordinationCards from './MandalaCoordinationCards';
 import AgentMessageCards from './AgentMessageCards';
@@ -37,7 +38,7 @@ import "./composer-queue.css";
 import TaskWorkspace, { TaskDialog } from "./TaskWorkspace";
 import { navigateAssetPage } from "./AssetLibrary";
 import SchedulesPage from "./SchedulesPage";
-import type { QueuedInput } from "../shared/tasks";
+import { isHumanInput, type QueuedInput } from "../shared/tasks";
 import AssetLibrary from "./AssetLibrary";
 import MarketPage from "./MarketPage";
 import { type ApprovalDecision } from "../shared/approvals";
@@ -61,7 +62,8 @@ import ConversationFind from "./ConversationFind";
 import ComposerActions from "./ComposerActions";
 import ComposerSettings from "./ComposerSettings";
 import ConversationWorkspace, { type ConversationWorkspaceTab } from "./ConversationWorkspace";
-import TurnProcess, { TurnFooter } from "./TurnProcess";
+import ConversationSubagents from "./NativeSubagents";
+import TurnProcess, { turnErrorText, TurnFooter } from "./TurnProcess";
 import { presentRun } from "./runView";
 import type {
   Agent,
@@ -77,8 +79,10 @@ import type {
 } from "../shared/types";
 import EffectivePanel from "./EffectivePanel";
 import WorkspaceInspector from "./WorkspaceInspector";
+import MandalaFilePreview from "./MandalaFilePreview";
 import ConversationContextPopover from "./ConversationContextPopover";
 import IdentityAvatar from "./IdentityAvatar";
+import { AccountAvatar } from "./AccountAvatar";
 import Icon from "./ui/Icon";
 import BrandMark from "./ui/BrandMark";
 import { modulePinsKey, readModulePins, moduleOrderKey, readModuleOrder, moveSidebarItem } from "./sidebar-modules";
@@ -101,12 +105,14 @@ import {WorkspacePage,PageHeader} from "./ui/WorkspacePage";
 import CommandPalette, { type PaletteAction } from "./CommandPalette";
 import KeyboardShortcuts from './KeyboardShortcuts';
 import { composingKey, useShortcuts, shortcutLabel, shortcutAria } from './shortcuts';
-import { CHAT_HISTORY_PAGE_TURNS, groupChatTurns, mergeChatEvents, recoverableUnsubmittedDraft, type ChatHistoryPage, type ChatMessage } from "./chatTurns";
+import { CHAT_HISTORY_PAGE_TURNS, groupChatTurns, mergeChatEvents, recoverableUnsubmittedDraft, type ChatHistoryPage, type ChatMessage, type ChatTurn } from "./chatTurns";
 import "./journeys.css";
 import "./ui/design-system.css";
 import "./workspace.css";
 import "./chat-feedback.css";
 import "./chat-bubbles.css";
+import QuestionAnswers from "./QuestionAnswers";
+import { questionReplyPresenter } from "../shared/questions";
 const labels = {
   idle: "就绪",
   running: "执行中",
@@ -126,13 +132,31 @@ function currentRoute() {
   normalizeOrganizationRoute();
   const query = new URLSearchParams(location.search);
   const settingsProject = location.pathname.match(/^\/projects\/([^/]+)\/settings$/)?.[1];
-  const workbenchProject = location.pathname.match(/^\/projects\/([^/]+)\/(?:workbench|overview|tasks|library|agents)$/)?.[1];
+  const workbenchProject = location.pathname.match(/^\/projects\/([^/]+)\/(?:workbench|overview|blueprint|tasks|library|agents)$/)?.[1];
   const explicit = location.pathname === "/mandala" || !!workbenchProject || ["project", "conversation", "agent", "workspace", "cwd"].some(key => query.has(key));
   return { usage: location.pathname === "/usage", project: workbenchProject || settingsProject ? decodeURIComponent((workbenchProject || settingsProject)!) : query.get("project") ?? "",
     workspace: query.has("workspace") ? query.get("workspace") || null : undefined, cwd: query.get("cwd") ?? "",
     agent: location.pathname.match(/^\/agents\/([^/]+)(?:\/memory)?$/)?.[1] ? decodeURIComponent(location.pathname.split("/")[2]) : query.get("agent") ?? "", conversation: query.get("conversation") ?? "", workbench: !!workbenchProject, mana: location.pathname === "/mana", assets: (location.pathname.startsWith("/assets") || location.pathname.startsWith("/library")) || location.pathname === "/mana" && query.get("tab") === "document",
     market: location.pathname === "/market", tasks: location.pathname.startsWith("/tasks") || location.pathname === "/schedules", explicit };
 }
+function chatTurnRunId(turn: ChatTurn) {
+  return (turn.events.find(event => (event.data as { runId?: string }).runId)?.data as { runId?: string } | undefined)?.runId;
+}
+
+function MandalaTyping({ startedAt }: { startedAt?: number }) {
+  const { text: localize } = useLanguage();
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), Math.max(0, 15000 - (Date.now() - (startedAt ?? Date.now()))));
+    return () => clearTimeout(timer);
+  }, [startedAt]);
+  const label = localize('等待回复', 'Waiting for reply');
+  return <div className="mandala-typing" role="status" aria-label={label}>
+    <span className="typing-dots" aria-hidden="true"><i/><i/><i/></span>
+    {slow && <span>{localize('仍在等待回复…', 'Still waiting for a reply…')}</span>}
+  </div>;
+}
+
 export default function App({ account, userInitial, draftIdentity = "fixture" }: { account?: SidebarAccount; userInitial?: string; draftIdentity?: string } = {}) {
   const { refresh: refreshExtensions } = useUiExtensions();
   useEffect(() => { void refreshExtensions(); }, [refreshExtensions]);
@@ -195,10 +219,10 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const queueReads = useRef({ generation: 0, issued: 0, applied: 0 });
   const refreshQueuedInputs = async (id: string, isCurrent: () => boolean) => {
     const generation = queueReads.current.generation, version = ++queueReads.current.issued;
-    const inputs = await api<QueuedInput[]>("/conversations/" + id + "/queue");
+    const inputs = await requestJson<QueuedInput[]>("/api/conversations/" + id + "/queue");
     if (!isCurrent() || generation !== queueReads.current.generation || version < queueReads.current.applied) return;
     queueReads.current.applied = version;
-    setQueuedInputs(inputs.filter(input => input.state === "queued" || input.unrecorded || input.prestartFailure));
+    setQueuedInputs(inputs.filter(input => input.state === "queued" || input.state === "running" || input.prestartFailure || input.unrecorded));
   };
   const [executionId,setExecutionId]=useState<string|null>(null);
   const selectedChat = useRef(selected);
@@ -234,13 +258,8 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const auxiliaryReady=historyReady&&(!selected||settledChat===selected);
   const readerConversation = useRef("");
   const [contentRequest, setContentRequest] = useState<{ conversationId: string; target: ContentTarget } | null>(null);
-  const activeContentRequest = contentRequest?.conversationId === selected ? contentRequest.target : null;
   useEffect(() => setContentRequest(current => current?.conversationId === selected ? current : null), [selected]);
   const [workspaceTab, setWorkspaceTab] = useState<ConversationWorkspaceTab>("files");
-  const openContent = useCallback((target: ContentTarget) => {
-    setContentRequest({ conversationId: selected, target: { ...target } });
-    setWorkspaceTab(target.kind === "file" ? "files" : "references"); setEffectiveOpen(true);
-  }, [selected]);
   const [editingMessage, setEditingMessage] = useState<{ eventId: number; text: string } | null>(null);
   const [branchPending, setBranchPending] = useState(false);
   const branchRequest = useRef(0);
@@ -250,6 +269,21 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const [refreshError, setRefreshError] = useState("");
   const activeChat = chat?.id === selected ? chat : chats.find(item => item.id === selected);
   const mandalaMain=activeChat?.purpose === "mandala-main";
+  const showExecutionDetails = !mandalaMain || config.mandala?.showExecutionDetails === true;
+  const inlineQueued = (input: QueuedInput) => mandalaMain && isHumanInput(input) && !input.prestartFailure && !input.unrecorded && input.admission !== 'remote_unavailable'
+    && !(input.state === 'queued' && (input.waitingReason === 'context-window' || activeChat.status === 'interrupted'));
+  const recordedInputs = useMemo(() => new Set(events.flatMap(event=>event.kind==='user' ? (event.data as {queuedInputId?:string}).queuedInputId ?? [] : [])), [events]);
+  const [mainPreview, setMainPreview] = useState<ContentTarget | null>(null);
+  const previewOpener = useRef<HTMLElement | null>(null);
+  const openContent = useCallback((target: ContentTarget) => {
+    if (mandalaMain) {
+      previewOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setMainPreview(target);
+      return;
+    }
+    setContentRequest({ conversationId: selected, target: { ...target } });
+    setWorkspaceTab(target.kind === "file" ? "files" : "references"); setEffectiveOpen(true);
+  }, [selected, mandalaMain]);
   const mandalaAgent=mandalaMain?config.agents.find(item=>item.id===activeChat.agentId):undefined;
   const runtimeRunning=pending||activeChat?.status==='running'||activeChat?.status==='approval';
   const statusCli=mandalaAgent&&!runtimeRunning?mandalaAgent.defaultCli:activeChat?.cli??cli;
@@ -259,6 +293,15 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const composerDraftRef=useRef(composerDraft);composerDraftRef.current=composerDraft;
   const {text,files,references:selectedReferences}=composerDraft.value;
   const [voiceBusy,setVoiceBusy]=useState(false);
+  const compactSelected = selectedReferences.some(item => item.kind === 'command' && item.id === '/compact');
+  const compactCommand = mandalaMain && (compactSelected || text.trim() === '/compact') && !composerDraft.pending;
+  const [compactNotice, setCompactNotice] = useState<{state:'working'|'done'|'error'; message:string} | null>(null);
+  const compactWorking = mandalaMain && compactNotice?.state === 'working';
+  useEffect(() => {
+    if (!compactNotice || compactNotice.state === 'working') return;
+    const timer = setTimeout(() => setCompactNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [compactNotice]);
   const setText: React.Dispatch<React.SetStateAction<string>> = next => composerDraft.setValue(value=>({...value,text:typeof next === 'function' ? next(value.text) : next}));
   const setFiles: React.Dispatch<React.SetStateAction<File[]>> = next => composerDraft.setValue(value=>{const files=typeof next==='function'?next(value.files):next;return {...value,files,missingAttachments:value.missingAttachments.filter(item=>!files.some(file=>file.name===item.name&&file.size===item.size))};});
   const setSelectedReferences: React.Dispatch<React.SetStateAction<ComposerReferenceItem[]>> = next => composerDraft.setValue(value=>({...value,references:typeof next==='function'?next(value.references):next}));
@@ -273,9 +316,17 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     .filter(item => (referenceMode === 'mention' ? item.kind === 'agent' : item.kind !== 'agent' && item.kind !== 'chat')
       && !selectedReferences.some(selected=>selected.id===item.id) && matchesReferenceQuery(item,referenceQuery?.query??''))
     .map(item => item.kind === 'command' ? {...item,name:localize('创建任务', 'Create task'),detail:localize('加入任务上下文，发送后由 Agent 处理', 'Add task creation context for the Agent')} : item);
+  if (mandalaMain && referenceMode === 'slash' && referenceQuery && text.trim() === '/' + referenceQuery.query &&
+      '/compact'.startsWith(text.trim()) && !compactSelected && !composerDraft.pending) {
+    visibleReferences.push({id:'/compact',kind:'command',name:localize('整理上下文','Compact context'),source:'/compact',
+      detail:localize('整理当前对话的上下文','Compact this conversation’s context'),status:'available'});
+  }
   const updateReferenceQuery = (value: string, caret: number) => {
     const mention = mentionReferenceQuery(value,caret);
-    setReferenceMode(mention?'mention':'slash'); setReferenceQuery(mention??slashReferenceQuery(value,caret)); setReferenceIndex(0);
+    const slash = slashReferenceQuery(value,caret);
+    setReferenceMode(mention ? 'mention' : 'slash');
+    setReferenceQuery(mandalaMain && slash?.query === 'compact' && (value.trim() !== '/compact' || compactSelected) ? null : mention ?? slash);
+    setReferenceIndex(0);
   };
   const chooseReference = (item: ComposerReferenceItem) => {
     if (!referenceQuery || !selectableReference(item)) return;
@@ -594,8 +645,8 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       if (loading >= 2) { reload = true; return; }
       loading++;
       const version = ++loadVersion;
-      return api<{ conversation: Conversation; approvals: Approval[]; executionId:string|null }>(
-        "/conversations/" + selected,
+      return requestJson<{ conversation: Conversation; approvals: Approval[]; executionId:string|null }>(
+        "/api/conversations/" + selected,
       )
         .then((data) => {
           // A newer request may still be pending; only an already applied response supersedes this one.
@@ -896,7 +947,11 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   };
   const [mandalaSettingsOpen,setMandalaSettingsOpen]=useState(false);
   const [mandalaLoading,setMandalaLoading]=useState(false);
+  useEffect(() => { setMainPreview(null); }, [selected, chatActive, workbench]);
+  const preview = mandalaMain && chatActive && !workbench ? mainPreview : null;
   useEffect(()=>{if(mandalaMain)setEffectiveOpen(!matchMedia('(max-width: 1100px)').matches);},[mandalaMain]);
+  // Showing a receiving chat in Collaboration opens the side panel that holds it.
+  useEffect(()=>{if(!mandalaMain)return;const open=()=>setEffectiveOpen(true);addEventListener(collabFocusEvent,open);return()=>removeEventListener(collabFocusEvent,open);},[mandalaMain]);
   const chatDefaults = cli ? config.chatDefaults?.[cli] : undefined;
   const inheritedModel = cli ? agent?.models[cli] || chatDefaults?.model : undefined;
   const effectiveModel = selected ? activeChat?.model ?? models.find(item => item.isDefault)?.id : model || inheritedModel || models.find(item => item.isDefault)?.id;
@@ -951,9 +1006,42 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     addTextAttachment(value, true);
     window.getSelection()?.removeAllRanges();
   };
+  const earlyMainSend = useRef<{id:string;view:number;fingerprint:string} | null>(null);
+  const composerReadyToSend = composerDraft.loaded && (!selected || chat?.id === selected && historyReady);
   const send = async (interrupt = false) => {
-    if(voiceBusy || writerRecoveryBusy)return;
-    if (selected && (chat?.id !== selected || !historyReady)) return;
+    if(voiceBusy || writerRecoveryBusy || compactWorking)return;
+    if (!composerReadyToSend) {
+      if (mandalaMain && (text.trim() || files.length || selectedReferences.length)) {
+        earlyMainSend.current = {id:selected,view:navigationVersion.current,fingerprint:composerDraftFingerprint(composerDraft.value)};
+      }
+      return;
+    }
+    earlyMainSend.current = null;
+    if (compactCommand) {
+      if (busy || stopping) {
+        setCompactNotice({state:'error',message:localize('请等当前执行结束后再整理上下文。','Wait for the current run to finish before compacting.')});
+        return;
+      }
+      const view = navigationVersion.current;
+      setCompactNotice({state:'working',message:localize('正在整理上下文…','Compacting context…')});
+      try {
+        const {status} = await api<{status:'completed'|'noop'|'fallback'}>(`/conversations/${selected}/compact`, 'POST', {});
+        if (view === navigationVersion.current && selectedChat.current === selected) {
+          composerDraft.setValue(current => ({
+            ...current,
+            text: !compactSelected && current.text === text ? '' : current.text,
+            references: current.references.filter(item => item.id !== '/compact'),
+          }));
+        }
+        const message = status === 'noop' ? localize('当前上下文无需整理。','The context is already compact.') :
+          status === 'fallback' ? localize('已保留近期对话，下轮将从这里继续。','Recent messages have been kept for the next turn.') :
+          localize('上下文已整理。','Context compacted.');
+        setCompactNotice({state:'done',message});
+      } catch (reason) {
+        setCompactNotice({state:'error',message:errorText((reason as Error).message)});
+      }
+      return;
+    }
     if (!composerDraft.loaded || (composerDraft.value.missingAttachments.length && !composerDraft.pending) || ((!text.trim() && !files.length && !selectedReferences.length) && !composerDraft.pending) || pending || stopping || modeSaving || branchPending || approvalPreferenceLoading || approvalPreferenceError || (!selected && (!cli || !runtimes.includes(cli)))) return;
     const view = navigationVersion.current;
     let requestText = text;
@@ -1009,7 +1097,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       const attachments = submission.attachments;
       const input = await resolveComposerFiles(requestText, requestFiles);
       await uploadComposerFiles(fetch,id,input.files,attachments);
-      const prepared:ComposerSubmission={conversationId:id,commandKey:submission.commandKey,draftFingerprint:submission.draftFingerprint,text:input.text,attachments,references:requestReferences.map(item=>({id:item.id})),action,recovery:submission};
+      const prepared:ComposerSubmission={steer:mandalaMain && action==="queue",conversationId:id,commandKey:submission.commandKey,draftFingerprint:submission.draftFingerprint,text:input.text,attachments,references:requestReferences.map(item=>({id:item.id})),action,recovery:submission};
       let submittedDraft=composerDraft;
       if(!selected){
         await composerDraft.flush();await composerDraft.copyToConversation(id,pendingSubmission(prepared));
@@ -1017,8 +1105,12 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       }
       const background=!selected&&navigationVersion.current!==view;
       if (selectedChat.current === id) queueReads.current.generation++;
-      await submitComposerInput(api,prepared,background?(pending=>composerDraft.savePending(pending,id)):submittedDraft.savePending,async()=>{if(background)await composerDraft.completeConversation(id,prepared.draftFingerprint);else{submittedDraft.setValue(current=>clearAcceptedComposerDraft(current,prepared.draftFingerprint));await submittedDraft.flush();}});
+      const receipt = await submitComposerInput(api,prepared,background?(pending=>composerDraft.savePending(pending,id)):submittedDraft.savePending,async()=>{if(background)await composerDraft.completeConversation(id,prepared.draftFingerprint);else{submittedDraft.setValue(current=>clearAcceptedComposerDraft(current,prepared.draftFingerprint));await submittedDraft.flush();}});
       if (selectedChat.current === id) queueReads.current.generation++;
+      if (mandalaMain && selectedChat.current === id && action === 'queue') {
+        const input = receipt as QueuedInput;
+        if (input.state === 'queued' || input.state === 'running') setQueuedInputs(items => items.some(item=>item.id===input.id) ? items : [...items,input]);
+      }
       rememberedAgents.current[projectId] = agentId;
       try { devicePreferences.setItem('mana-project-agents', JSON.stringify(rememberedAgents.current)); } catch { /* Sending is independent of browser preference storage. */ }
       if (retrySubmissions.current.get(id) === submission) retrySubmissions.current.delete(id);
@@ -1033,6 +1125,13 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       if (navigationVersion.current === view) setPending(false);
     }
   };
+  useEffect(()=>{
+    const queued=earlyMainSend.current;
+    if (!queued || !composerReadyToSend) return;
+    earlyMainSend.current=null;
+    if (mandalaMain && queued.id===selected && queued.view===navigationVersion.current && !composerDraft.pending &&
+      queued.fingerprint===composerDraftFingerprint(composerDraft.value)) void send();
+  },[composerReadyToSend,selected]);
   const editMessage = async () => {
     if (!editingMessage?.text.trim() || busy || branchPending || !selected) return;
     const source = selected, view = navigationVersion.current, request = ++branchRequest.current;
@@ -1060,10 +1159,13 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     } catch (e) { if (selectedChat.current === source && navigationVersion.current === view) setError((e as Error).message); }
     finally { if (request === branchRequest.current) setBranchPending(false); }
   };
-  const copyMessage = async (id: number, content: string) => {
+  const copyMessage = async (id: string | number, content: string) => {
     try { await copyText(content); setCopiedMessage(id); }
     catch { clearCopiedMessage(); setError(t("复制失败，请手动选择文本。")); }
   };
+  const messageCopy = (key: string | number, text: string) => (
+    <Button type="button" aria-label={t("复制消息")} title={t(copiedMessage === key ? "已复制" : "复制消息")} data-copied={copiedMessage === key || undefined} onClick={() => void copyMessage(key, text)}><Icon key={"icon-" + copySequence} name={copiedMessage === key ? "check" : "copy"} size={14} />{copiedMessage === key && <span key={"feedback-" + copySequence} className="copy-feedback" role="status">{t('已复制')}</span>}</Button>
+  );
   const unsentDraftRestore = useRef<{key?:number;eligible:boolean}>({eligible:false});
   const reuseRequest = async (message: Pick<ChatMessage, 'text' | 'referenceItems'> & { attachments?: { id: string; name?: string; mimeType?: string }[] }, sameChatKey?: number) => {
     const sameChat = sameChatKey !== undefined;
@@ -1111,7 +1213,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     }
   };
   const sendQueued=async(input:QueuedInput)=>{
-    if(pending||stopping||navigationLocked||branchPending||modeSaving||!historyReady||chat?.id!==selected)return;
+    if(pending||writerRecoveryBusy||stopping||navigationLocked||branchPending||modeSaving||!historyReady||chat?.id!==selected)return;
     const id=selected,view=navigationVersion.current;setPending(true);setError('');queueReads.current.generation++;
     try{await api('/conversations/'+id+'/queue/'+input.id,'POST',{expectedExecutionId:executionId});if(view===navigationVersion.current)queueReads.current.generation++;await refreshQueuedInputs(id,()=>view===navigationVersion.current);}
     catch(error){if(view===navigationVersion.current)setError((error as Error).message);}
@@ -1135,14 +1237,17 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   };
   const renderApprovalRequest=(approval:Approval)=><ApprovalRequest key={approval.id} approval={approval} events={events}
     pending={submittingApproval===approval.id} onDecision={(id,decision)=>void submitApproval(id,decision)} onAnswer={(id,answers)=>void submitQuestion(id,answers)}/>;
-  const turns = useMemo(() => groupChatTurns(events), [events]);
+  const presentReply = useMemo(() => questionReplyPresenter(events), [events]);
+  const turns = useMemo(() => groupChatTurns(events, presentReply), [events, presentReply]);
+  const visibleInputs = useMemo(() => queuedInputs.map(input => ({ ...input, ...presentReply(input.id, input.text) })), [queuedInputs, presentReply]);
+  const requestedRun = new URLSearchParams(location.search).get('run');
   const presentedTurns = useMemo(() => turns.map(turn => {
-    const run = presentRun(turn);
+    const run = presentRun(turn, activeChat?.cli);
     return { turn, run, replyText: run.answers.map(message => message.text).join("\n\n") };
-  }), [turns]);
-  const unsentDraftKey=useMemo(()=>recoverableUnsubmittedDraft(turns,chat?.id===selected?chat.status:undefined),[turns,chat?.id,chat?.status,selected]);
+  }), [turns, activeChat?.cli]);
+  const unsentDraftKey=useMemo(()=>recoverableUnsubmittedDraft(turns,chat?.id===selected?chat.status:undefined,mandalaMain),[turns,chat?.id,chat?.status,selected,mandalaMain]);
   unsentDraftRestore.current = {key:unsentDraftKey,eligible:historyReady&&!busy&&!stopping&&!navigationLocked};
-  const executionResults=useExecutionResults(chatActive&&auxiliaryReady&&chat?.id===selected&&agent?.systemRole==='mandala'?selected:'');
+  const executionResults=useExecutionResults(chatActive&&auxiliaryReady&&chat?.id===selected?selected:'');
   const resultGroups=useMemo(()=>{
     const presented=new Set(turns.flatMap(turn=>turn.messages.flatMap(message=>message.source?.kind==='coordination'?message.source.receiptIds:[])));
     const groups=new Map<number|null,typeof executionResults.items>();
@@ -1171,7 +1276,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   }, [events, approvals.length, historyReady, executionResults.items, operationTasks.tasks]);
   const focusedExecution=useRef('');
   useLayoutEffect(()=>{
-    const runId=new URLSearchParams(location.search).get('run');
+    const runId=requestedRun;
     if(!runId||!historyReady){focusedExecution.current='';return;}
     const key=selected+':'+runId;if(focusedExecution.current===key)return;
     const target=messagesRoot.current?.querySelector<HTMLElement>('[data-run-id="'+CSS.escape(runId)+'"]');
@@ -1310,7 +1415,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     const section = settingsSection(target.pathname);
     if (section) { void openSettings(section, target.searchParams.get("agent") ?? "", target.searchParams.get("project") ?? "", section === "projects" && target.searchParams.has("project"), target.searchParams.get("tab") ?? "", target.search); return; }
     if (settingsPath && !closeSettings(false)) return;
-    const workbenchMatch = path.match(/^\/projects\/([^/]+)\/(?:workbench|overview|tasks|library|agents)$/);
+    const workbenchMatch = path.match(/^\/projects\/([^/]+)\/(?:workbench|overview|blueprint|tasks|library|agents)$/);
     if (workbenchMatch && path.endsWith("/workbench")) { navigate(decodeURIComponent(workbenchMatch[1]), "", "", true); return; }
     const identity=config.agents.find(a=>a.id===target.searchParams.get('agent'));
     if (target.pathname === '/' && isSystemAgent(config,identity) && !target.searchParams.has('conversation')) {
@@ -1411,6 +1516,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const pageQuery = new URLSearchParams(location.search);
   // Typing a task search changes the URL, not the page or its unsent drafts.
   if (tasksOpen) pageQuery.delete('q');
+  if (assetsOpen) { pageQuery.delete('tab'); pageQuery.delete('file'); pageQuery.delete('plan'); }
   // Selecting or creating a Project/Agent keeps the settings page and its unsaved creation form.
   if (settingsPath) { pageQuery.delete('agent'); pageQuery.delete('project'); }
   const withPalette = (content: React.ReactNode) => <TaskNotifications onOpen={openWorkspacePath}><ComposerDraftIdentity.Provider value={draftIdentity}><PageErrorBoundary key={marketOpen ? "/market" : location.pathname+'?'+pageQuery} onRecover={path=>{setNavigationLocked(false);if(path){history.pushState(null,'',path);dispatchEvent(new PopStateEvent('popstate'));}}}>{content}</PageErrorBoundary>{palette}{mandalaSettingsOpen&&<MandalaSettings onClose={()=>setMandalaSettingsOpen(false)} onSaved={(value,revision)=>{settingsSaved.current=value;configRevision.current=revision;latestDraft.current=structuredClone(value);setConfig(value);setDraft(latestDraft.current);setSettingsRevision(revision);}}/>} {shortcutsOpen && <KeyboardShortcuts onClose={() => setShortcutsOpen(false)}/>}{taskDialog && !tasksOpen && <TaskDialog id={taskDialog} config={config} onNavigate={setTaskDialog} onClose={() => setTaskDialog(null)} onOpenPage={() => { const id = taskDialog; setTaskDialog(null); navigateAssetPage("/tasks/" + encodeURIComponent(id)); }}/>}</ComposerDraftIdentity.Provider></TaskNotifications>;
@@ -1445,13 +1551,13 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
       onRuntimeDirtyChange={dirty => { runtimeDraftDirty.current = dirty; }} onSaveRuntime={saveRuntime} onRuntimeNavigate={path => { if(runtimeSaveInFlight.current) return; if(JSON.stringify(latestDraft.current)!==JSON.stringify(settingsSaved.current))void saveSettings(); const requestedCli=new URLSearchParams(location.search).get('runtime');const previousCli = location.pathname.split('/')[3]==='new'&&runtimeIds.includes(requestedCli as Cli)?requestedCli!:location.pathname.split('/')[3]; history.pushState(null, '', path); setSettingsPath(path); runtimeDraftDirty.current = false; if(path === '/settings/runtimes') requestAnimationFrame(() => (document.querySelector<HTMLButtonElement>('[data-runtime-configure="' + previousCli + '"]') ?? document.querySelector<HTMLButtonElement>('.runtime-connections .primary'))?.focus()); }}
       projectPreparationName={projectPreparationName} onProjectPreparationNameChange={setProjectPreparationName} initialProjectId={settingsProjectId} initialAgentId={isSystemAgent(config,config.agents.find(a=>a.id===settingsAgentId))?'':settingsAgentId} projectSelectionVersion={projectSelectionVersion}
       initialAgentTab={location.pathname.endsWith("/memory") ? "memory" : new URLSearchParams(location.search).get("tab") ?? "profile"}
-      onShortcuts={() => setShortcutsOpen(true)} modulePins={modulePins} moduleOrder={moduleOrder} onModulePin={pinModule} onModuleReorder={reorderModule} saveError={saveError} onRetrySave={() => { failedDraft.current = ''; void saveSettings(); }} onReloadSettings={() => void reloadSettings()}
+      onShortcuts={() => setShortcutsOpen(true)} modulePins={modulePins} moduleOrder={moduleOrder} onModulePin={pinModule} onModuleReorder={reorderModule} saveError={saveError} onRetrySave={() => { failedDraft.current = ''; void saveSettings(); }} onReloadSettings={reloadSettings}
       onOpenPath={openWorkspacePath} onNavigate={(next, objectId = "") => { if(objectSaveGuard || navigationLocked || !confirmRuntimeLeave()) return; navigationVersion.current++; const query = next === "projects" && objectId ? "?project=" + encodeURIComponent(objectId) : next === "agents" && objectId ? "?agent=" + encodeURIComponent(objectId) : ""; history.pushState(null, "", settingsUrl(next) + query); setSettingsProjectId(next === "projects" ? objectId : ""); setSettingsAgentId(next === "agents" ? objectId : ""); setSettingsPath(location.pathname); setMobileNav(false); }} /></div>);
   }
   if (workbench && !workbenchProject) return withPalette(<div className="product-frame"><div className="app-shell"><AppSidebar navigation={globalNavigation} open={mobileNav} onClose={() => setMobileNav(false)}/><main className="workspace-main"><SidebarToggle onClick={() => setMobileNav(true)}/><p role="alert">{localize('此项目不可用，可能已被移除或你无权访问。', 'This project is unavailable. It may have been removed or you may not have access.')}</p><Button onClick={()=>openWorkspacePath('/projects')}>{localize('返回项目', 'Back to Projects')}</Button></main></div></div>);
   if (marketOpen) return withPalette(<div className="product-frame"><MarketPage navigation={globalNavigation} mobileNav={mobileNav} onMobileNav={setMobileNav} onConfigSaved={() => refresh()} onNavigationLockChange={setNavigationLocked} /></div>);
   if (tasksOpen && location.pathname === "/schedules") return withPalette(<div className="product-frame"><SchedulesPage navigation={globalNavigation} mobileNav={mobileNav} onMobileNav={setMobileNav} config={config} onOpenConversation={openConversation} onNavigationLockChange={setNavigationLocked}/></div>);
-  if (tasksOpen) return withPalette(<div className="product-frame"><TaskWorkspace navigation={globalNavigation} mobileNav={mobileNav} onMobileNav={setMobileNav} config={config} onOpenConversation={openConversation} onNavigationLockChange={setNavigationLocked}/></div>);
+  if (tasksOpen) return withPalette(<div className="product-frame"><TaskWorkspace navigation={globalNavigation} mobileNav={mobileNav} onMobileNav={setMobileNav} config={config} onNavigationLockChange={setNavigationLocked}/></div>);
   if (assetsOpen) return withPalette(<div className="product-frame"><AssetLibrary onNavigationLockChange={setNavigationLocked} navigation={globalNavigation} mobileNav={mobileNav} onMobileNav={setMobileNav} config={config} onOpenPath={openWorkspacePath} /></div>);
   if (manaOpen) return withPalette(<div className="product-frame"><ManaWorkspace navigation={globalNavigation} mobileNav={mobileNav} onMobileNav={setMobileNav}
     config={config} conversations={chats} tasks={tasks} onOpenConversation={openConversation} onNavigationLockChange={setNavigationLocked} onOpenPath={openWorkspacePath}
@@ -1501,7 +1607,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
           </Button>}
         {!document.getElementById('desktop-titlebar-right')&&contextPopover}</header>}
         {chatActive && <ConversationFind root={messagesRoot} conversationId={selected} version={events} hasEarlier={earlierBefore !== null} historyState={earlierState} onLoadEarlier={() => loadEarlier.current?.(100)} onInspect={() => { followLatest.current = false; }} />}
-        {!workbench && selected && (()=>{const slot=document.getElementById('desktop-titlebar-right');const button=<Button ref={contentPanelTrigger} type="button" className="content-panel-trigger" hidden={!slot&&effectiveOpen} aria-label={t(effectiveOpen?'收起右侧栏':'展开右侧栏')} title={t(effectiveOpen?'收起右侧栏':'展开右侧栏')} aria-expanded={effectiveOpen} aria-controls="chat-environment-panel" onClick={()=>{setEffectiveOpen(value=>!value);}}><Icon name="panel" size={18}/></Button>;return slot?createPortal(<>{contextPopover}{button}</>,slot):button;})()}
+        {!workbench && selected && (()=>{const slot=document.getElementById('desktop-titlebar-right');const button=<Button ref={contentPanelTrigger} type="button" className="content-panel-trigger" hidden={!!preview||!slot&&effectiveOpen} aria-label={t(effectiveOpen?'收起右侧栏':'展开右侧栏')} title={t(effectiveOpen?'收起右侧栏':'展开右侧栏')} aria-expanded={effectiveOpen} aria-controls="chat-environment-panel" onClick={()=>{setEffectiveOpen(value=>!value);}}><Icon name="panel" size={18}/></Button>;return slot?createPortal(<>{contextPopover}{button}</>,slot):button;})()}
 
         {workbench && workbenchProject ? <>{(error || refreshError) && <p className="form-error" role="alert">{errorText(error || refreshError)}</p>}
           {saveError&&<div role="alert" className="settings-save-error"><span>{errorText(saveError)}</span><Button onClick={()=>saveError==='configuration changed'?void reloadSettings():(failedDraft.current='',void saveSettings())}>{t(saveError==='configuration changed'?'重新读取配置':'重试自动保存')}</Button></div>}
@@ -1643,29 +1749,37 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
                   ? localize('加载失败，点击重试', 'Could not load history. Retry') : localize('加载更早的记录', 'Load earlier messages')}
               </Button>
             </div>}
-            <ExecutionResults items={resultGroups.get(null)??[]} config={config} tasks={operationTasks.tasks} onOpen={openWorkspacePath}/>
+            <ExecutionResults onRefresh={executionResults.retry} renderCopy={mandalaMain ? messageCopy : undefined} items={resultGroups.get(null)??[]} config={config} tasks={operationTasks.tasks} onOpen={openWorkspacePath}/>
             {presentedTurns.map(({ turn, run, replyText }) => {
               const inspect = () => { followLatest.current = false; setAwayFromLatest(true); };
               const checkpoint = [...turn.events].reverse().find(event => event.kind === "status" && (event.data as {status?: string}).status === "idle");
               const answer = run.answers.at(-1);
+              const errors = turn.messages.filter(message=>message.kind==='error');
+              const quietStop = mandalaMain && run.status === 'interrupted' && (turn.events.some(event=>event.kind==='status' && (event.data as {userStopped?:boolean}).userStopped) || !errors.length);
               const recoverUnsentRequest = (message: ChatMessage) => message.key === unsentDraftKey
                 ? <Button type="button" title={existingComposerDraft ? localize('请先保留或清空现有草稿', 'Save or clear the existing draft first') : undefined}
                     disabled={busy || pending || branchPending || navigationLocked || !composerDraft.loaded || existingComposerDraft}
-                    onClick={() => void reuseRequest(message, message.key)}>{localize('恢复到当前草稿', 'Restore draft here')}</Button> : null;
+                    onClick={() => void reuseRequest(message, message.key)}>{mandalaMain&&errors.some(error=>error.text==='CLI request timed out: thread/resume')?localize('取回到当前输入框','Restore to current draft'):localize('恢复到当前草稿', 'Restore draft here')}</Button> : null;
+              const visibleReplies = mandalaMain ? [...run.progress,...run.answers].sort((a,b)=>a.key-b.key) : run.answers;
               const canFork = !!checkpoint && !run.incomplete && !busy && !branchPending;
               const showReply = turn.messages.some(m=>m.kind!=="agent_message") && turn.events.some(event=>event.kind!=="user");
+              const waiting = mandalaMain && turn === turns.at(-1) && run.status === 'running'
+                && activeChat.status === 'running' && !stopping && !approvals.length && !errors.length
+                && !visibleReplies.some(message => message.text.trim());
+              const onlyChildOutput = !run.answers.length && !run.progress.length && !errors.length && run.subagents.some(child => child.agentId && child.text?.trim());
+              const waitingForParent = onlyChildOutput && run.status === 'running' && turn === turns.at(-1) && activeChat?.status === 'running' && !stopping && !approvals.length;
               const operationCards = <><AgentMessageCards messages={turn.messages.filter(message=>message.agentMessage?.direction!=='reply')} config={config} onOpen={openWorkspacePath}/><MandalaCoordinationCards config={config} events={turn.events} allEvents={events} onOpen={openWorkspacePath}/><OperationResults taskState={operationTasks} events={turn.events} allEvents={events} onOpen={openWorkspacePath}/></>;
-              return <section className="chat-turn" key={turn.key} tabIndex={-1} data-run-id={(turn.events.find(event=>(event.data as {runId?:string}).runId)?.data as {runId?:string}|undefined)?.runId}>
-            {turn.messages.filter(message => message.kind === "user").map(m => m.source?.kind==='coordination' ? <ExecutionResults key={m.key} items={executionResults.items.filter(item=>m.source?.kind==='coordination'&&m.source.receiptIds.includes(item.id))} config={config} tasks={operationTasks.tasks} onOpen={openWorkspacePath}/> : m.source && m.source.kind!=='telegram' ? <Disclosure key={m.key} className="handoff-input" title={<><Icon name="workflow" size={14}/>{localize('自动后台输入', 'Automatic background input')}</>}><div className="message-text">{m.text}</div></Disclosure> : m.task ? <Disclosure key={m.key} className="handoff-input" title={<> <Icon name="workflow" size={14} />{t(m.task.kind === "return" ? "帮手结果 · 结合原对话整合" : "接收的 Agent 任务")} </>}>
+              return <section className="chat-turn" key={turn.key} tabIndex={-1} data-run-id={chatTurnRunId(turn)}>
+            {turn.messages.filter(message => message.kind === "user").map(m => m.source?.kind==='coordination' ? <ExecutionResults onRefresh={executionResults.retry} renderCopy={mandalaMain ? messageCopy : undefined} key={m.key} items={executionResults.items.filter(item=>m.source?.kind==='coordination'&&m.source.receiptIds.includes(item.id))} config={config} tasks={operationTasks.tasks} onOpen={openWorkspacePath}/> : m.source && m.source.kind!=='telegram' ? <Disclosure key={m.key} className="handoff-input" title={<><Icon name="workflow" size={14}/>{localize('自动后台输入', 'Automatic background input')}</>}><div className="message-text">{m.text}</div></Disclosure> : m.task ? <Disclosure key={m.key} className="handoff-input" title={<> <Icon name="workflow" size={14} />{t(m.task.kind === "return" ? "帮手结果 · 结合原对话整合" : "接收的 Agent 任务")} </>}>
 
               <div className="message-text">{m.text}</div>
             </Disclosure> : <article key={m.key} className="message user" aria-label={localize('你的消息', 'Your message')} data-message-key={m.key}>
-              <div className={"message-avatar" + (userInitial ? " user-initial-avatar" : "")}>{userInitial || <Icon name="user" size={17} />}</div>
+              {account ? <AccountAvatar name={account.username} source={account.avatar} className="message-avatar user-account-avatar" /> : <div className="message-avatar">{userInitial || <Icon name="user" size={17} />}</div>}
               <div className="message-content">
                 {m.source?.kind==='telegram'&&<span className="telegram-source">Telegram</span>}
                 {!mandalaMain && <div className="message-name">{t("你")}<span className="message-actions">
                 {m.text.trim() && <QuoteButton kind="message" text={m.text} disabled={quoteDisabled} onQuote={addQuote} />}
-                <Button type="button" aria-label={t("复制消息")} title={t(copiedMessage === m.key ? "已复制" : "复制消息")} data-copied={copiedMessage === m.key || undefined} onClick={() => void copyMessage(m.key, m.text)}><Icon key={"icon-" + copySequence} name={copiedMessage === m.key ? "check" : "copy"} size={14} />{copiedMessage === m.key && <span key={"feedback-" + copySequence} className="copy-feedback" role="status">{t('已复制')}</span>}</Button>
+                {messageCopy(m.key, m.text)}
                 <Button type="button" aria-label={t("在新对话中使用此请求")} title={t("在新对话中使用此请求")} disabled={pending || branchPending || navigationLocked} onClick={() => void reuseRequest(m)}><Icon name="message" size={14} /></Button>
                 {!mandalaMain && <Button type="button" aria-label={t("编辑消息")} disabled={busy || branchPending} title={t(busy ? "执行结束后可编辑消息" : "编辑消息")}
                   onClick={() => setEditingMessage({ eventId: m.key, text: m.text })}><Icon name="edit" size={14} /></Button>}
@@ -1676,7 +1790,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
                   <p>{t("在当前对话重跑，替换此消息及之后的上下文；已执行的文件和工具操作不会撤销。")}</p>
                   <div><Button type="button" disabled={branchPending} onClick={() => setEditingMessage(null)}>{t("取消")}</Button>
                     <Button className="primary" type="submit" disabled={busy || branchPending || !editingMessage.text.trim()}><Icon name="send" size={15} />{t(branchPending ? "正在重新执行…" : "保存并重新执行")}</Button></div>
-                </form> : <div className="message-text markdown-text"><LinkedMessageText text={m.text}/></div>}
+                </form> : m.questionAnswers ? <QuestionAnswers pairs={m.questionAnswers}/> : <div className="message-text markdown-text"><LinkedMessageText text={m.text}/></div>}
                 {!!m.referenceItems?.length && <div className="message-references" aria-label={t('已选引用')}>{m.referenceItems.map(item => <span className="composer-reference-tag" key={item.id} title={`${item.source} · ${item.detail}`}>
                   <Icon name={item.kind==='project'?'project':item.kind==='chat'||item.kind==='message'?'message':item.kind === 'agent' ? 'agent' : item.kind === 'skill' ? 'book' : item.kind === 'mcp' ? 'plug' : 'plan'} size={15} /><span>{item.name}</span>{item.kind==='message'&&<q className="composer-message-excerpt">{item.detail}</q>}<span className="composer-reference-source">{item.kind==='chat'?(item.intent==='inquiry'?localize('提问目标','Inquiry target'):localize('对话引用','Conversation reference')):item.source}</span>
                 </span>)}</div>}
@@ -1685,34 +1799,46 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               </div>
               {mandalaMain && <div className="message-name"><span className="message-actions">
                 {m.text.trim() && <QuoteButton kind="message" text={m.text} disabled={quoteDisabled} onQuote={addQuote} />}
-                <Button type="button" aria-label={t("复制消息")} title={t(copiedMessage === m.key ? "已复制" : "复制消息")} data-copied={copiedMessage === m.key || undefined} onClick={() => void copyMessage(m.key, m.text)}><Icon key={"icon-" + copySequence} name={copiedMessage === m.key ? "check" : "copy"} size={14} />{copiedMessage === m.key && <span key={"feedback-" + copySequence} className="copy-feedback" role="status">{t('已复制')}</span>}</Button>
+                {messageCopy(m.key, m.text)}
                 <Button type="button" aria-label={t("在新对话中使用此请求")} title={t("在新对话中使用此请求")} disabled={pending || branchPending || navigationLocked} onClick={() => void reuseRequest(m)}><Icon name="message" size={14} /></Button>
                 {!mandalaMain && <Button type="button" aria-label={t("编辑消息")} disabled={busy || branchPending} title={t(busy ? "执行结束后可编辑消息" : "编辑消息")}
                   onClick={() => setEditingMessage({ eventId: m.key, text: m.text })}><Icon name="edit" size={14} /></Button>}
               </span></div>}
             </article>)}
-            <AgentMessageCards messages={turn.messages.filter(message=>message.agentMessage?.direction==='reply')} config={config} onOpen={openWorkspacePath}/>
-            {showReply ? <section className="agent-reply" aria-label={agent?.name ?? (runtimeName(cli))}>
+            <AgentMessageCards renderCopy={mandalaMain ? messageCopy : undefined} messages={turn.messages.filter(message=>message.agentMessage?.direction==='reply')} config={config} onOpen={openWorkspacePath}/>
+            {showReply || waiting ? <section className="agent-reply" aria-label={agent?.name ?? (runtimeName(cli))}>
               {!mandalaMain && <header className="agent-reply-header">
                 <div className="message-avatar">{agent ? <IdentityAvatar identity={agent} kind="agent" size={28} /> : <Icon name="agent" size={18} />}</div>
                 <div className="message-name">{agent?.name ?? (runtimeName(cli))}</div>
               </header>}
-              <TurnProcess turn={turn} run={run} onInspect={inspect} approvals={approvals} renderApproval={renderApprovalRequest}
-                writerRecoveryAvailable={mandalaMain && chat?.cli === 'codex' && !chat.executionLocation} />
-              {run.answers.map(m => <article className={"message text"+(mandalaMain?" chat-reply-bubble":"")} key={m.key} data-message-key={m.key}>
+              {showExecutionDetails && <TurnProcess mainChat={mandalaMain} turn={turn} run={run} onInspect={inspect} approvals={approvals} renderApproval={renderApprovalRequest} quietStop={quietStop} writerRecoveryAvailable={mandalaMain && chat?.cli === 'codex' && !chat.executionLocation}/>}
+              {waitingForParent ? <p className="native-subagent-waiting" role="status">{localize('正在等待主代理回复…','Waiting for the parent agent to reply…')}</p>
+                : waiting && <MandalaTyping startedAt={run.startedAt}/>}
+              {onlyChildOutput && run.status === 'idle' && <p className="native-subagent-waiting">{localize('主代理尚未提供回复。','The parent agent did not provide a reply.')}</p>}
+              {visibleReplies.filter(m => !mandalaMain || m.text.trim()).map(m => <article className={"message text"+(mandalaMain?" chat-reply-bubble":"")} key={m.key} data-message-key={m.key}>
                 <div className="message-content"><MarkdownMessage text={m.text} streaming={run.status === 'running'} publishedFiles={publishedFilesByRun.get((turn.events.find(event=>event.id===m.key)?.data as {runId?:string})?.runId??'')} /></div>
+                {mandalaMain && <span className="message-actions bubble-copy"><QuoteButton kind="reply" text={m.text} disabled={quoteDisabled} onQuote={addQuote} />{messageCopy(m.key, m.text)}</span>}
               </article>)}
+              {!showExecutionDetails && !quietStop && errors.map(message=><p className="run-event-error" role="alert" key={message.key}><Icon name="error" size={14}/>{/^CLI request timed out:/.test(message.text) ? localize('执行端响应超时。你的消息已保留。','The runtime timed out. Your message is saved.') : turnErrorText(turn, message, localize, errorText, chat?.cli === 'codex' && !chat.executionLocation)}</p>)}
+              {!showExecutionDetails && run.incomplete && !quietStop && !errors.length && <p className="run-incomplete" role="alert">{localize('回复未完成。','The reply was incomplete.')}</p>}
               {operationCards}
-              <TurnFooter turn={turn} run={run} turns={turns} onInspect={inspect} actions={answer && checkpoint && !run.incomplete ? <>
+              {showExecutionDetails && <TurnFooter turn={turn} run={run} turns={turns} onInspect={inspect} actions={!mandalaMain && answer && checkpoint && !run.incomplete ? <>
                 <QuoteButton kind="reply" text={replyText} disabled={quoteDisabled} onQuote={addQuote} />
-                <Button type="button" aria-label={t("复制消息")} title={t(copiedMessage === answer.key ? "已复制" : "复制消息")} data-copied={copiedMessage === answer.key || undefined} onClick={() => void copyMessage(answer.key, replyText)}><Icon key={"icon-" + copySequence} name={copiedMessage === answer.key ? "check" : "copy"} size={15} />{copiedMessage === answer.key && <span key={"feedback-" + copySequence} className="copy-feedback" role="status">{t('已复制')}</span>}</Button>
+                {messageCopy(answer.key, replyText)}
                 {!mandalaMain && <Button type="button" aria-label="Fork" title={t("从这轮回答继续新对话，不重新执行")} disabled={!canFork} onClick={() => void forkReply(checkpoint.id)}><Icon name="workflow" size={15} /></Button>}
-              </> : undefined} />
+              </> : undefined} />}
             </section> : operationCards}
-            <ExecutionResults items={resultGroups.get(turn.key)??[]} config={config} tasks={operationTasks.tasks} onOpen={openWorkspacePath}/>
+            <ExecutionResults onRefresh={executionResults.retry} renderCopy={mandalaMain ? messageCopy : undefined} items={resultGroups.get(turn.key)??[]} config={config} tasks={operationTasks.tasks} onOpen={openWorkspacePath}/>
             </section>; })}
-            {approvals.filter(approval=>!presentedTurns.some(({turn})=>turn.messages.some(message=>message.kind!=='agent_message')&&turn.events.some(event=>event.kind==='approval'&&(event.data as Approval).id===approval.id))).map(renderApprovalRequest)}
+            {approvals.filter(approval=>!showExecutionDetails || !presentedTurns.some(({turn})=> turn.messages.some(message=>message.kind!=='agent_message')&&turn.events.some(event=>event.kind==='approval'&&(event.data as Approval).id===approval.id))).map(renderApprovalRequest)}
+            <ChatReviewRequests reviews={executionResults.reviews} onRefresh={executionResults.retry} onOpen={openWorkspacePath}/>
             {executionResults.error&&<p role="alert">{localize('执行结果读取失败。', 'Could not load execution results.')} {executionResults.error} <Button onClick={executionResults.retry}>{t('重试')}</Button></p>}
+            {visibleInputs.filter(input=>inlineQueued(input) && !recordedInputs.has(input.id)).map(input=><article className="message user" aria-label={localize('你的消息','Your message')} key={input.id}>
+              <div className="message-content">{input.questionAnswers ? <QuestionAnswers pairs={input.questionAnswers}/> : <div className="message-text"><LinkedMessageText text={input.text}/></div>}
+                {!!input.attachments?.length && <small>{t('{count} 个附件',{count:input.attachments.length})}</small>}
+              </div>
+              <div className="message-name"><span className="message-actions">{messageCopy(input.id, input.text)}</span></div>
+            </article>)}
             <div ref={bottom} />
           </div>
         </div>
@@ -1736,7 +1862,9 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               eventId={chat.status === 'error' ? events.at(-1)?.id : undefined}
               disabled={busy || stopping || navigationLocked || !!composerDraft.pending}
               onBusy={setWriterRecoveryBusyId} flushDraft={composerDraft.flush} />}
-          <QueuedMessages inputs={queuedInputs} busy={busy} disabled={pending||writerRecoveryBusy||stopping||branchPending||navigationLocked||modeSaving||!historyReady} onSend={input=>void sendQueued(input)} onCopy={input => void copyMessage(-1, input.text)} onReuse={input => void reuseRequest({ text: input.text, attachments: input.attachments?.map(id => ({ id })), referenceItems: referenceItems.filter(item => input.references?.some(ref => ref.id === item.id)) })} onCancel={async inputId=>{
+          {mandalaMain && compactNotice && <small className="mandala-handoff-hint" role={compactNotice.state === 'error' ? 'alert' : 'status'}>{compactNotice.message}</small>}
+          {mandalaAgent && activeChat?.cli !== mandalaAgent.defaultCli && <small className="mandala-handoff-hint" role="status">{localize(`下一条消息将由 ${runtimeName(mandalaAgent.defaultCli)} 接续。`,`Your next message will continue with ${runtimeName(mandalaAgent.defaultCli)}.`)}</small>}
+          <QueuedMessages recordedInputIds={mandalaMain ? recordedInputs : undefined} inputs={visibleInputs.filter(input=>!inlineQueued(input) && (input.state==="queued" || input.prestartFailure || input.unrecorded))} busy={busy} disabled={pending||writerRecoveryBusy||stopping||branchPending||navigationLocked||modeSaving||!historyReady} onSend={input=>void sendQueued(input)} onCopy={input => void copyMessage(-1, input.text)} onReuse={input => void reuseRequest({ text: input.text, attachments: input.attachments?.map(id => ({ id })), referenceItems: referenceItems.filter(item => input.references?.some(ref => ref.id === item.id)) })} onCancel={async inputId=>{
             const view=navigationVersion.current;
             queueReads.current.generation++;
             try {await api("/conversations/"+selected+"/queue/"+inputId,"DELETE");if(view===navigationVersion.current){queueReads.current.generation++;setQueuedInputs(items=>items.filter(item=>item.id!==inputId));}}
@@ -1775,9 +1903,9 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               aria-keyshortcuts={shortcutAria('composer')}
               title={shortcutLabel('composer')}
               rows={2}
-              aria-label={t("消息")} disabled={!composerDraft.loaded}
+              aria-label={t("消息")} disabled={!mandalaMain && !composerDraft.loaded}
               placeholder={
-                agent
+                mandalaMain ? localize(`给 ${mandalaAgent?.name ?? "Mandala"} 发消息…`,`Message ${mandalaAgent?.name ?? "Mandala"}…`) : agent
                   ? t("给 {agent} 分派工作…", { agent: agent.name })
                   : t("描述你希望完成的任务…")
               }
@@ -1846,29 +1974,18 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
                 ]} />
               </ComposerSettings>}
               <VoiceInput key={JSON.stringify([draftIdentity,selected,projectId,agentId])} disabled={!composerDraft.loaded||pending||stopping||branchPending||!!composerDraft.pending} onBusyChange={setVoiceBusy} onText={value=>{setText(current=>appendVoiceText(current,value));composerInput.current?.focus();}}/>
-              <ComposerActions recovering={!!composerDraft.pending} busy={busy} waiting={waitingForMessages||waitingForTasks} stopping={stopping} stopDisabled={!chat || stopping || pending}
-                disabled={voiceBusy || writerRecoveryBusy || !composerDraft.loaded || !!(composerDraft.value.missingAttachments.length && !composerDraft.pending) || !configLoaded || !!selected && (chat?.id !== selected || !historyReady) || (!text.trim() && !files.length && !selectedReferences.length && !composerDraft.pending) || pending || stopping || modeSaving || branchPending || approvalPreferenceLoading || approvalPreferenceError || (!selected && (!cli || !runtimes.includes(cli)))}
-                continuing={chat?.status === 'interrupted' || chat?.status === 'error'} onStop={() => void control('stop',{expectedExecutionId:executionId,continueQueued:busy})} onSend={() => void send()} onInterrupt={() => void send(true)} />
+              <ComposerActions mainChat={mandalaMain} recovering={!!composerDraft.pending} busy={busy} waiting={waitingForMessages||waitingForTasks} stopping={stopping} stopDisabled={!chat || stopping || pending}
+                disabled={voiceBusy || writerRecoveryBusy || compactWorking || !composerDraft.loaded || !!(composerDraft.value.missingAttachments.length && !composerDraft.pending && !compactCommand) || !configLoaded || !!selected && (chat?.id !== selected || !historyReady) || (!text.trim() && !files.length && !selectedReferences.length && !composerDraft.pending) || pending || stopping || modeSaving || branchPending || approvalPreferenceLoading || approvalPreferenceError || (!selected && (!cli || !runtimes.includes(cli)))}
+                continuing={chat?.status === 'interrupted' || chat?.status === 'error'} onStop={() => void control('stop',{expectedExecutionId:executionId,continueQueued:busy && !mandalaMain})} onSend={() => void send()} onInterrupt={() => void send(true)} />
             </div>
           </div>
         </footer>}
         </>}
       </main>
-      <WorkspaceInspector returnFocusRef={selected && !workbench ? contentPanelTrigger : undefined} compact={!!selected && !workbench} id="chat-environment-panel" title={t(selected && !workbench ? "右侧栏" : "上下文与能力")} className={selected && !workbench ? "chat-workspace-inspector" : ""} preserveContent={!!selected && !workbench} resizable={!!selected && !workbench} open={effectiveOpen} onClose={()=>setEffectiveOpen(false)}>
-        {mandalaMain ? <>
-          <div hidden={!!activeContentRequest} style={{ display: activeContentRequest ? "none" : "contents" }}>
-            <MandalaPanels conversationId={selected} config={config} onCatalogRefresh={refreshReferenceCatalog} references={referenceItems} onReference={addCatalogReference} onOpen={openWorkspacePath} visible={effectiveOpen&&auxiliaryReady&&!activeContentRequest}/>
-          </div>
-          {activeContentRequest &&
-          <ConversationWorkspace key={selected} conversationId={selected} projectId={projectId} config={config} theme={theme}
-            onCloseTerminal={() => setEffectiveOpen(false)} onReference={addReference} initialTab={workspaceTab}
-            requestedContent={activeContentRequest} onClosePreview={() => {
-              setContentRequest(null);
-              requestAnimationFrame(() => contentPanelTrigger.current?.focus());
-            }} />
-          }
-        </> : selected && !workbench ? chat && readerConversation.current === selected && <ConversationWorkspace key={selected} conversationId={selected} projectId={projectId} activityVersion={chat?.updatedAt} config={config} theme={theme} configuration={environmentPanel} contextSources={<><p className="effective-scope">{project?.name ?? t("不关联项目")} / {agent?.name ?? runtimeName(chat?.cli ?? cli)}</p><EffectivePanel visible={effectiveOpen && workspaceTab === "configuration"} view="sources" projectId={projectId} agentId={agentId} cli={chat!.cli} conversationId={selected} workspaceId={workspace?.id ?? null} cwd={!project ? directory : undefined}/></> } onCloseTerminal={() => { setEffectiveOpen(false); requestAnimationFrame(() => { if(document.activeElement===document.body||document.activeElement?.closest("#chat-environment-panel"))contentPanelTrigger.current?.focus(); }); }} onReference={addReference} initialTab={workspaceTab} onTabChange={setWorkspaceTab} requestedContent={contentRequest?.conversationId === selected ? contentRequest.target : null} /> : environmentPanel}
+      <WorkspaceInspector returnFocusRef={selected && !workbench ? contentPanelTrigger : undefined} compact={!!selected && !workbench} id="chat-environment-panel" title={t(selected && !workbench ? "右侧栏" : "上下文与能力")} className={selected && !workbench ? "chat-workspace-inspector" : ""} preserveContent={!!selected && !workbench} resizable={!!selected && !workbench} open={!workbench && effectiveOpen && !preview} onClose={()=>setEffectiveOpen(false)}>
+        {mandalaMain ? <MandalaPanels conversationId={selected} config={config} onCatalogRefresh={refreshReferenceCatalog} references={referenceItems} onReference={addCatalogReference} onOpen={openWorkspacePath} visible={effectiveOpen && auxiliaryReady && !preview}/> : selected && !workbench ? chat && readerConversation.current === selected && <ConversationWorkspace key={selected} conversationId={selected} projectId={projectId} activityVersion={chat?.updatedAt} config={config} theme={theme} configuration={environmentPanel} subagents={historyReady&&chat.id===selected?<ConversationSubagents turns={turns} cli={chat.cli} conversationId={selected}/>:<LoadingState label={localize("正在读取对话…","Loading conversation…")}/>} contextSources={<><p className="effective-scope">{project?.name ?? t("不关联项目")} / {agent?.name ?? runtimeName(chat?.cli ?? cli)}</p><EffectivePanel visible={effectiveOpen && workspaceTab === "configuration"} view="sources" projectId={projectId} agentId={agentId} cli={chat!.cli} conversationId={selected} workspaceId={workspace?.id ?? null} cwd={!project ? directory : undefined}/></> } onCloseTerminal={() => { setEffectiveOpen(false); requestAnimationFrame(() => { if(document.activeElement===document.body||document.activeElement?.closest("#chat-environment-panel"))contentPanelTrigger.current?.focus(); }); }} onReference={addReference} initialTab={workspaceTab} onTabChange={setWorkspaceTab} requestedContent={contentRequest?.conversationId === selected ? contentRequest.target : null} /> : environmentPanel}
       </WorkspaceInspector>
+      {preview && <MandalaFilePreview conversationId={selected} target={preview} onClose={()=>{setMainPreview(null);requestAnimationFrame(()=>previewOpener.current?.focus({preventScroll:true}));}}/>}
       {folderOpen && <FolderPicker initialPath={directory} purpose="conversation" onClose={() => setFolderOpen(false)} onSelect={path => { setDirectory(path); setWorkspaceId(null); setFolderOpen(false); const query = new URLSearchParams({project: projectId, agent: agentId, cwd: path}); history.replaceState(null, "", "/?" + query); }} />}
       {agentDetail && (() => {
         const item = config.agents.find((a) => a.id === agentDetail);

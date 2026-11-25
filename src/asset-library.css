@@ -78,3 +78,26 @@
 .library-resource-rows .library-resource-row:last-child { border-bottom: 0; }
 /* In a row, sharing is one more metadata item; the filled chip stays in the detail header. */
 .library-row-meta .asset-sharing { padding:0; background:transparent; border-radius:0; }
+
+.library-tabs { display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; min-width:0; padding:0 var(--page-gutter); margin-bottom:16px; border-bottom:1px solid var(--border-soft); }
+.library-tabs .ui-tabs { width:auto; max-width:100%; column-gap:20px; }
+.library-tabs .ui-tabs button, .library-tabs > button { max-width:100%; }
+.library-tabs button > span:not(.library-tab-count) { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.library-tabs > button[data-selected=true] { box-shadow:inset 0 -2px var(--accent); }
+.library-tab-count { font-size:var(--type-meta); color:var(--muted); background:var(--raised); border-radius:4px; padding:0 5px; font-variant-numeric:tabular-nums; }
+.library-resource-row:has(.library-row-menu) { flex-wrap:nowrap; }
+.library-resource-row:has(.library-row-menu) > a { flex-basis:0; }
+.library-resource-row > .library-row-menu { flex:none; margin:0 var(--page-gutter) 0 0; }
+.library-main:has(.library-file-reader) .workspace-page { height:100%; }
+.library-main:has(.library-file-reader) .library-tabs { margin-bottom:8px; }
+.library-main:has(.library-file-reader) [role=tabpanel] { display:flex; flex:1; min-height:0; flex-direction:column; }
+.library-file-tools { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:0 var(--page-gutter) 8px; }
+.library-file-tools > a[target=_blank] { margin-inline-start:auto; }
+.library-file-open { display:inline-flex; align-items:center; gap:4px; flex:none; color:var(--link); font-weight:var(--weight-medium); }
+.library-file-reader { display:flex; flex-direction:column; flex:1; min-height:0; }
+.library-file-reader > .ui-notice { margin:0 var(--page-gutter) 8px; }
+.library-file-reader iframe { display:block; flex:1; min-height:240px; width:100%; border:0; border-top:1px solid var(--border-soft); background:var(--surface); }
+@media(max-width:600px) {
+  .library-tabs .ui-tabs { column-gap:14px; }
+  .library-tabs:has(> button) .ui-tabs { display:contents; }
+}

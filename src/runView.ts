@@ -1,10 +1,12 @@
-import type { Approval, DisplayEvent } from "../shared/types";
+import type { Approval, Cli, DisplayEvent } from "../shared/types";
 import type {ApprovalDecision} from '../shared/approvals';
 import {describeOperation,groupActivity,type OperationPresentation} from './activity-presentation';
 import type { ExplicitProgress } from "../shared/conversation-progress";
 import type { ChatMessage } from "../shared/chat-turns";
 import type { ChatTurn } from "./chatTurns";
 import {presentTurnText} from '../shared/conversation-output';
+import {nativeSubagents} from '../shared/native-subagents';
+import {isCli} from '../shared/runtimes';
 import { summarizeOperations, type NativeItem, type Operation } from "./execution";
 
 type RunEventData = {
@@ -54,8 +56,8 @@ export function eventTime(event: DisplayEvent | undefined) {
   const time = event ? Date.parse(event.createdAt) : NaN;
   return Number.isFinite(time) ? time : undefined;
 }
-export function presentRun(turn: ChatTurn) {
-  let cli: string | undefined;
+export function presentRun(turn: ChatTurn, runtime?: Cli) {
+  let cli = runtime;
   const reasoning = new Map<string, string>();
   let terminal: DisplayEvent | undefined;
   let status = "running";
@@ -65,7 +67,7 @@ export function presentRun(turn: ChatTurn) {
   let approvalMs = 0;
   for (const event of turn.events) {
     const data = event.data as RunEventData;
-    if(event.kind==='metadata'&&!data.systemTask&&['loaded','applying'].includes(data.status??'')&&typeof data.cli==='string')cli=data.cli;
+    if(event.kind==='metadata'&&!data.systemTask&&['loaded','applying'].includes(data.status??'')&&isCli(data.cli))cli=data.cli;
     if(event.kind==='metadata'&&(data.execution==='queued'||data.state==='queued')&&turn.events.some(e=>{
       const user=e.data as RunEventData;
       return e.kind==='user'&&(data.queuedInputId&&data.queuedInputId===user.queuedInputId||data.runId&&data.runId===user.runId);
@@ -185,7 +187,7 @@ export function presentRun(turn: ChatTurn) {
       if(value){seenReasoning.add(id);timeline.push({kind:'reasoning',key:`reasoning:${id}`,text:value});}
     }
   }
-  return { answers, progress, output, latestProgress, timeline, activityTimeline:groupActivity(timeline,cli), reasoning: [...reasoning.entries()].filter(([key]) =>
+  return { answers, progress, output, latestProgress, subagents:nativeSubagents(turn.events,cli), timeline, activityTimeline:groupActivity(timeline,cli), reasoning: [...reasoning.entries()].filter(([key]) =>
     !key.endsWith(":content") || !reasoning.has(key.replace(/:content$/, ":summary"))),
     operations, background, modelCalls, status, queueReason, incomplete, userStopped, startedAt, endedAt, durationMs,
     nativeDuration, approvalMs, approvalStarted, maxParallel, lastActivityAt };

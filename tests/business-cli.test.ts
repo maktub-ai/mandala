@@ -41,6 +41,24 @@ it('documents complete coordinator criteria and executor arguments in action hel
 async function temporary() { const directory = await mkdtemp(join(tmpdir(), 'openmana-cli-')); cleanups.push(() => rm(directory, { recursive: true, force: true })); return directory; }
 
 describe('business CLI', () => {
+  it('exports complete Skill archives and sends a baselined market upgrade through owner-only commands', async () => {
+    const requests: {path:string;body:unknown}[] = [], archive = Buffer.from([80,75,3,4,0,255]);
+    const {baseUrl} = await fixture((req,res,body) => {
+      requests.push({path:req.url!,body});
+      if(req.method==='GET'){res.writeHead(200,{'Content-Type':'application/zip'});res.end(archive);}
+      else reply(res,{id:'market-1',version:'new'});
+    });
+    const output=join(await temporary(),'skill.zip');
+    const exported=await run(['skills','export','skill/a','version/b','--output',output,'--base-url',baseUrl]);
+    expect(exported.code).toBe(0);expect(await readFile(output)).toEqual(archive);
+    const upgraded=await run(['market','upgrade','market-1','--data','{"version":"new","revision":"baseline"}','--base-url',baseUrl]);
+    expect(upgraded.code).toBe(0);
+    expect(requests.map(item=>item.path)).toEqual(['/api/skills/skill%2Fa/versions/version%2Fb/export','/api/market/installed/market-1/upgrade']);
+    expect(requests[1].body).toEqual({version:'new',revision:'baseline'});
+    const context=join(await temporary(),'context.json');await writeFile(context,JSON.stringify({baseUrl,token:'bound'}),{mode:0o600});
+    for(const args of [['skills','export','skill/a','version/b'],['market','upgrade','market-1','--data','{}']])expect((await run(args,{OPEN_MANA_CONTEXT:context})).code).toBe(1);
+    expect(requests).toHaveLength(2);
+  });
   it('documents and routes on-demand work planning only through the invocation identity',async()=>{
     const requests:any[]=[],{baseUrl}=await fixture((req,res,body)=>{requests.push({path:req.url,body});reply(res,{accepted:true});});
     const context=join(await temporary(),'context.json');await writeFile(context,JSON.stringify({baseUrl,token:'bound'}),{mode:0o600});
@@ -183,9 +201,17 @@ describe('business CLI', () => {
     expect((await run(['tasks','create','--data','{"goal":"Goal","projectId":null,"acceptance":"checks"}'],{OPEN_MANA_CONTEXT:context})).code).toBe(0);
     expect(requests.at(-1).body).toMatchObject({command:'tasks create',args:{acceptance:'checks'}});
   });
-  it('documents independent Task creation, explicit links and authorized Agent completion',async()=>{
+  it('explains how a primary-chat follow-up keeps the original receiver',async()=>{
+    const help=JSON.parse((await run(['messages','ask','--help'])).stdout).data.commands[0];
+    expect(help.note).toMatch(/follow-up[^.]*targetConversationId/i);
+    expect(help.note).toContain('targetProjectId');
+  });
+  it('documents chat tracking, explicit links and authorized Agent completion',async()=>{
     const entry=async(action:string)=>JSON.parse((await run(['tasks',action,'--help'])).stdout).data.commands[0];
-    expect((await entry('create')).agentDataExample).toMatchObject({goal:'Write a report',projectId:null});
+    const create=await entry('create');
+    expect(create.agentDataExample).toMatchObject({goal:'Track the current investigation',projectId:'current-project-id'});
+    expect(create.agentDataExample).not.toHaveProperty('originConversationId');
+    expect(create.note).toContain('current Chat as the origin');
     expect((await entry('update')).dataExample).toMatchObject({expectedRevision:1,goal:'Updated report goal'});
     expect((await entry('context')).queryExample).toEqual({conversationId:'chat-id'});
     expect((await entry('execution-add')).boundFields).toEqual(['taskId','expectedRevision','conversationId']);
@@ -332,4 +358,18 @@ it('progress report is invocation-only and carries stable public report keys wit
  expect(result.code).toBe(0);expect(requests).toEqual([{command:'progress report',args:{text:'Checking inputs'},commandKey:'stable-report'}]);
  const forged=await run(['progress','report','--data','{"text":"Checking","agentId":"forged"}'],env);expect(forged.code).toBe(1);expect(requests).toHaveLength(1);
  const unbound=await run(['progress','report','--data','{"text":"Checking"}'],{MANDALA_CONTEXT:'',OPEN_MANA_CONTEXT:''});expect(unbound.code).toBe(1);expect(requests).toHaveLength(1);
+});
+
+it('offers readable terminal help and errors while keeping explicit JSON and Agent output parseable', async () => {
+  const root = await run(['--human', '--help']);
+  expect(root.code).toBe(0);
+  expect(root.stdout).toContain('Groups:');
+  const scoped = await run(['tasks', 'start', '--human', '--help']);
+  expect(scoped.stdout).toContain('mandala tasks start <taskId>');
+  const error = await run(['invalid', 'command', '--human']);
+  expect(error.code).toBe(1);
+  expect(error.stderr).toContain('Error [unknown_command]');
+  for (const result of [await run(['--json', '--human', '--help']), await run(['--human', '--help'], { MANDALA_CONTEXT: '/unopened-test-context' })]) {
+    expect(JSON.parse(result.stdout).ok).toBe(true);
+  }
 });

@@ -1,3 +1,4 @@
+import {displayedAsyncReply} from './async-questions';
 import { createFileMaintenance, type FileMaintenance } from './file-maintenance';
 import { workspacePrincipal } from './workspace-identity';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -15,7 +16,7 @@ import type { Store } from './store';
 // Sandboxed: scripts may run inline, but no network, forms, frames or same-origin access.
 export const htmlPreviewPolicy="sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' https:; style-src 'unsafe-inline' https:; img-src data: https:; font-src data: https:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 import { DomainError } from '../shared/workspace-contracts';
-import type { AssetBinding } from '../shared/assets';
+import type { Asset, AssetBinding } from '../shared/assets';
 import { fileMediaType, filePreviewKind } from '../shared/file-types';
 import { openLocalAsset } from './asset-local-open';
 const json=(res:ServerResponse,status:number,data:unknown)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
@@ -30,6 +31,14 @@ export function createAssetHttp(home:string,store:Store,authorizeConversation:(i
   const {config}=await readConfig(home);
   if(type==='agent'&&config.agents.some(a=>a.id===id)||type==='project'&&config.projects.some(p=>p.id===id))return;
   throw invalid();
+ }
+ const featuredScope=(projectId?:string|null)=>projectId?'project:'+projectId:'user:'+principal.userId;
+ function inScope(asset:Asset,type:string|null,ownerId:string|null,bindings:AssetBinding[]|null){
+  if(!type||!ownerId)return true;
+  if(type==='project'&&asset.owner.projectId)return asset.owner.projectId===ownerId;
+  if(bindings?.some(binding=>binding.assetId===asset.id))return true;
+  if(type==='agent')return asset.owner.agentId===ownerId;
+  return type==='project'&&!!asset.headVersionId&&!!store.database.prepare("SELECT v.id FROM asset_versions v LEFT JOIN file_execution_scopes s ON s.invocation_id=json_extract(v.data,'$.provenance.runId') LEFT JOIN task_runs r ON r.id=json_extract(v.data,'$.provenance.runId') LEFT JOIN task_executions e ON e.id=r.execution_id WHERE v.id=? AND (s.project_id=? OR e.project_id=?)").get(asset.headVersionId,ownerId,ownerId);
  }
  const handle = async (req:IncomingMessage,res:ServerResponse,url:URL,body:(req:IncomingMessage)=>Promise<any>):Promise<boolean>=>{
   if(!url.pathname.startsWith('/api/v2/assets'))return false;
@@ -56,10 +65,11 @@ export function createAssetHttp(home:string,store:Store,authorizeConversation:(i
     if(method==='GET'){json(res,200,assets.listBindings(principal,type as AssetBinding['ownerType'],id));return true;}
    }
    if(parts.length===0){
-    if(method==='GET'){await attachmentAssets.reconcileSubmitted(principal,authorizeConversation);const type=url.searchParams.get('ownerType'),ownerId=url.searchParams.get('ownerId');if(Boolean(type)!==Boolean(ownerId))throw invalid();if(type&&ownerId)await validateTargets(type,ownerId);const selected=type&&ownerId?assets.listBindings(principal,type as AssetBinding['ownerType'],ownerId):null;json(res,200,assets.listAssets(principal).filter(asset=>asset.owner.projectId&&type==='project'?asset.owner.projectId===ownerId:!selected||selected.some(b=>b.assetId===asset.id)||type==='agent'&&asset.owner.agentId===ownerId||type==='project'&&asset.headVersionId&&Boolean(store.database.prepare("SELECT v.id FROM asset_versions v LEFT JOIN file_execution_scopes s ON s.invocation_id=json_extract(v.data,'$.provenance.runId') LEFT JOIN task_runs r ON r.id=json_extract(v.data,'$.provenance.runId') LEFT JOIN task_executions e ON e.id=r.execution_id WHERE v.id=? AND (s.project_id=? OR e.project_id=?)").get(asset.headVersionId,ownerId,ownerId))).map(asset=>{
+    if(method==='GET'){await attachmentAssets.reconcileSubmitted(principal,authorizeConversation);const type=url.searchParams.get('ownerType'),ownerId=url.searchParams.get('ownerId');if(Boolean(type)!==Boolean(ownerId))throw invalid();if(type&&ownerId)await validateTargets(type,ownerId);const selected=type&&ownerId?assets.listBindings(principal,type as AssetBinding['ownerType'],ownerId):null;json(res,200,assets.listAssets(principal).filter(asset=>inScope(asset,type,ownerId,selected)).map(asset=>{
      let file: {name:string;mediaType:string}|undefined;let versionOrdinal:number|null=null,updatedAt:string|null=null,source='manual',availability=asset.kind==='external_reference'?'host_reference':'unpublished';
      if(asset.headVersionId){try{const version=assets.getAuthorizedVersion(principal,{assetId:asset.id,versionId:asset.headVersionId});versionOrdinal=version.ordinal;updatedAt=version.createdAt;if(version.files[0])file={name:version.files[0].path,mediaType:version.files[0].mediaType};source=store.database.prepare("SELECT asset_id FROM attachment_asset_links WHERE user_id=? AND asset_id=? AND state='imported'").get(principal.userId,asset.id)?'attachment':version.provenance.runId??'manual';availability=asset.kind==='external_reference'?'host_reference':'managed_local';for(let index=0;index<version.files.length;index++)assets.readAssetFile(principal,{assetId:asset.id,versionId:version.id},String(index));}catch(error){if(error instanceof DomainError&&error.status===403)availability='access_denied';else if(error instanceof DomainError&&error.code==='blob_missing')availability='missing';else throw error;}}
-     const activity=assets.activity(principal,asset.id),recentAt=[updatedAt,activity.lastViewedAt,activity.lastEditedAt].filter((at):at is string=>!!at).sort().at(-1)??null;return {...asset,...availability==='access_denied'?{}:{file},versionOrdinal,updatedAt,source,availability,...activity,recentAt};
+     const activity=assets.activity(principal,asset.id),recentAt=[updatedAt,activity.lastViewedAt,activity.lastEditedAt].filter((at):at is string=>!!at).sort().at(-1)??null;const {featured,...summary}=asset;
+     return {...summary,featuredAt:featured?.[featuredScope(type==='project'?ownerId:null)],...availability==='access_denied'?{}:{file},versionOrdinal,updatedAt,source,availability,...activity,recentAt};
     }).sort((a,b)=>(Date.parse(b.recentAt??'')||0)-(Date.parse(a.recentAt??'')||0)||a.id.localeCompare(b.id)));return true;}
     if(method==='POST'){const data=await body(req);fields(data,['kind','title','agentId']);if(data.agentId)await validateTargets('agent',data.agentId);json(res,201,assets.createAsset(principal,{kind:data.kind,title:data.title,owner:{userId:principal.userId,...(data.agentId?{agentId:data.agentId}:{})}}));return true;}
    }
@@ -67,6 +77,15 @@ export function createAssetHttp(home:string,store:Store,authorizeConversation:(i
    if(parts[1]==='bindings'&&parts.length===2&&method==='GET'){
     const {config}=await readConfig(home),bindings=assets.listAssetBindings(principal,id);
     json(res,200,bindings.filter(binding=>binding.ownerType==='project'?config.projects.some(p=>p.id===binding.ownerId):config.agents.some(a=>a.id===binding.ownerId)));return true;
+   }
+   if(parts[1]==='featured'&&parts.length===2&&method==='PUT'){
+    const data=await body(req);fields(data,['projectId','featured']);
+    if(typeof data.featured!=='boolean'||(data.projectId!==undefined&&(typeof data.projectId!=='string'||!data.projectId)))throw invalid();
+    if(data.projectId){
+     await validateTargets('project',data.projectId);
+     if(!inScope(assets.getAuthorizedAsset(principal,id),'project',data.projectId,assets.listBindings(principal,'project',data.projectId)))throw invalid();
+    }
+    json(res,200,{featuredAt:assets.setFeatured(principal,id,featuredScope(data.projectId),data.featured)});return true;
    }
    if(parts[1]==='maintenance'&&parts.length===2){if(method==='GET'){json(res,200,upkeep.status(principal,id));return true;}if(method==='PUT'){const data=await body(req);fields(data,['enabled','agentId','projectId','conditions','expectedRevision']);json(res,200,await upkeep.configure(principal,id,data));return true;}}
    if(parts[1]==='origin'&&parts.length===2&&method==='GET'){let origin:{kind:string;conversationId:string|null;title:string|null;attachmentId?:unknown}|null=attachmentAssets.origin(principal,id,authorizeConversation);if(!origin){const a=assets.getAuthorizedAsset(principal,id);if(a.headVersionId){const v=assets.getAuthorizedVersion(principal,{assetId:id,versionId:a.headVersionId});const scope=store.database.prepare('SELECT conversation_id FROM file_execution_scopes WHERE invocation_id=? AND user_id=?').get(v.provenance.runId??'',principal.userId);const c=scope?store.getConversation(scope.conversation_id as string):null;if(c){authorizeConversation(c.id);origin={kind:'agent_output',conversationId:c.id,title:c.title};}}}json(res,200,origin);return true;}
@@ -127,6 +146,13 @@ export function createAssetHttp(home:string,store:Store,authorizeConversation:(i
   }catch(error){if(res.headersSent){res.destroy();return true;}const domain=error instanceof DomainError?error:null;json(res,domain?.status??400,{code:domain?.code??'invalid_request',error:domain?.message??'Invalid asset request'});}
   return true;
  };
- return Object.assign(handle,{history:(conversation:Conversation,events:DisplayEvent[])=>projectHistoricalOutputLinks(home,store,assets,principal,conversation,events)});
+ return Object.assign(handle,{history:(conversation:Conversation,events:DisplayEvent[])=>projectHistoricalOutputLinks(home,store,assets,principal,conversation,events).map(event=>{
+  if(event.kind!=='user')return event;
+  const data=event.data as {queuedInputId?:string;text?:string;nativeText?:string};
+  const display=displayedAsyncReply(store,conversation.id,data.queuedInputId,data.text);
+  if(!display)return event;
+  const {nativeText,...visible}=data;
+  return {...event,data:{...visible,...display}};
+ })});
 
 }

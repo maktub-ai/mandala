@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import type {Store} from './store';
 import type {QueuedInput} from '../shared/tasks';
+import type {DisplayEvent} from '../shared/types';
 import type {AgentMessage,AgentMessageInput,AgentMessageOrigin} from '../shared/agent-messages';
 import {DomainError} from '../shared/workspace-contracts';
 
@@ -79,11 +80,35 @@ export function createAgentMessages(store:Store,enqueue:(conversationId:string,t
    AND NOT EXISTS(SELECT 1 FROM task_directory_claims WHERE kind='input' AND owner_id=? AND submitted=1))`).run(r.reply_input_id as string,r.reply_input_id as string);
   db.prepare("UPDATE agent_messages SET auto_resume_allowed=0,reply_state='parked' WHERE id=? AND reply_state<>'consumed'").run(r.id as string);
  };
+ // Only the originating chat can address a recipient through its still-visible request.
+ const outgoingRoutes=(sourceId:string,boundary:number,filter:{conversationId:string}|{eventIds:number[]})=>{
+  const byTarget='conversationId' in filter;
+  return db.prepare(`SELECT m.source_request_event_id AS sourceEventId,m.id AS messageId,m.target_conversation_id AS targetConversationId,
+    json_extract(c.data,'$.agentId') AS targetAgentId,nullif(json_extract(c.data,'$.projectId'),'') AS targetProjectId
+    FROM agent_messages m JOIN conversations c ON c.id=m.target_conversation_id
+    JOIN events e ON e.id=m.source_request_event_id AND e.conversationId=m.source_conversation_id
+    WHERE m.source_conversation_id=? AND e.id>? AND e.superseded=0 AND json_extract(c.data,'$.archivedAt') IS NULL
+     AND NOT EXISTS(SELECT 1 FROM task_executions t WHERE t.conversation_id=c.id AND t.superseded_by_execution_id IS NOT NULL)
+     AND ${byTarget?'c.id=? LIMIT 1':'e.id IN (SELECT value FROM json_each(?)) ORDER BY m.rowid'}`)
+   .all(sourceId,boundary,byTarget?filter.conversationId:JSON.stringify(filter.eventIds));
+ };
  return {
   get:(id:string)=>decode(row(id)),
   metadata,
   isDedicated:(id:string)=>Boolean(db.prepare('SELECT conversation_id FROM agent_inquiry_conversations WHERE conversation_id=?').get(id)),
   hasKey:(sourceId:string,key:string)=>Boolean(keyed(sourceId,key)),
+  outgoingRoutes,
+  withOutgoingRoutes(sourceId:string,events:DisplayEvent[],boundary:number):DisplayEvent[]{
+   const requests=events.filter(event=>event.kind==='user'&&event.id>boundary).map(event=>event.id);
+   if(!requests.length)return events;
+   const rows=outgoingRoutes(sourceId,boundary,{eventIds:requests});
+   const byEvent=new Map<number,typeof rows>();
+   for(const {sourceEventId,...route} of rows){
+    const id=Number(sourceEventId),routes=byEvent.get(id);
+    if(routes)routes.push(route);else byEvent.set(id,[route]);
+   }
+   return events.map(event=>byEvent.has(event.id)?{...event,data:{...event.data as object,outgoingInquiries:byEvent.get(event.id)}}:event);
+  },
   prior(sourceId:string,key:string,input:AgentMessageInput):AgentMessage|undefined{
    const r=keyed(sourceId,key);
    if(!r)return;
@@ -105,7 +130,7 @@ export function createAgentMessages(store:Store,enqueue:(conversationId:string,t
     .all(sourceId,origin.eventId,origin.invocationId,input.text.trim(),input.policy??'resume');
    const prior=rows.find(r=>{
     const target=store.getConversation(r.target_conversation_id as string);
-    return target?.agentId===input.targetAgentId&&target.projectId===(input.targetProjectId??'');
+    return target?.agentId===input.targetAgentId&&target.projectId===(input.targetProjectId??'')&&(!input.targetConversationId||target.id===input.targetConversationId);
    });
    if(!prior)return;
    db.prepare('INSERT INTO agent_inquiry_key_aliases VALUES (?,?,?)').run(sourceId,key,prior.id as string);

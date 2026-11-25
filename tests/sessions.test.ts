@@ -162,6 +162,21 @@ it("rejects_busy_message_and_stop_requires_explicit_continuation", async () => {
   await manager.continue(chat.id, "continue");
   expect(turns).toEqual(["first", "continue"]);
 });
+it('attributes a resumed unbound worker to its repository without inheriting the project MCP',async()=>{
+  await manager.close();
+  const scoped=structuredClone(config);
+  scoped.projects[0].cwd=home;
+  scoped.projects[0].agentIds=[];
+  scoped.projects[0].mcp=[{name:'project-only',transport:'stdio',command:'node'}];
+  let resources:string[]|undefined;
+  manager=createSessionManager(store,async()=>scoped,async options=>({...await factory(options),
+    resumeThread:async(_id,servers)=>{resources=(servers??[]).map(server=>server.name);}}));
+  const chat=store.createConversation({agentId:'a',projectId:'',cli:'codex',model:null,cwd:home});
+  store.updateConversation(chat.id,{nativeId:'native-1'});
+  await manager.send(chat.id,'Resume');
+  expect(store.getConversation(chat.id)).toMatchObject({projectId:'',attributedProjectId:'p',turnId:'turn-1'});
+  expect(resources).not.toContain('project-only');
+});
 it("rejects an agent outside the selected project", async () => {
   const restricted = structuredClone(config);
   restricted.projects[0].agentIds = [];
@@ -2048,4 +2063,23 @@ it.each(['direct','queued'] as const)('preserves the same native thread without 
  expect(resumed).toEqual([nativeId,nativeId]);
  expect(store.getConversation(chat.id)?.nativeId).toBe(nativeId);
  if(inputId)expect(manager.listUserInputs(chat.id).find(i=>i.id===inputId)?.state).toBe('cancelled');
+});
+
+it('attributes a buffered OMP child report only to the run that announced that child', async () => {
+  await manager.close();
+  manager = createSessionManager(store, async () => structuredClone(config), factory, factory, home);
+  const c = await manager.create('p','a',undefined,'omp');
+  await manager.send(c.id,'first');
+  const first = options;
+  const child = (id: string, status: string, text?: string) => first.onEvent({method:status === 'running'?'item/started':'item/completed',
+    params:{threadId:'native-1', turnId:'turn-1', item:{type:'nativeSubagent', id, agentId:id, status, text}}});
+  child('worker','running');
+  first.onEvent({method:'turn/completed', params:{threadId:'native-1', turn:{id:'turn-1',status:'completed'}}});
+  await manager.send(c.id,'second');
+  child('unknown','completed','Wrong');
+  child('worker','completed','First result');
+  const data = store.listEvents(c.id,0).filter(e => e.kind==='tool').map(e => e.data as any);
+  const owner = data.find(e => e.params.item?.agentId === 'worker');
+  expect(data.filter(e => e.params.item?.text === 'First result')).toMatchObject([{runId:owner.runId}]);
+  expect(data.some(e => e.params.item?.text === 'Wrong')).toBe(false);
 });

@@ -1,5 +1,5 @@
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
 import { writeFileSync, renameSync, existsSync, unlinkSync, mkdirSync, statSync, readFileSync } from 'node:fs';
 import { join, resolve, sep, extname } from 'node:path';
@@ -85,7 +85,15 @@ export function createDesktopGateway(options:{root:string;setupToken:string;cont
    const c=cookies(req.headers.cookie??''),lease=accounts.current();
    const native=!req.headers.origin&&equal(req.headers['x-mandala-launcher'],options.setupToken);
    const setup=equal(c.mandala_setup,options.setupToken);
-   const signed=lease&&equal(c.mandala_desktop,lease.localToken)?lease:undefined;
+   // A system browser has no desktop cookie. Bind its short-lived link to one
+   // read-only view, one project and the current desktop login.
+   const libraryView=/^\/api\/v2\/library-sections\/[A-Za-z0-9_.%:-]+\/files\/[A-Za-z0-9._-]+\/view\.html$/.test(path)&&url.searchParams.getAll('project').length===1&&!!url.searchParams.get('project');
+   const workerUrl=new URL(url);
+   const signature=url.searchParams.get('fileLink'),expires=url.searchParams.get('expires');
+   workerUrl.searchParams.delete('fileLink');workerUrl.searchParams.delete('expires');
+   const signView=(key:string,until:string)=>createHmac('sha256',key).update(workerUrl.href+'\n'+until).digest('base64url');
+   const browserView=lease&&libraryView&&req.method==='GET'&&signature&&expires&&Number(expires)>Date.now()&&equal(signature,signView(lease.localToken,expires));
+   const signed=lease&&(equal(c.mandala_desktop,lease.localToken)||browserView)?lease:undefined;
    const stillSigned=()=>signed&&!stopped&&!changing&&accounts.current()?.localToken===signed.localToken;
    const body=()=>readJsonBody(req,{maxBytes:8192,contentTypeError:'JSON required',sizeError:'Request too large'});
    if(path==='/auth/desktop/bootstrap'&&req.method==='GET'){
@@ -128,6 +136,11 @@ export function createDesktopGateway(options:{root:string;setupToken:string;cont
     if(!signed||changing)return json(res,401,{error:'Sign in required'});
     const mutation=!['GET','HEAD'].includes(req.method??'GET');
     if(mutation&&(req.headers.origin!==origin||path.startsWith('/auth/')&&!equal(req.headers['x-csrf-token'],signed.csrfToken)))return json(res,403,{error:'Request verification required'});
+    if(libraryView&&req.method==='POST'&&req.headers['x-mandala-file-link']==='1'&&[...url.searchParams.keys()].every(key=>key==='project')){
+     const until=String(Date.now()+5*60_000),link=new URL(workerUrl);
+     link.searchParams.set('expires',until);link.searchParams.set('fileLink',signView(signed.localToken,until));
+     return json(res,200,{url:link.href});
+    }
     if(path==='/auth/logout'&&req.method==='POST'){
      pending=undefined;await expire();void cloud('/auth/logout',{},signed).catch(()=>{});
      res.setHeader('Set-Cookie','mandala_desktop=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return json(res,200,{restart:true});
@@ -182,7 +195,7 @@ export function createDesktopGateway(options:{root:string;setupToken:string;cont
     // can remain open while idle and will close during normal shutdown.
     let awaitingReply = true;
     const replied = () => { if (awaitingReply) { awaitingReply = false; forwarding--; } };
-    const upstream=httpRequest(w.origin+(req.url??'/'),{method:req.method,headers},reply=>{if (!mutation) replied();const h={...reply.headers};delete h['set-cookie'];res.writeHead(reply.statusCode??502,h);reply.pipe(res);});
+    const upstream=httpRequest(w.origin+(browserView?workerUrl.pathname+workerUrl.search:req.url??'/'),{method:req.method,headers},reply=>{if (!mutation) replied();const h={...reply.headers};delete h['set-cookie'];res.writeHead(reply.statusCode??502,h);reply.pipe(res);});
     forwarding++;
     streams.add(res);res.on('close',()=>{streams.delete(res);upstream.destroy();});upstream.once('close', replied);upstream.on('error',()=>{if(!res.headersSent)json(res,502,{error:'Workspace unavailable'});else res.destroy();});req.pipe(upstream);return;
    }

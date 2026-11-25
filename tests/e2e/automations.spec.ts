@@ -13,7 +13,7 @@ async function setup(request: any) {
 
 test("existing schedules edit, persist, run independently and retain their Project scope", async ({page,request}) => {
   await setup(request);await page.goto("/schedules?project=schedule-reading");
-  await expect(page.getByRole("heading",{name:"计划",exact:true})).toBeVisible();
+  await expect(page.getByRole("heading",{name:"自动化",exact:true})).toBeVisible();
   await seedRuleForEditing(request,page,"schedule-reading","schedule-reader","Personal weekly notes","Review a personal reading list");
   const form=page.getByRole("form",{name:"编辑计划",exact:true});
   await expect(form.getByRole("combobox",{name:"执行方式",exact:true})).toHaveAttribute("data-value","independent");
@@ -33,7 +33,9 @@ test("existing schedules edit, persist, run independently and retain their Proje
   const run=page.locator(".schedule-detail-history .automation-run").filter({hasText:"Personal weekly notes"}).first();
   await expect(run).toContainText("结果待确认",{timeout:15000});
   const receipt=(await(await request.get("/api/automations")).json()).runs.find((item:any)=>item.automationId===new URL(page.url()).searchParams.get("schedule"));expect(receipt.status).toBe("succeeded");expect(receipt.taskState).toBe("review");
+  await page.getByRole("button",{name:"通知",exact:true}).click();
   await page.getByRole("button",{name:"关闭通知 Review a personal reading list",exact:true}).click();
+  await page.getByRole("button",{name:"关闭通知面板",exact:true}).click();
   await run.getByRole("button",{name:"查看对话",exact:true}).click();
   await expect(page.getByText("Fixture reply: Review a personal reading list",{exact:true})).toBeVisible();
   expect((await(await request.get("/api/automations")).json()).automations.find((rule:any)=>rule.id===receipt.automationId).projectId).toBe("schedule-reading");
@@ -56,7 +58,10 @@ test("running schedules can be stopped without disabling the plan or losing hist
   await run.getByRole("button",{name:"停止本次运行",exact:true}).click();
   await expect(run).toContainText("已中断");await expect(plan).toContainText("已启用");
   await plan.getByRole("button",{name:"删除计划",exact:true}).click();
-  await plan.getByRole("button",{name:"确认删除",exact:true}).click();await expect(plan).toHaveCount(0);await expect(page.locator(".automation-history .automation-run").filter({hasText:"Personal long review"})).toBeVisible();
+  await plan.getByRole("button",{name:"确认删除",exact:true}).click();await expect(plan).toHaveCount(0);await page.getByRole('button',{name:'运行记录',exact:true}).click();await expect(page.locator(".automation-history .automation-run").filter({hasText:"Personal long review"})).toBeVisible();
+  await expect(page.locator('.automation-help,.schedule-list-detail')).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator('.automation-history .automation-run').filter({hasText:'Personal long review'})).toBeVisible();
   const data=await (await request.get("/api/automations")).json();
   expect(data.runs.find((r:any)=>r.automationId===schedule.id).status).toBe("interrupted");
 });

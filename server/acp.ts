@@ -1,8 +1,9 @@
+import {AcpSubagents,advertiseAcpSubagents,normalizeAcpSessionOutput,readAcpNotification} from './acp-subagents';
 import {openClawNativeSettings} from './gateway-native';
 import { canApproveAcpLocally } from './approval-policy';
-import type { TurnOptions } from "../shared/chat-input";
+import { efforts, type ReasoningEffort, type TurnOptions } from "../shared/chat-input";
 import type { SessionConfigOption, SessionNotification, RequestPermissionRequest, RequestPermissionResponse, McpServer as AcpMcpServer, ContentBlock } from '@agentclientprotocol/sdk';
-import {createAcpRuntime,createAgentRegistry,type AcpRuntimeHandle,type AcpRuntimeTurn,type AcpSessionRecord,type AcpRuntimeEvent} from 'acpx/runtime';
+import {createAcpRuntime,createAgentRegistry,type AcpRuntimeHandle,type AcpRuntimeTurn,type AcpSessionRecord} from 'acpx/runtime';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import {join} from 'node:path';
@@ -32,16 +33,27 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
  const calls=new Map<string,Record<string,unknown>>();
  const secrets=new Set(Object.entries(options.env??{}).filter(([name,value])=>name!=='MANDALA_CLAUDE_RESTRICTED'&&value).map(([,value])=>value));
  const redact=(message:string)=>{for(const value of secrets)message=message.replaceAll(value,'[redacted]');return message;};
- const permissions=new Map<string,{resolve:(value:RequestPermissionResponse)=>void;allowed:Set<string>}>();
+ const permissions=new Map<string,{resolve:(value:RequestPermissionResponse)=>void;allowed:Set<string>;childId?:string}>();
  const emit=(method:string,params:Record<string,unknown>)=>options.onEvent({method,params:{threadId:sessionId,turnId:active?.id,...params}});
  const finishMessage=()=>{
   if(messageId&&message)emit('item/completed',{item:{id:messageId,type:'agentMessage',text:message}});
   if(messageId&&thought)emit('item/completed',{item:{id:messageId+':thought',type:'reasoning',content:[thought],summary:[]}});
   messageId='';message='';thought='';
  };
- const cancelPermissions=()=>{for(const [id,p] of permissions){p.resolve({outcome:{outcome:'cancelled'}});emit('serverRequest/resolved',{requestId:id});}permissions.clear();};
+ const cancelPermissions=(childId?:string)=>{
+  for(const [id,p] of permissions){
+   if(childId&&p.childId!==childId)continue;
+   permissions.delete(id);p.resolve({outcome:{outcome:'cancelled'}});emit('serverRequest/resolved',{requestId:id});
+  }
+ };
+ const subagents=new AcpSubagents(options.runtimeCli,item=>{
+  if(!active||options.safeSystem)return;
+  active.sawOutput=true;
+  const visible=item.status==='failed'&&item.text?{...item,text:redact(item.text)}:item;
+  emit(['running','dispatching'].includes(item.status)?'item/started':'item/completed',{item:visible});
+ },cancelPermissions);
  const update=({sessionId:id,update:u}:SessionNotification)=>{
-  if(closed||!active||id!==sessionId)return;
+  if(closed||subagents.handle(id,u)||!active||id!==sessionId)return;
   if(u.sessionUpdate==='config_option_update'){configuration=u.configOptions;return;}
   if(u.sessionUpdate==='agent_message_chunk'||u.sessionUpdate==='agent_thought_chunk'){
    if(u.content.type!=='text')return;
@@ -65,14 +77,19 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
   }
  };
  const requestPermission=async(request:RequestPermissionRequest):Promise<RequestPermissionResponse>=>{
-  if(closed||!active||active.cancelled||request.sessionId!==sessionId)return {outcome:{outcome:'cancelled'}};
+  const subagent=subagents.owner(request.sessionId,{...request._meta,...request.toolCall._meta});
+  const childId=subagent?.teamIdentity??subagent?.agentId;
+  const invalidChild=subagent===null||subagent&&(!childId||['completed','failed','interrupted'].includes(subagent.status??''));
+  if(closed||!active||active.cancelled||invalidChild||(!subagent&&request.sessionId!==sessionId))return {outcome:{outcome:'cancelled'}};
   if(options.safeSystem){options.onApproval({id:randomUUID(),method:'acp/permission',params:{threadId:sessionId,toolCall:request.toolCall}});return {outcome:{outcome:'cancelled'}};}
   const once=request.options.find(option=>option.kind==='allow_once');
-  if(once&&(active.wholeTurnApproved||active.mode==='auto'||active.mode==='default'&&canApproveAcpLocally(request.toolCall,options.cwd)))return {outcome:{outcome:'selected',optionId:once.optionId}};
+  if(!subagent&&once&&(active.wholeTurnApproved||active.mode==='auto'||active.mode==='default'&&canApproveAcpLocally(request.toolCall,options.cwd)))return {outcome:{outcome:'selected',optionId:once.optionId}};
+  const choices=subagent?request.options.filter(o=>o.kind==='allow_once'||o.kind==='reject_once'):request.options;
+  if(!choices.length)return {outcome:{outcome:'cancelled'}};
   const id=randomUUID();
   return new Promise<RequestPermissionResponse>(resolve=>{
-   permissions.set(id,{resolve,allowed:new Set(request.options.filter(o=>o.kind==='allow_once'||o.kind==='allow_always'||o.kind==='reject_once').map(o=>o.optionId))});
-   options.onApproval({id,method:'acp/permission',params:{threadId:sessionId,turnId:active!.id,title:request.toolCall.title??'ACP tool',itemId:request.toolCall.toolCallId,toolCall:request.toolCall,options:request.options}});
+   permissions.set(id,{resolve,childId,allowed:new Set(choices.filter(o=>o.kind==='allow_once'||o.kind==='allow_always'||o.kind==='reject_once').map(o=>o.optionId))});
+   options.onApproval({id,method:'acp/permission',params:{threadId:sessionId,turnId:active!.id,title:subagent?(subagent.name??childId)+' · '+(request.toolCall.title??'ACP tool'):request.toolCall.title??'ACP tool',...(childId?{nativeSubagentId:childId}:{}),itemId:request.toolCall.toolCallId,toolCall:request.toolCall,options:choices}});
   });
  };
  const cli=options.runtimeCli, policy=runtimeCapabilities(cli), gatewayBacked=policy.gateway;
@@ -87,10 +104,15 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
   sessionStore:{async load(id){const record=records.get(id);return record?structuredClone(record):undefined;},async save(record){records.set(record.acpxRecordId,structuredClone(record));}},
   agentProcessEnv:options.env,timeoutMs:setupTimeout,permissionMode:'deny-all',nonInteractivePermissions:'deny',fs:false,terminal:false,
   mcpServers:()=>servers,
+  onAcpMessage(direction,frame){
+   if(direction!=='inbound'||!('method' in frame)||frame.method!=='session/update'||'id' in frame)return;
+   const notification=readAcpNotification(frame.params);
+   if(notification)update(notification);
+  },
   processLifecycle:{onExit(exit){
    const agent=agentPids.delete(exit.pid);
    if(!agent||closed||exit.scope.kind!=='runtime-session'||exit.scope.sessionKey!==handle?.sessionKey)return;
-   cancelPermissions();options.onExit(runtimeError('ACP connection closed',redact(stderr)));
+   subagents.begin('');cancelPermissions();options.onExit(runtimeError('ACP connection closed',redact(stderr)));
   }},
   sessionRequestMeta:cli==='claude'?()=>({claudeCode:{options:claudeBridgeOptions(options.safeSystem)}}):undefined,
   spawnAgent({command,args,options:launch}){
@@ -98,7 +120,11 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
    const child=spawn(command,args,{...launch,catalogRuntime:options[bindLocalCatalogLauncher]?cli:undefined,stdio:'pipe'});
    // acpx also owns --version/--help probes; only piped-stdin ACP agents
    // represent the conversation connection, even when they share its scope.
-   if(!(Array.isArray(launch.stdio)&&launch.stdio[0]==='ignore'))child.once('spawn',()=>{if(child.pid)agentPids.add(child.pid);});
+   if(!(Array.isArray(launch.stdio)&&launch.stdio[0]==='ignore')){
+    if(!options.safeSystem)advertiseAcpSubagents(child.stdin);
+    child.stdout=normalizeAcpSessionOutput(child.stdout,cli,(id,meta)=>subagents.owner(id,meta)===undefined);
+    child.once('spawn',()=>{if(child.pid)agentPids.add(child.pid);});
+   }
    const stop=()=>{child.kill('SIGTERM');};
    lifetime.signal.addEventListener('abort',stop,{once:true});
    child.once('close',()=>lifetime.signal.removeEventListener('abort',stop));
@@ -126,18 +152,17 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
   handle=resumeSessionId?next:await runtime.ensureSession({sessionKey:next.sessionKey,agent:cli,mode:'persistent',cwd,resumeSessionId:next.backendSessionId});
   return snapshot();
  };
- const forward=(event:AcpRuntimeEvent)=>{
-  if(event.type==='text_delta')update({sessionId,update:{sessionUpdate:event.stream==='thought'?'agent_thought_chunk':'agent_message_chunk',content:{type:'text',text:event.text}}});
-  else if(event.type==='status'&&event.tag==='plan'&&event.entries&&!closed&&active)emit('turn/plan/updated',{plan:event.entries.map(entry=>({step:entry.content,status:entry.status}))});
-  else if(event.type==='tool_call'&&event.toolCallId)update({sessionId,update:{sessionUpdate:event.tag==='tool_call'?'tool_call':'tool_call_update',toolCallId:event.toolCallId,title:event.title,kind:event.kind,status:event.status,locations:event.locations,rawInput:event.rawInput,rawOutput:event.rawOutput,content:event.content} as SessionNotification['update']});
- };
  const sendPrompt=async(content:ContentBlock[])=>{
   const text=content.filter(block=>block.type==='text').map(block=>block.text).join('');
   const attachments=content.filter(block=>block.type==='image').map(block=>({mediaType:block.mimeType,data:block.data}));
   // Setup is bounded; coding turns last until completion or explicit cancellation.
   const turn=runtime.startTurn({handle:handle!,requestId:active!.id,mode:'prompt',text,attachments,timeoutMs:0,assertActive:()=>{if(closed||active?.cancelled)throw new Error('ACP turn cancelled');}});
   nativeTurn=turn;
-  try{for await(const event of turn.events)forward(event);const result=await turn.result;
+  try{
+   // Drain ACPX's normalized stream. The wire observer projects root and child
+   // notifications together, because normalized text loses its session identity.
+   for await(const _ of turn.events){ /* already observed */ }
+   const result=await turn.result;
    if(result.status==='failed')throw new Error(result.error.message);
    configure(await snapshot());
    return {stopReason:result.status==='cancelled'?'cancelled':result.stopReason};
@@ -145,7 +170,7 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
  };
  let closing:Promise<void>|undefined;
  const abort=()=>{void close().catch(error=>options.onExit(String(error)));};
- const close=()=>{if(closing)return closing;closed=true;cancelPermissions();options.signal?.removeEventListener('abort',abort);lifetime.abort();return closing=runtime.shutdown();};
+ const close=()=>{if(closing)return closing;closed=true;subagents.begin('');cancelPermissions();options.signal?.removeEventListener('abort',abort);lifetime.abort();return closing=runtime.shutdown();};
  options.signal?.addEventListener('abort',abort,{once:true});
  let initialized;
  try {options.signal?.throwIfAborted();initialized=await bounded(runtime.doctor(),setupTimeout);if(!initialized.ok)throw new Error(initialized.details?.at(-1)??initialized.message);}
@@ -170,6 +195,10 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
   })};
  });
  };
+ type SelectOption=Extract<SessionConfigOption,{type:'select'}>;
+ const reasoningOption=()=>configuration.find((option):option is SelectOption=>options.runtimeCli==='dsh'&&option.id==='reasoning_effort'&&option.type==='select');
+ const choiceValues=(option:SelectOption)=>option.options.flatMap(choice=>'options' in choice?choice.options:[choice]);
+ const fromNativeEffort=(value:string)=>value==='off'?'none':value;
  const setModel=async(model?:string)=>{
   if(!model)return;
   if(options.runtimeCli==='openclaw'){if(model!==options.nativeModel?.id)throw new Error('OpenClaw ACP cannot switch models. Select the native default, or change the model in the native Gateway and start a new chat.');return;}
@@ -185,12 +214,21 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
  };
  let prepared: {id:string;input:TurnOptions;images:ContentBlock[]}|undefined;
  const setup=async<T>(request:Promise<T>):Promise<T>=>{try{return await bounded(request,gatewayBacked?45000:15000);}catch(error){if(!gatewayBacked)throw new Error(redact(String(error)));throw Object.assign(new Error(`${runtimeLabel(cli)} Gateway setup failed. Check the native installation, Gateway startup and provider login in the selected profile. No task was sent.`), {code: 'runtime-gateway-unavailable'});}};
- const ensureSession=async()=>{if(!sessionId){const result=await setup(attach(options.cwd,[]));sessionId=result.sessionId;configure(result);}};
+ const ensureSession=async()=>{if(!sessionId){const result=await setup(attach(options.cwd,[]));sessionId=result.sessionId;subagents.bind(sessionId);configure(result);}};
  const prepareTurn=async(id:string,input:TurnOptions={})=>{
   if(closed||id!==sessionId||active)throw new Error('ACP session is unavailable or busy');
-  if(input.effort)throw new Error('ACP reasoning effort selection is not supported');
+  if(input.effort&&options.runtimeCli!=='dsh')throw new Error('ACP reasoning effort selection is not supported');
   if(input.images?.length&&!capabilities?.promptCapabilities?.image)throw new Error('ACP agent does not support images');
   await setModel(input.model);
+  if(input.effort){
+   const setting=reasoningOption();
+   const value=setting&&choiceValues(setting).find(choice=>fromNativeEffort(choice.value)===input.effort)?.value;
+   if(!setting||!value)throw new Error('DSH reasoning effort is unavailable for the selected model');
+   if(setting.currentValue!==value){
+    await bounded(runtime.setConfigOption({handle:handle!,key:setting.id,value}));
+    configure(await snapshot());
+   }
+  }
   const images:ContentBlock[]=[];
   for(const image of input.images??[])images.push({type:'image',mimeType:image.mimeType,data:(await readFile(image.path)).toString('base64')});
   prepared={id,input,images};
@@ -210,14 +248,23 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
    await ensureSession();
    const setting=configuration.find(option=>option.category==='model');
    if(!setting||setting.type!=='select')return legacyModels;
-   return setting.options.flatMap(option=>'options' in option?option.options:[option]).map(option=>({id:option.value,label:option.name,isDefault:option.value===setting.currentValue}));
+   const reasoning=reasoningOption();
+   const supportedReasoningEfforts=reasoning&&choiceValues(reasoning).map(choice=>fromNativeEffort(choice.value)).filter((value):value is ReasoningEffort=>efforts.includes(value as ReasoningEffort));
+   const currentEffort=reasoning ? fromNativeEffort(reasoning.currentValue) as ReasoningEffort : undefined;
+   return choiceValues(setting).map(option=>({
+    id:option.value,label:option.name,isDefault:option.value===setting.currentValue,
+    ...(option.value===setting.currentValue&&supportedReasoningEfforts?.length?{
+     supportedReasoningEfforts,
+     ...(currentEffort&&supportedReasoningEfforts.includes(currentEffort)?{defaultReasoningEffort:currentEffort}:{}),
+    }:{}),
+   }));
   },
   async startThread(input){
    if(closed||active)throw new Error('ACP session is unavailable or busy');
    if(input.safeSystem&&!options.safeSystem)throw new Error('Restricted ACP must be configured before launch');
    if(!options.safeSystem&&!durableResume)throw new Error(strictResume?strictResumeMessage:'ACP agent must support session resume for durable chats');
    const result=await setup(attach(input.cwd,options.safeSystem?[]:mcpServers(input.mcp)));
-   sessionId=result.sessionId;instructions=input.instructions;configure(result);
+   sessionId=result.sessionId;subagents.bind(sessionId);instructions=input.instructions;configure(result);
    await setModel(input.model);return sessionId;
   },
   async resumeThread(id,mcp,nextInstructions,model){
@@ -225,8 +272,11 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
    const servers=mcpServers(mcp);
    if(id!==sessionId){
     if(!durableResume)throw new Error(strictResume?strictResumeMessage:'ACP agent cannot resume this session; start a new chat');
-    const result=await setup(attach(options.cwd,options.safeSystem?[]:servers,id));
-    sessionId=id;configure(result);
+    subagents.bind(id);
+    try{
+     const result=await setup(attach(options.cwd,options.safeSystem?[]:servers,id));
+     sessionId=id;configure(result);
+    }catch(error){subagents.bind(sessionId);throw error;}
    }
    instructions=nextInstructions??instructions;await setModel(model);
   },
@@ -234,7 +284,7 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
    if(prepared?.id!==id||prepared.input!==input)await prepareTurn(id,input);
    const prompt:ContentBlock[]=[{type:'text',text:instructions?`<mandala-context>\n${instructions}\n</mandala-context>\n\n${text}`:text},...prepared!.images];
    prepared=undefined;
-   const turn={id:randomUUID(),mode,cancelled:false,promptStarted:false,wholeTurnApproved:false,sawOutput:false,gatewayFailure:undefined as string|undefined};active=turn;calls.clear();
+   const turn={id:randomUUID(),mode,cancelled:false,promptStarted:false,wholeTurnApproved:false,sawOutput:false,gatewayFailure:undefined as string|undefined};active=turn;calls.clear();subagents.begin(turn.id);
    emit('turn/started',{turn:{id:turn.id,status:'inProgress'}});
    // Prompt lasts until the agent finishes; setup timeouts must not truncate a coding turn.
    void (async()=>{
@@ -253,13 +303,13 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
     turn.promptStarted=true;
     return sendPrompt(prompt);
    })().then(result=>{
-    if(closed||active!==turn)return;finishMessage();cancelPermissions();
+    if(closed||active!==turn)return;subagents.flush();finishMessage();cancelPermissions();
     if(options.runtimeCli==='openclaw'&&result.stopReason==='end_turn'&&!turn.sawOutput)turn.gatewayFailure='OpenClaw Gateway ended without a response or tool result. Check native model authentication and Gateway logs; the task was not resent.';
     const status=result.stopReason==='cancelled'?'interrupted':!turn.gatewayFailure&&result.stopReason==='end_turn'?'completed':'failed';
-    emit('turn/completed',{turn:{id:turn.id,status,...(status==='failed'?{error:{message:turn.gatewayFailure??`ACP stopped: ${result.stopReason}`}}:{})}});active=undefined;
+    emit('turn/completed',{turn:{id:turn.id,status,...(status==='failed'?{error:{message:turn.gatewayFailure??`ACP stopped: ${result.stopReason}`}}:{})}});active=undefined;subagents.begin('');
    }).catch(error=>{
-    if(closed||active!==turn)return;finishMessage();cancelPermissions();
-    active=undefined;
+    if(closed||active!==turn)return;subagents.flush();finishMessage();cancelPermissions();
+    active=undefined;subagents.begin('');
     if(turn.cancelled){
      options.onExit('ACP did not confirm stopping. The native turn outcome is unknown.');
      void close().catch(()=>{});

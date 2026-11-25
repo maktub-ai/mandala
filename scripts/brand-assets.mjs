@@ -7,7 +7,7 @@ const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ deviceScaleFactor: 1 });
   for (const name of ['logo-on-light', 'logo-on-dark', 'logo-black', 'logo-white', 'logo-small']) {
-    const svg = await readFile(`src/assets/${name}.svg`, 'utf8');
+    const svg = await readFile(`src/assets/${name === 'logo-small' ? 'logo-petals' : name}.svg`, 'utf8');
     await writeFile(`${destination}/${name}.svg`, svg);
     for (const size of name === 'logo-small' ? [16, 24, 32, 48, 64] : [64, 128, 256, 512, 1024]) {
       await page.setViewportSize({ width: size, height: size });

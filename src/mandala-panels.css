@@ -135,3 +135,95 @@ a.mandala-rule-last:hover > svg:last-child,.mandala-rule:focus-within a.mandala-
 @media(prefers-reduced-motion:no-preference) { .mandala-team-working > i { animation:mandala-working-pulse 1.6s ease-in-out infinite; } }
 @keyframes mandala-working-pulse { 50% { opacity:.35; } }
 .mandala-team-agent > .task-work-related[open] > summary,.mandala-rule > .mandala-rule-instructions[open] > summary { width:fit-content; margin-left:auto; }
+
+.mandala-task-views { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-top:16px; }
+.mandala-task-views .mandala-task-scope { margin:0; }
+.mandala-task-group { padding:8px 0; }
+.mandala-task-group + .mandala-task-group { border-top:1px solid var(--border-soft); }
+.mandala-task-group > header { display:flex; align-items:center; gap:8px; justify-content:space-between; }
+.mandala-task-group > header h2 { display:flex; align-items:center; gap:6px; min-width:0; margin:0; color:var(--heading); font-size:var(--type-ui); font-weight:var(--weight-heading); }
+.mandala-task-group > header h2 > span { overflow-wrap:anywhere; }
+.mandala-task-group > header a { flex:none; display:inline-flex; align-items:center; gap:4px; min-height:30px; font-size:var(--type-meta); color:var(--muted); text-decoration:none; }
+.mandala-task-group > header a:hover { color:var(--text); text-decoration:underline; }
+.mandala-task-group > header a:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+@media(pointer:coarse) { .mandala-task-group > header a { min-height:44px; } }
+
+/* Collaboration tab: a Chat is the unit the user works with; a Task is a thin parent line above its Chats. */
+.mandala-collab-toolbar { margin:16px 0 4px; gap:6px; flex-wrap:nowrap; }
+.mandala-collab-toolbar .mandala-task-scope { margin:0; flex:none; }
+.mandala-collab-toolbar .progress-search { flex:1 1 0; min-width:72px; }
+.mandala-panels .mandala-collab-heading { display:flex; align-items:center; gap:6px; width:100%; min-height:32px; margin:12px 0 2px; padding:0; border:0; background:none; color:var(--muted); font:inherit; font-size:var(--type-meta); font-weight:500; text-align:left; }
+.mandala-panels button.mandala-collab-heading { cursor:pointer; justify-content:flex-start; height:auto; }
+.mandala-panels button.mandala-collab-heading:hover { color:var(--text); }
+.mandala-collab-heading-note { margin-left:auto; font-weight:400; }
+.mandala-collab-section + .mandala-all-tasks { margin-top:16px; }
+
+.mandala-chat-row { display:grid; grid-template-columns:28px minmax(0,1fr); column-gap:10px; margin:0 -8px 2px; padding:10px 8px; border-radius:var(--control-radius); }
+.mandala-chat-row:hover, .mandala-chat-row[data-open] { background:var(--raised); }
+.mandala-chat-row[data-nested] { grid-template-columns:24px minmax(0,1fr); padding:8px; margin:0 -8px 2px 0; }
+.mandala-chat-avatar { padding-top:2px; line-height:0; }
+.mandala-chat-main { min-width:0; }
+.mandala-chat-heading { display:flex; align-items:center; gap:6px; min-width:0; }
+.mandala-chat-heading > svg { flex:none; color:var(--muted); }
+.mandala-panels button.mandala-chat-title { flex:1; min-width:0; height:auto; min-height:0; justify-content:flex-start; padding:0; border:0; background:none; color:var(--text); font:inherit; font-size:var(--theme-font-size); font-weight:var(--weight-heading); line-height:20px; text-align:left; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mandala-panels button.mandala-chat-title:hover { text-decoration:underline; text-underline-offset:3px; }
+.mandala-chat-title:focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:4px; }
+.mandala-chat-heading > time { flex:none; color:var(--muted); font-size:var(--type-meta); font-variant-numeric:tabular-nums; }
+.mandala-new-dot { flex:none; width:6px; height:6px; border-radius:50%; background:var(--accent); }
+.mandala-chat-row:is(:hover,:focus-within) .mandala-reference { opacity:1; }
+.mandala-chat-status { display:flex; align-items:center; gap:6px; min-width:0; margin:2px 0 0; color:var(--muted); font-size:var(--type-meta); }
+.mandala-chat-status > span { white-space:nowrap; }
+.mandala-chat-status > span:last-child { overflow:hidden; text-overflow:ellipsis; }
+.mandala-chat-status .status-mark, .mandala-collab-task-state .status-mark { flex:none; width:14px; height:14px; }
+.mandala-chat-status[data-tone] > span:first-of-type { font-weight:500; }
+:is(.mandala-chat-status,.mandala-collab-task-state)[data-tone=active] { color:var(--status-running); }
+:is(.mandala-chat-status,.mandala-collab-task-state)[data-tone=success] { color:var(--success); }
+:is(.mandala-chat-status,.mandala-collab-task-state)[data-tone=warning] { color:var(--warning); }
+:is(.mandala-chat-status,.mandala-collab-task-state)[data-tone=danger] { color:var(--danger); }
+.mandala-chat-status > span:not(:first-of-type) { color:var(--muted); font-weight:400; }
+.mandala-chat-preview { margin:4px 0 0; color:var(--text); font-size:var(--type-meta); line-height:18px; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; }
+.mandala-chat-row[data-nested] .mandala-chat-preview { -webkit-line-clamp:1; color:var(--muted); }
+.mandala-chat-row .mandala-chat-preview[data-open] { -webkit-line-clamp:10; color:var(--text); }
+.mandala-chat-preview > strong { font-weight:500; color:var(--muted); }
+.mandala-chat-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.mandala-chat-action { display:inline-flex; align-items:center; gap:6px; min-height:28px; padding:4px 10px; border:1px solid var(--border); border-radius:var(--control-radius); background:var(--surface); color:var(--text); font-size:var(--type-meta); font-weight:500; text-decoration:none; }
+.mandala-chat-action[data-primary] { border-color:transparent; background:var(--button); color:var(--button-text); }
+.mandala-chat-action:hover { text-decoration:none; filter:brightness(1.08); }
+.mandala-chat-action:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+
+.mandala-collab-task { margin:0 0 2px; }
+.mandala-collab-task-head, .mandala-collab-run { display:flex; align-items:center; gap:6px; min-width:0; min-height:32px; margin:0 -8px; padding:0 8px; border-radius:var(--control-radius); color:var(--muted); font-size:var(--type-meta); text-decoration:none; }
+.mandala-collab-task-head:hover, a.mandala-collab-run:hover { background:var(--raised); }
+.mandala-collab-task-head > svg, .mandala-collab-run > svg { flex:none; color:var(--muted); }
+.mandala-panels button.mandala-collab-task-toggle { flex:none; display:grid; place-items:center; width:16px; height:24px; min-height:0; min-width:0; padding:0; border:0; background:none; color:var(--muted); cursor:pointer; }
+.mandala-panels button.mandala-collab-task-toggle:disabled { opacity:.35; cursor:default; }
+.mandala-collab-task-title, .mandala-collab-run-title { flex:0 1 auto; min-width:0; color:var(--text); font-size:var(--theme-font-size); font-weight:var(--weight-medium); text-decoration:none; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mandala-collab-task-title:hover { text-decoration:underline; text-underline-offset:3px; }
+.mandala-collab-task-state { flex:none; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.mandala-collab-task-state .status-mark { width:12px; height:12px; }
+.mandala-collab-task-project { flex:0 1 auto; display:inline-flex; align-items:center; gap:4px; min-width:0; color:var(--muted); text-decoration:none; }
+.mandala-collab-task-project > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mandala-collab-task-project:hover { color:var(--text); text-decoration:underline; text-underline-offset:3px; }
+.mandala-collab-task-project:focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:4px; }
+.mandala-collab-task-count { flex:none; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.mandala-collab-task-meta { display:flex; align-items:center; gap:4px 10px; flex-wrap:wrap; min-width:0; margin:0 0 4px; padding-left:36px; color:var(--muted); font-size:var(--type-meta); }
+.mandala-collab-task-head + .mandala-collab-task-meta { margin-top:-4px; }
+.mandala-collab-task-title { flex:1 1 auto; }
+.mandala-collab-task-head:is(:hover,:focus-within) .mandala-reference { opacity:1; }
+.mandala-collab-task-blocked { margin:2px 0 4px 30px; font-size:var(--type-meta); }
+.mandala-collab-task-chats { margin:2px 0 6px 7px; padding-left:12px; border-left:1px solid var(--border); }
+:is(.mandala-collab-task-title,a.mandala-collab-run):focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:4px; }
+
+/* Agents tab: each Agent shows its own next schedule; the tab ends with the next few runs. */
+.mandala-panels button.mandala-team-agent-schedule { grid-column:2 / -1; display:flex; align-items:center; gap:6px; min-width:0; height:auto; min-height:24px; margin-top:2px; padding:0; border:0; background:none; color:var(--muted); font:inherit; font-size:var(--type-meta); text-align:left; justify-content:flex-start; cursor:pointer; }
+.mandala-team-agent-schedule > svg { flex:none; }
+.mandala-team-agent-schedule > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mandala-panels button.mandala-team-agent-schedule:hover { color:var(--text); }
+.mandala-team-schedules { margin-top:12px; padding-top:4px; border-top:1px solid var(--border-soft); }
+.mandala-panels button.mandala-team-schedule { display:flex; align-items:center; gap:8px; width:calc(100% + 16px); height:auto; min-height:32px; margin:0 -8px; padding:4px 8px; border:0; border-radius:var(--control-radius); background:none; color:var(--text); font:inherit; font-size:var(--theme-font-size); text-align:left; justify-content:flex-start; cursor:pointer; }
+.mandala-panels button.mandala-team-schedule:hover { background:var(--raised); }
+.mandala-team-schedule > svg { flex:none; color:var(--muted); }
+.mandala-team-schedule-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mandala-team-schedule-meta { flex:none; color:var(--muted); font-size:var(--type-meta); font-variant-numeric:tabular-nums; }
+:is(.mandala-team-agent-schedule,.mandala-team-schedule):focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+@media(pointer:coarse) { .mandala-panels :is(.mandala-chat-title,.mandala-collab-task-title,.mandala-collab-task-toggle,.mandala-team-agent-schedule,.mandala-team-schedule,.mandala-chat-action) { min-height:44px; } }

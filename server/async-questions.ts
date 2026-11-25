@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import type { Approval } from '../shared/types';
-import { nativeQuestions, questionResponse } from '../shared/questions';
+import { nativeQuestions, questionResponse, presentSubmittedQuestions } from '../shared/questions';
 import type { Store } from './store';
 
 export function initializeAsyncQuestions(store:Store) {
   store.database.exec(`CREATE TABLE IF NOT EXISTS async_question_migration(singleton INTEGER PRIMARY KEY CHECK(singleton=1),event_id INTEGER NOT NULL);
     INSERT OR IGNORE INTO async_question_migration SELECT 1,COALESCE(MAX(id),0) FROM events;
+    CREATE INDEX IF NOT EXISTS events_async_question_receipts ON events(conversationId,json_extract(data,'$.queuedInputId'))
+      WHERE kind='metadata' AND json_extract(data,'$.answeredQuestionId') IS NOT NULL;
     CREATE INDEX IF NOT EXISTS events_async_question_messages ON events(conversationId,id)
       WHERE kind='tool' AND superseded=0 AND json_extract(data,'$.method')='item/completed'
         AND json_extract(data,'$.params.item.type')='agentMessage';`);
@@ -40,7 +42,7 @@ export function asyncQuestions(store:Store,conversationId:string):Approval[] {
     const terminal=db.prepare("SELECT data FROM events WHERE conversationId=? AND kind='status' AND json_extract(data,'$.runId')=? ORDER BY id DESC LIMIT 1").get(conversationId,event.runId);
     if(terminal&&['interrupted','error'].includes(JSON.parse(terminal.data as string).status))continue;
     const questions=item.questions.map((q:any,index:number)=>({id:String(index),header:`${index+1}`,question:q.title,
-      ...(q.isSecret===true?{isSecret:true}:{}),options:q.options?.map((label:unknown)=>({label,description:''}))}));
+      ...(q.isSecret!==false&&q.isSecret!==undefined?{isSecret:true}:{}),options:q.options?.map((label:unknown)=>({label,description:''}))}));
     const approval:Approval={id,conversationId,nativeRequestId:item.id,method:'item/tool/requestUserInput',
       params:{questions,isBlocking:false,async:true,threadId:p.threadId,turnId:p.turnId,runId:event.runId}};
     if(nativeQuestions(approval).length)pending.set(id,approval);
@@ -55,4 +57,14 @@ export function asyncQuestionReply(approval:Approval,answers:unknown):string {
     question:q.question,answer:response.answers[q.id].answers[0],
   }));
   return '<send_user_message_question_reply>\n'+JSON.stringify(replies)+'\n</send_user_message_question_reply>';
+}
+
+// Read the durable receipt even when the original form or receipt falls outside
+// the returned history page. Preserve the wire payload only for native execution.
+export function displayedAsyncReply(store:Store,conversationId:string,inputId:unknown,text:unknown){
+ if(typeof inputId!=='string'||typeof text!=='string'||!text.startsWith('<send_user_message_question_reply>'))return;
+ const receipt=store.database.prepare(`SELECT data FROM events WHERE conversationId=? AND kind='metadata'
+  AND json_extract(data,'$.answeredQuestionId') IS NOT NULL AND json_extract(data,'$.queuedInputId')=?
+  AND json_extract(data,'$.answeredQuestionId') LIKE 'async:%' LIMIT 1`).get(conversationId,inputId);
+ return receipt?presentSubmittedQuestions(text,JSON.parse(receipt.data as string).publicQuestionItems):undefined;
 }

@@ -196,3 +196,13 @@ test('keeps local draft attachment ids scoped and leaves the legacy draft record
  expect((await request('/api/drafts/entry','DELETE',{scope:target,expectedRevision:2})).status).toBe(200);
  expect((await request('/api/drafts/files/'+conversation.id+'/'+id)).status).toBe(404);
 });
+
+test('lists a tracked goal from its readable source before any execution',async()=>{
+ const source=chat(),p={userId:store.ownerUserId},task=manager.taskService.createTask(p,{goal:'Follow up',originConversationId:source.id},'tracked-source');
+ const list=async()=>(await request('/api/v2/tasks?conversationId='+source.id)).json();
+ expect(await list()).toMatchObject([{id:task.id,conversationIds:[]}]);
+ expect(manager.taskService.listLinkedTasks(p,source.id).map(row=>row.id)).toEqual([task.id]);
+ expect(manager.taskService.snapshotProgress(p,source.id)).toEqual([]);
+ vi.spyOn(manager,'authorizeConversationRead').mockImplementation(()=>{throw new DomainError('forbidden',403,'Revoked source');});
+ expect(await list()).toEqual([]);
+});

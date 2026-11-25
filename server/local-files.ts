@@ -1,3 +1,5 @@
+import { attachmentImageType, MAX_ATTACHMENT_SIZE } from './attachments';
+import { fileMediaType } from '../shared/file-types';
 import { MAX_FILE_REFERENCE_BATCH, MAX_FILE_REFERENCE_BODY_BYTES, isConcreteLocalFileReference, isRelativeLocalFileReference, messageFileLinks, withoutFileLine } from "../shared/local-file-links";
 import { constants, realpath as fsRealpath } from "node:fs";
 import { lstat, open, realpath as ordinaryRealpath, stat } from "node:fs/promises";
@@ -90,13 +92,13 @@ async function openScopedLocalFile(href: string, roots: string[], linked = false
   }
 }
 
-export async function readLocalFilePreview(href: string, roots: string[], linked = false, cwd?: string) {
+async function readLocalFileBytes(href: string, roots: string[], linked: boolean, cwd: string | undefined, limit: number) {
   const { handle, path, requested } = await openScopedLocalFile(href, roots, linked, cwd);
   try {
     const before = await handle.stat();
     if (!before.isFile()) throw new DomainError("file_type", 415, "Only text files can be previewed here");
-    if (before.size > LIMIT) throw new DomainError("file_size", 413, "File is too large to preview");
-    const buffer = Buffer.alloc(LIMIT + 1);
+    if (before.size > limit) throw new DomainError("file_size", 413, "File is too large to preview");
+    const buffer = Buffer.alloc(before.size + 1);
     let size = 0;
     while (size < buffer.length) {
       const { bytesRead } = await handle.read(buffer, size, buffer.length - size, size);
@@ -106,13 +108,25 @@ export async function readLocalFilePreview(href: string, roots: string[], linked
     const after = await handle.stat(), location = await realpath(requested), current = await stat(location);
     if (location !== path || current.dev !== before.dev || current.ino !== before.ino || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || size !== before.size)
       throw new DomainError("file_changed", 409, "File changed while loading; open it again");
-    let text: string;
-    try {
-      if (buffer.subarray(0, size).includes(0)) throw new Error();
-      text = new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, size));
-    } catch { throw new DomainError("file_type", 415, "Only text files can be previewed here"); }
-    return { name: basename(path), path, text };
+    return { path, bytes: buffer.subarray(0, size) };
   } finally { await handle.close(); }
+}
+
+export async function readLocalFilePreview(href: string, roots: string[], linked = false, cwd?: string) {
+  const { path, bytes } = await readLocalFileBytes(href, roots, linked, cwd, LIMIT);
+  try {
+    if (bytes.includes(0)) throw new Error();
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return { name: basename(path), path, text };
+  } catch { throw new DomainError("file_type", 415, "Only text files can be previewed here"); }
+}
+
+export async function readLinkedMedia(href: string, roots: string[], cwd: string) {
+  const { path, bytes } = await readLocalFileBytes(href, roots, false, cwd, MAX_ATTACHMENT_SIZE);
+  const mediaType = bytes.subarray(0, 5).equals(Buffer.from('%PDF-')) ? 'application/pdf' : attachmentImageType(bytes);
+  if (!mediaType || fileMediaType(path) !== mediaType)
+    throw new DomainError('file_type', 415, 'Unsupported file preview');
+  return { mediaType, bytes };
 }
 
 // Resolve a whole transcript batch without reading file contents. Preview rechecks the

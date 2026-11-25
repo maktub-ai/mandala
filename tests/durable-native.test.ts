@@ -221,7 +221,7 @@ test('F2 forced stop retains physical directory occupancy while explicit continu
  terminal(f.clients[0]); // Retired callback is not proof about a current physical invocation.
  expect(f.store.getConversation(source.id)?.status).toBe('interrupted');
  expect(f.clients).toHaveLength(1);
- expect(f.manager.listUserInputs(source.id)).toMatchObject([{id:first.id,state:'completed'},{text:'explicit continuation',state:'queued'}]);
+ expect(f.manager.listUserInputs(source.id)).toMatchObject([{id:first.id,state:'unknown'},{text:'explicit continuation',state:'queued'}]);
  expect(f.store.database.prepare('SELECT submitted FROM task_directory_claims').all()).toEqual([{submitted:1}]);
 });
 test('F3 additional private native history parks accepted child before injection without changing its snapshot',async()=>{

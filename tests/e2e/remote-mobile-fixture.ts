@@ -17,7 +17,7 @@ import { createAssetFiles } from '../../server/asset-files';
 import { createAssets } from '../../server/assets';
 import { workspacePrincipal } from '../../server/workspace-identity';
 
-export async function remoteMobileFixture() {
+export async function remoteMobileFixture(routeGenerate?:import('../../server/system-tasks').SystemGenerator) {
  test.skip(!accountServiceAvailable,'Set MANDALA_ACCOUNT_SERVICE_SOURCE for cross-repository relay integration');
   const home = mkdtempSync(join(tmpdir(), 'mandala-remote-mobile-')), relayHome = mkdtempSync(join(tmpdir(), 'mandala-relay-mobile-'));
   const password = 'synthetic-remote-password';
@@ -28,7 +28,7 @@ export async function remoteMobileFixture() {
   const conversation = store.createConversation({ projectId: '', agentId: 'remote-fixture-agent', cli: 'codex', model: null });
   store.renameConversation(conversation.id, '手机端合成对话');
   store.appendEvent(conversation.id, 'text', { text: 'History remains on this computer.' });
-  const manager = createSessionManager(store, async () => (await readConfig(home)).config, async options => connectCodex(createRpcClient(spawn(process.execPath, ['tests/fixtures/fake-cli.mjs', '--chat', '--state', join(home, 'native-threads.json')], { stdio: 'pipe', signal: options.signal }), { onNotification: options.onEvent, onRequest: options.onApproval, onExit: options.onExit })), undefined, home);
+  const manager = createSessionManager(store, async () => (await readConfig(home)).config, async options => connectCodex(createRpcClient(spawn(process.execPath, ['tests/fixtures/fake-cli.mjs', '--chat', '--state', join(home, 'native-threads.json')], { stdio: 'pipe', signal: options.signal }), { onNotification: options.onEvent, onRequest: options.onApproval, onExit: options.onExit })), undefined, home,undefined,undefined,undefined,{routeGenerate});
   const principal = workspacePrincipal(store), task = manager.taskService.createTask(principal, { goal: '合成持久任务' }, 'mobile-task');
   manager.taskService.moveTask(principal, task.id, task.revision, 'running', null, 'mobile-task-state');
   const files = createAssetFiles(home), assets = createAssets(store, files); writeFileSync(join(home, 'synthetic-output.txt'), 'Synthetic issued output');

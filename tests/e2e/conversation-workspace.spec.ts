@@ -147,7 +147,7 @@ for(const language of ['zh-CN','en'])test('right pane stays within 390px and rep
  await page.route('**/api/conversations/'+f.conversation.id+'/workspace{,?*}',route=>route.fulfill({status:403,json:{error:'Synthetic file access denied'}}));
  const panel=await openPanel(page,f,language);await panel.getByRole('tab',{name:language==='en'?'Files':'文件',exact:true}).click();await expect(panel.getByRole('alert')).toContainText('Synthetic file access denied');
  expect(await panel.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
- await expect(panel.getByRole('tab')).toHaveText(language==='en'?['Capabilities','Files','Changes','Terminal']:['能力','文件','改动','终端']);
+ await expect(panel.getByRole('tab')).toHaveText(language==='en'?['Capabilities','Files','Changes','Terminal','Subagents']:['能力','文件','改动','终端','子代理']);
  await page.keyboard.press('Escape');await expect(panel).not.toBeVisible();await expect(page.getByRole('button',{name:language==='en'?'Expand right sidebar':'展开右侧栏',exact:true})).toBeFocused();
 });
 

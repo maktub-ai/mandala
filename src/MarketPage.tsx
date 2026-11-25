@@ -14,7 +14,8 @@ import type { Config } from "../shared/types";
 import { marketSources, githubPluginSource, githubSkillSource, marketSourceOf, matchesMarketSource, marketSorts, sortMarketItems, type MarketSort, type MarketSource, type MarketSourceSnapshot, type MarketSourceId, type InstalledMarketItem, type MarketDetail, type MarketItem, type MarketKind, type MarketTarget } from "../shared/market";
 import AppSidebar, { type SidebarNavigation } from "./AppSidebar";
 import Dialog from "./Dialog";
-import Icon, { type IconName } from "./ui/Icon";
+import Icon from "./ui/Icon";
+import MarketCapabilityIcon from "./MarketCapabilityIcon";
 import EmptyState from './ui/EmptyState';
 import MarkdownMessage from "./MarkdownMessage";
 import { api } from "./api";
@@ -37,7 +38,6 @@ const savedSources = (): MarketSourceId[] => {
   } catch { /* An unavailable preference does not prevent browsing. */ }
   return [...builtinOrder];
 };
-const capabilityIcon = (item: MarketItem): IconName => item.kind === "theme" ? "grid" : item.kind === "language" ? "globe" : item.kind === "pet" ? "sparkles" : /design|canvas|art|brand/.test(item.name) ? "grid" : /github|mcp-builder/.test(item.name) ? "code" : /pdf|doc|ppt|xls/.test(item.name) ? "file" : item.kind === "mcp" ? "tool" : "book";
 export default function MarketPage({ navigation, mobileNav, onMobileNav, onConfigSaved, onNavigationLockChange }: {
   navigation: SidebarNavigation; mobileNav: boolean; onMobileNav: (open: boolean) => void; onConfigSaved: () => Promise<void>; onNavigationLockChange: (locked: boolean) => void;
 }) {
@@ -55,7 +55,7 @@ export default function MarketPage({ navigation, mobileNav, onMobileNav, onConfi
   const [sourceFormError, setSourceFormError] = useState("");
   const allSources: MarketSource[] = sourceSnapshot?.sources ?? [...marketSources];
   const sourceOrder = [...builtinOrder, ...allSources.filter(entry => !!entry.adapter).map(entry => entry.id)];
-  const kindName = (value: MarketKind) => value === "plugin" ? localize("插件", "Plugins") : value === "theme" ? t("主题") : value === "language" ? t("语言包") : value === "pet" ? localize("桌宠", "Pets") : value === "skill" ? "Skill" : "MCP";
+  const kindName = (value: MarketKind | "library-section") => value === "library-section" ? localize("资料库标签页", "Library tabs") : value === "plugin" ? localize("插件", "Plugins") : value === "theme" ? t("主题") : value === "language" ? t("语言包") : value === "pet" ? localize("桌宠", "Pets") : value === "skill" ? "Skill" : "MCP";
   const sourceName = (id: string) => allSources.find(entry => entry.id === id)?.name ?? id;
   const say = (english: string, chinese: string) => localize(chinese, english);
   const [query, setQuery] = useState(""), [submittedQuery, setSubmittedQuery] = useState("");
@@ -63,7 +63,7 @@ export default function MarketPage({ navigation, mobileNav, onMobileNav, onConfi
   const [snapshot, setSnapshot] = useState<{ config: Config; revision: string } | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(true), [libraryError, setLibraryError] = useState("");
   const [capabilityInstallations, setInstallations] = useState<InstalledMarketItem[]>([]);
-  const installations: InstalledMarketItem[] = [...capabilityInstallations, ...(extensions.snapshot?.plugins ?? []).map(item => ({ ...item, kind: "plugin" as const, id: item.catalogId, targets: [], missing: false, plugin: item })), ...(extensions.snapshot?.items ?? []).filter(item => !item.pluginId).map(item => ({ ...item, id: item.catalogId, targets: [], missing: false, extension: item }))];
+  const installations: InstalledMarketItem[] = [...capabilityInstallations, ...(extensions.snapshot?.plugins ?? []).map(item => ({ ...item, kind: "plugin" as const, id: item.catalogId, targets: [], missing: false, plugin: item })), ...(extensions.snapshot?.items ?? []).flatMap(item => !item.pluginId && isUiExtension(item.kind) ? [{ ...item, kind: item.kind, id: item.catalogId, targets: [], missing: false, extension: item }] : [])];
   const [detail, setDetail] = useState<MarketDetail | null>(null), [selected, setSelected] = useState<MarketItem | null>(null);
   const [mode, setMode] = useState<"overview" | "install" | "contents">("overview");
   const [targetKind, setTargetKind] = useState<"agent" | "project">("agent"), [targetQuery, setTargetQuery] = useState("");
@@ -167,6 +167,19 @@ export default function MarketPage({ navigation, mobileNav, onMobileNav, onConfi
     finally { if (detailRequest.current === token) setDetailLoading(false); }
   };
   const selectedInstallation = installations.find(item => item.catalogId === detail?.catalogId);
+  const checkUpdate = async () => {
+    if (!selectedInstallation || selectedInstallation.kind !== 'skill') return;
+    detailController.current?.abort();
+    const controller = new AbortController(); detailController.current = controller;
+    const token = ++detailRequest.current; setDetailLoading(true); setError(''); setNotice('');
+    try {
+      const latest = await readMarket<MarketDetail>('/market/detail?' + new URLSearchParams({ catalogId: selectedInstallation.catalogId, refresh: 'true' }), controller.signal);
+      if (detailRequest.current !== token || controller.signal.aborted) return;
+      setDetail(latest);
+      if (latest.version === selectedInstallation.version) setNotice(say('Already up to date', '已是最新版本'));
+    } catch (e) { if (detailRequest.current === token && !controller.signal.aborted) setError(failure((e as Error).message)); }
+    finally { if (detailRequest.current === token) setDetailLoading(false); }
+  };
   const mutate = async (operation: () => Promise<unknown>, success: string, clear = false) => {
     setBusy(true); setError(""); setNotice("");
     try { await operation(); await reload(); await onConfigSaved(); setNotice(success); setTargets([]); setMode("overview"); if (clear) closeDetail(); }
@@ -180,7 +193,7 @@ export default function MarketPage({ navigation, mobileNav, onMobileNav, onConfi
     if (Object.values(refs).some(ref => !/^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(ref)) || !selectedInstallation && detail.environment?.some(entry => entry.required && !refs[entry.name])) {
       setError(t("请填写有效的环境变量引用。")); return;
     }
-    await mutate(() => api("/market/install", "POST", { catalogId: detail.catalogId, version: detail.version, revision: snapshot.revision, targets, environment: refs }), t(selectedInstallation ? "已添加关联" : "已安装并关联"));
+    await mutate(() => api("/market/install", "POST", { catalogId: detail.catalogId, version: selectedInstallation?.version ?? detail.version, revision: snapshot.revision, targets, environment: refs }), t(selectedInstallation ? "已添加关联" : "已安装并关联"));
   };
   const allTargets = snapshot ? [...snapshot.config.agents.map(owner => ({ kind: "agent" as const, id: owner.id, name: owner.name, cli: owner.defaultCli })),
     ...snapshot.config.projects.map(owner => ({ kind: "project" as const, id: owner.id, name: owner.name, cli: "Project" }))] : [];
@@ -224,7 +237,7 @@ export default function MarketPage({ navigation, mobileNav, onMobileNav, onConfi
         <div className="market-grid">{list.map(item => {
           const installed = installations.find(entry => entry.catalogId === item.catalogId);
           return <Button type="button" key={item.catalogId} ref={selected?.catalogId === item.catalogId ? selectedCard : undefined} className={`market-card${selected?.catalogId === item.catalogId ? " selected" : ""}`} aria-label={`${t("查看详情")} ${item.name}`} disabled={busy} onClick={() => void select(item)}>
-            <span className={`market-capability-icon ${item.kind}`}><Icon name={capabilityIcon(item)} size={20}/></span>
+            <MarketCapabilityIcon item={item} size={20} />
             <span className="market-card-content"><span className="market-item-heading"><strong>{item.name}</strong><small>{kindName(item.kind)}{item.kinds?.length ? ` · ${item.kinds.map(kindName).join(" / ")}` : ""}</small></span><span className="market-description">{item.description||t("查看包内容以了解用途。")}</span><span className="market-item-meta"><span className="market-card-source">{sourceName(marketSourceOf(item.catalogId))}{item.publisher&&item.publisher!=="Anthropic"&&<small>{item.publisher}</small>}</span>{popularity(item)}{item.updatedAt!==undefined&&<span className="market-updated"><Icon name="clock" size={12}/>{updatedDate(item.updatedAt)}</span>}{tab==="installed"&&installed&&!isUiExtension(item.kind)&&item.kind!=="plugin"&&<span className="market-card-links">{t("关联 {count} 个位置",{count:installed.targets.length})}{installed.missing&&` · ${t("能力定义缺失")}`}</span>}</span></span>
             <span className="market-card-action">{t(installed?"已安装":"查看详情")}<Icon name={installed?"check":"chevronRight"} size={14}/></span>
           </Button>;
@@ -239,11 +252,19 @@ export default function MarketPage({ navigation, mobileNav, onMobileNav, onConfi
         {error && <p role="alert" className="error">{error}</p>}
         {notice && <p role="status" className="market-notice">{notice} · {t("已保存，实际生效状态请在对话的能力面板检查。")}</p>}
         {detailLoading ? <p>{t("正在读取详情…")}</p> : !detail ? <Button onClick={() => void select(selected)}>{t("重试")}</Button> : <>
-          <div className="market-drawer-summary"><span className={`market-capability-icon ${detail.kind}`}><Icon name={capabilityIcon(detail)} size={24} /></span><div>{mode==="install"&&<h3>{detail.name}</h3>}<p>{detail.description}</p></div></div>
+          <div className="market-drawer-summary"><MarketCapabilityIcon item={{ ...detail, skillIcon: detail.skillIcon ?? selected.skillIcon }} size={24} /><div>{mode==="install"&&<h3>{detail.name}</h3>}<p>{detail.description}</p></div></div>
           {popularity(detail, true)}
           <MetadataList items={[{label:t("版本"),value:<code title={detail.version}>{/^[a-f0-9]{40}$/.test(detail.version)?detail.version.slice(0,8):detail.version}</code>},...(detail.updatedAt!==undefined?[{label:t("更新时间"),value:<time title={new Date(detail.updatedAt).toISOString()}>{updatedDate(detail.updatedAt)}</time>}]:[]),{label:t("运行兼容性"),value:<span className="market-compatibility"><Icon name="info" size={14}/>{t(detail.unsupported?"暂不兼容":"待验证")}</span>}]}/>
           {detail.unsupported && <p className="error">{unsupportedReason(detail.unsupported)}</p>}
           {selectedInstallation?.missing && <p className="error">{t("能力定义已被移除，需重新安装。")}</p>}
+          {selectedInstallation?.kind === 'skill' && mode === 'overview' && <section className="market-installed-actions">
+            <MetadataList items={[{ label: say('Installed version', '已安装版本'), value: <code title={selectedInstallation.version}>{/^[a-f0-9]{40}$/.test(selectedInstallation.version) ? selectedInstallation.version.slice(0, 8) : selectedInstallation.version}</code> }]}/>
+            <Button disabled={busy || detailLoading || selectedInstallation.missing} onClick={() => void checkUpdate()}>{say('Check for updates', '检查更新')}</Button>
+            {detail.version !== selectedInstallation.version && <>
+              <p className="field-hint">{say('Upgrading replaces the complete Skill package and local edits, keeps all bindings and disabled selections, and takes effect on the next turn.', '升级会替换完整技能包及本地修改，保留所有关联和停用状态；下一轮执行生效。')}</p>
+              <Button disabled={busy || !snapshot || !!detail.unsupported || selectedInstallation.missing} onClick={() => void mutate(() => api(`/market/installed/${selectedInstallation.id}/upgrade`, 'POST', { version: detail.version, revision: snapshot!.revision }), say('Upgraded; bindings kept', '已升级，关联保持不变'))}>{say('Upgrade and keep bindings', '升级并保留关联')}</Button>
+            </>}
+          </section>}
           {mode !== "install" && detail.readme && <nav className="market-detail-tabs"><Button aria-pressed={mode === "overview"} onClick={() => setMode("overview")}>{t("概览")}</Button><Button aria-pressed={mode === "contents"} onClick={() => setMode("contents")}>{t("包内容")}</Button></nav>}
           {mode === "contents" && detail.readme ? <div className="market-readme"><MarkdownMessage text={detail.readme} /></div> : <>
             {mode === "install" && <fieldset disabled={busy || !!detail.unsupported || !snapshot || !!selectedInstallation?.missing} className="market-targets"><legend>{t("安装到哪里")}</legend>

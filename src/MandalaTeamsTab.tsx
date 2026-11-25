@@ -13,6 +13,8 @@ import StatusMark from './ui/StatusMark';
 import IdentityAvatar from './IdentityAvatar';
 import ExecutionChats,{ExecutionMarks} from './ExecutionChats';
 import {relativeTime,recentWindowMs} from './mandala-panel-time';
+import type {Automation} from '../shared/automations';
+import {scheduleText} from './MandalaSchedulesTab';
 
 export type AgentFilter='working'|'recent'|'all';
 export type AgentActivity={running:number;approvals:number;failed:number;unknown:number;chats:ConversationProgress[];lastActiveAt:string|null;working:boolean;recent:boolean;rank:number};
@@ -30,7 +32,11 @@ export function agentActivity(agentId:string,rows:readonly ConversationProgress[
 }
 export function matchesAgentFilter(activity:AgentActivity,filter:AgentFilter){return filter==='all'||(filter==='working'?activity.working:activity.recent);}
 
-export default function MandalaTeamsTab({config,agents,groups,rows,tasks,expandAll,onExpandAll,reference,drag,onOpen}:{config:Config;agents:Agent[];groups:Group[];rows:ConversationProgress[];tasks:Task[];expandAll:boolean;onExpandAll:()=>void;reference:(kind:ComposerReferenceItem['kind'],id:string,name:string)=>ReactNode;drag:Drag;onOpen:(path:string)=>void}){
+/** Enabled schedules first by next run, paused ones last. */
+export function upcomingRules(rules:readonly Automation[],agentId?:string){
+ return rules.filter(rule=>rule.enabled&&(!agentId||rule.agentId===agentId)).sort((a,b)=>(a.nextRunAt??'~').localeCompare(b.nextRunAt??'~')||a.name.localeCompare(b.name));
+}
+export default function MandalaTeamsTab({config,agents,groups,rows,tasks,rules=[],expandAll,onExpandAll,reference,drag,onOpen}:{config:Config;agents:Agent[];groups:Group[];rows:ConversationProgress[];tasks:Task[];rules?:Automation[];expandAll:boolean;onExpandAll:()=>void;reference:(kind:ComposerReferenceItem['kind'],id:string,name:string)=>ReactNode;drag:Drag;onOpen:(path:string)=>void}){
  const {text:say,language}=useLanguage(),english=language!=='zh-CN';
  const [filter,setFilter]=useState<AgentFilter>('all'),[search,setSearch]=useState('');
  const now=Date.now(),activity=new Map(agents.map(agent=>[agent.id,agentActivity(agent.id,rows,now)]));
@@ -66,6 +72,8 @@ export default function MandalaTeamsTab({config,agents,groups,rows,tasks,expandA
        <button type="button" className="mandala-team-agent-name" title={agent.name} onClick={()=>onOpen('/agents/'+agent.id)}>{agent.name}</button>
        {reference('agent',agent.id,agent.name)}
        <small className="mandala-team-agent-status">{(state.working||state.failed)?<StatusMark tone={tone} shape={state.running?'play':'alert'}/>:<i className="mandala-idle-dot" data-recent={state.recent||undefined} aria-hidden="true"/>}<span title={parts.join(' · ')}>{parts.join(' · ')}</span></small>
+       {(()=>{const own=upcomingRules(rules,agent.id),next=own[0];if(!next)return null;
+        return <button type="button" className="mandala-team-agent-schedule" title={next.name} onClick={()=>onOpen('/schedules?schedule='+next.id)}><Icon name="clock" size={13}/><span>{next.name} · {scheduleText(next.schedule,english)}{next.nextRunAt?' · '+say(`下次 ${relativeTime(next.nextRunAt,english,now)}`,`next ${relativeTime(next.nextRunAt,english,now)}`):''}{own.length>1?say(` 等 ${own.length} 个`,` +${own.length-1}`):''}</span></button>;})()}
        {state.chats.length>0&&<Disclosure className="task-work-related" open={expandAll} title={<ExecutionMarks rows={state.chats} tasks={tasks}/>} summaryLabel={say(`展开 ${agent.name} 的对话`,`Show ${agent.name}’s chats`)}><ExecutionChats rows={state.chats} tasks={tasks} config={config} onOpen={onOpen}/></Disclosure>}
       </div>;
      })}
@@ -73,5 +81,13 @@ export default function MandalaTeamsTab({config,agents,groups,rows,tasks,expandA
     {group.project&&<div className="mandala-team-heading">{reference('project',group.id,group.project.name)}</div>}
    </section>;
   })}
+  {(()=>{const next=upcomingRules(rules),paused=rules.filter(rule=>!rule.enabled).length;if(!rules.length)return null;
+   return <section className="mandala-team-schedules" aria-label={say('定时','Schedules')}>
+    <h3 className="mandala-collab-heading"><span>{say('定时','Schedules')}</span><span className="mandala-scope-count">{next.length}</span><span className="mandala-collab-heading-note">{say('按下次执行','By next run')}</span></h3>
+    {next.slice(0,3).map(rule=>{const owner=config.agents.find(agent=>agent.id===rule.agentId);return <button type="button" key={rule.id} className="mandala-team-schedule" title={rule.name} onClick={()=>onOpen('/schedules?schedule='+rule.id)}>
+     <Icon name="clock" size={14}/><span className="mandala-team-schedule-name">{rule.name}</span><span className="mandala-team-schedule-meta">{[owner?.name,rule.nextRunAt?relativeTime(rule.nextRunAt,english,now):scheduleText(rule.schedule,english)].filter(Boolean).join(' · ')}</span>
+    </button>;})}
+    <a className="mandala-all-tasks" href="/schedules" onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();onOpen('/schedules');}}>{next.length>3||paused?say(`打开全部定时（${rules.length}）`,`Open all schedules (${rules.length})`):say('打开全部定时','Open all schedules')}<Icon name="arrowRight" size={14}/></a>
+   </section>;})()}
  </>;
 }

@@ -1,15 +1,22 @@
 import { arabicEntry, arabicFiles, legacyArabicCatalog } from '../../fixtures/language-plugin';
-import { studioCatalog, pluginFiles } from '../../fixtures/data-plugin';
+import { studioCatalog, pluginFiles, planEntry, planFiles, handbookEntry, handbookFiles } from '../../fixtures/data-plugin';
 import { defaultPreferences, exportThemePackage } from '../../../src/themes';
 import { createHash } from "node:crypto";
 import { marketZip } from "../../fixtures/market-zip";
 export async function marketSource(url: string): Promise<Response> {
-  if (url === 'https://raw.githubusercontent.com/maktub-ai/mandala-plugins/main/catalog.json') return Response.json({ ...studioCatalog, items: [...studioCatalog.items, arabicEntry] });
+  if (url === 'https://raw.githubusercontent.com/maktub-ai/mandala-plugins/main/catalogs/v2/catalog.json') return Response.json({ ...studioCatalog, items: [...studioCatalog.items, arabicEntry, planEntry, handbookEntry] });
   if (url === 'https://raw.githubusercontent.com/example/plugins/main/catalog.json') return Response.json(studioCatalog);
   if (url === 'https://raw.githubusercontent.com/maktub-ai/mandala-plugins/main/catalogs/languages.json') return Response.json(legacyArabicCatalog);
   const languagePrefix = `https://raw.githubusercontent.com/maktub-ai/mandala-plugins/${arabicEntry.package.revision}/`;
   if (url.startsWith(languagePrefix)) return new Response(arabicFiles[url.slice(languagePrefix.length)] ?? '', { status: arabicFiles[url.slice(languagePrefix.length)] ? 200 : 404 });
   if (url.startsWith('https://raw.githubusercontent.com/example/studio/')) return new Response(pluginFiles[url.split('/').at(-1)!] ?? '', { status: pluginFiles[url.split('/').at(-1)!] ? 200 : 404 });
+  for (const [entry, files] of [[planEntry, planFiles], [handbookEntry, handbookFiles]] as const) {
+    const prefix = `https://raw.githubusercontent.com/${entry.package.repository}/${entry.package.revision}/`;
+    if (url.startsWith(prefix)) {
+      const raw = files[url.slice(prefix.length)];
+      return new Response(raw, { status: raw ? 200 : 404 });
+    }
+  }
   if (url.includes('mandala-themes/')) {
     const raw = exportThemePackage(defaultPreferences(), 'light');
     if (url.endsWith('/catalog.json')) return Response.json({ format: 'mandala-catalog', version: 1, kind: 'theme', items: [{ id: 'paper', name: 'Community Paper', description: 'Community extension fixture', version: '1.0.0', publisher: 'Example', minAppVersion: '0.1.1', package: { repository: 'maktub-ai/mandala-themes', revision: 'b'.repeat(40), path: 'packages/example.json', sha256: createHash('sha256').update(raw).digest('hex') } }] });

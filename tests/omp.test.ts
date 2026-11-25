@@ -344,7 +344,7 @@ it("uses native model effort choices and sends model, effort and image bytes bef
   await writeFile(imagePath, Buffer.from("synthetic image bytes"));
   await writeFile(join(dir, "omp-fixture.cjs"), `const { createInterface } = require("node:readline");
 const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
-const model = { provider: "sample", id: "model", name: "Model", reasoning: true, thinking: { efforts: ["low", "high"], defaultLevel: "low" } };
+const model = { provider: "sample", id: "model", contextWindow: 24576, name: "Model", reasoning: true, thinking: { efforts: ["low", "high"], defaultLevel: "low" } };
 send({ type: "ready" });
 createInterface({ input: process.stdin }).on("line", line => {
   require("node:fs").appendFileSync(${JSON.stringify(capture)}, line + "\\n");
@@ -357,6 +357,8 @@ createInterface({ input: process.stdin }).on("line", line => {
   let client;
   try {
     client = await startOmp({ cwd: dir, onEvent() {}, onApproval() {}, onExit() {} });
+    expect(await client.getContextWindow!('sample/model')).toBe(24576);
+    expect(await client.getContextWindow!('absent')).toBeUndefined();
     expect(await client.listModels()).toEqual([{ id: "sample/model", label: "sample / Model", isDefault: true, defaultReasoningEffort: "low", supportedReasoningEfforts: ["none", "low", "high"] }]);
     await client.startTurn("sample-session", "inspect", undefined, undefined, { model: "sample/model", effort: "high", images: [{ path: imagePath, mimeType: "image/png" }] });
     const requests = (await readFile(capture, "utf8")).trim().split("\n").map(line => JSON.parse(line));
@@ -413,4 +415,59 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
   expect(launch.instructions).toBe('Current system coordinator context');
   expect(launch.args.includes('--resume=saved-session')).toBe(!!resume);
  }finally{await client?.close();await rm(dir,{recursive:true,force:true});}
+});
+
+it("subscribes to OMP progress and keeps detached child output on its original turn", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "mandala-omp-subagents-"));
+  const executable = join(dir, "omp-fixture.cjs");
+  await writeFile(executable, `const send = event => console.log(JSON.stringify(event));
+let subscribed = false;
+send({type:"ready"});
+require("node:readline").createInterface({input:process.stdin}).on("line", line => {
+  const r = JSON.parse(line);
+  if (r.type === "set_subagent_subscription") subscribed = r.level === "progress";
+  send({type:"response", id:r.id, success:true, data:r.type === "get_state" ? {sessionFile:"sample"} : {}});
+  if (r.type !== "prompt") return;
+  send({type:"agent_start"});
+  if (subscribed) {
+    const frame = (type,payload) => send({type,payload});
+    const worker = {id:"reader", agent:"explore", index:0, parentToolCallId:"launch-1", detached:true};
+    if (r.message === "first") {
+      send({type:"tool_execution_start",toolName:"task",toolCallId:"launch-1"});
+      frame("subagent_lifecycle",{...worker,status:"started",description:"Verify release"});
+      frame("subagent_lifecycle",{...worker,id:"writer",index:1,status:"started"});
+      frame("subagent_progress",{...worker,task:"Verify release",progress:{id:"reader",status:"running",recentOutput:["second","first"]}});
+      frame("subagent_lifecycle",{...worker,id:"writer",index:1,status:"aborted"});
+      send({type:"tool_execution_end",toolName:"task",toolCallId:"launch-1",result:{details:{results:[
+        {id:"writer",agent:"explore",task:"Prepare release",exitCode:1,aborted:true,output:"Interrupted before writing"}
+      ]}}});
+    } else {
+      frame("subagent_lifecycle",{...worker,id:"unowned",parentToolCallId:"old",status:"started"});
+      frame("subagent_lifecycle",{...worker,parentToolCallId:"other",status:"failed"});
+      frame("subagent_lifecycle",{...worker,status:"completed"});
+    }
+  }
+  send({type:"agent_end",isTerminal:true,messages:[]});
+});
+`);
+  registerFixture(executable);
+  const events: {method?:string; params?:any}[] = [];
+  const client = await startOmp({cwd:dir,onEvent:e=>events.push(e),onApproval(){},onExit(){}});
+  try {
+    const first = await client.startTurn("sample", "first");
+    await expect.poll(() => events.filter(e=>e.method==="turn/completed").length).toBe(1);
+    await client.startTurn("sample", "next");
+    await expect.poll(() => events.filter(e=>e.method==="turn/completed").length).toBe(2);
+    const workers = events.filter(e => e.params.item?.type === "nativeSubagent");
+    expect(workers.some(e=>e.params.item.agentId==="unowned")).toBe(false);
+    const reader = workers.filter(e => e.params.item.agentId === "reader");
+    expect(reader.map(e=>e.params.item.status)).toEqual(["running","running","completed"]);
+    expect(new Set(reader.map(e=>e.params.item.id)).size).toBe(1);
+    expect(reader.every(e=>e.params.turnId === first)).toBe(true);
+    expect(reader.at(-1)?.params.item).toMatchObject({task:"Verify release",name:"explore",text:"first\nsecond"});
+    const writer = workers.filter(e=>e.params.item.agentId === "writer");
+    expect(writer.map(e=>e.params.item.status)).toEqual(["running","interrupted","interrupted"]);
+    expect(writer.at(-1)?.params.item.text).toBe("Interrupted before writing");
+    expect(events.some(e=>e.params.item?.type === "agentMessage")).toBe(false);
+  } finally { await client.close(); await rm(dir,{recursive:true,force:true}); }
 });

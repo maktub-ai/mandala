@@ -2,6 +2,8 @@
 
 适用于本仓库的功能、修复、重构、文档、配置与测试更改。详细流程见 [开发与运维说明](docs/development.md#开发审阅与本机发布) 和 [协作与发布流程](docs/collaboration.md)。
 
+产品主线是 `github.com/maktub-ai/mandala` 的 `main`。交付前核对 origin 的拉取和推送地址；旧的 `maktub-ai/mandala-archive` 仅供查阅历史。
+
 1. 每个新任务用 `npm run task:start -- <任务名>` 开始：它获取 `origin/main`，快进本地 `main`，再从该提交创建 `.development/<任务名>` worktree 和 `work/<任务名>` 分支。动手前在任务工作树执行 `npm run task:check`，失败即停止，按提示处理后再继续；交付说明记录它输出的 `origin/main` SHA。根目录工作树始终停在干净的 `main` 上，不在根目录直接开发；无法使用独立 worktree 的环境才在根目录开任务分支，并以 `--allow-root-branch` 运行检查。不得从旧任务分支、旧 worktree 的 HEAD 或未核实的默认目录开始新任务；不得复用已交付的任务分支。保留他人改动，不用 reset、强推或覆盖工作区解决分歧。
 2. 精准修改并完成与改动相称的验证和审阅。合并前再次获取最新 `origin/main`；主线若已前进，先将其合入任务分支，再验证最终结果。交付时记录任务起点的 main SHA 与最终提交。
 3. 验证完成后，默认提交、合并到本地 `main`，并推送 `origin/main`，读取远端 SHA 确认一致。合并与推送已有项目默认授权，无需再次询问。只停留在任务分支、本地提交或本地 `main` 不算交付完成。

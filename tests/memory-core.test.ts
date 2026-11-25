@@ -30,6 +30,25 @@ function turn(s:ReturnType<typeof setup>,text='请记住：以后用中文回答
  s.store.appendEvent(s.chat.id,'status',{status:'idle'},'2026-10-04T00:00:00Z');return event;
 }
 function capture(s:ReturnType<typeof setup>,trigger:'idle'|'completed'|'explicit'='completed') {return s.memory.captureConversation(p,{collectionId:s.collection.id,conversationId:s.chat.id,trigger});}
+test('upgrades the singleton source counter and retries missed turns without duplicating evidence',()=>{
+ const s=setup();turn(s);const original=capture(s).sources[0];
+ const db=s.store.database;
+ db.exec(`DROP TABLE memory_source_changes;
+  CREATE TABLE memory_source_changes(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL);
+  INSERT INTO memory_source_changes VALUES(1,10);`);
+ for(const action of ['insert','update','delete'])db.exec(`CREATE TRIGGER memory_source_${action} AFTER ${action} ON memory_sources
+  BEGIN UPDATE memory_source_changes SET revision=revision+1 WHERE id=1; END;`);
+ // An earlier upgrade already installed the per-source triggers against the old table.
+ for(let i=0;i<6;i++)turn(s,'Synthetic missed turn '+i);
+ expect(()=>capture(s)).toThrow('Storage transaction failed');
+ const reopened={...s,memory:createMemoryStore(s.store,s.memory.options)};
+ const recovered=capture(reopened);
+ expect(recovered.sources).toHaveLength(7);
+ expect(recovered.sources[0]).toEqual(original);
+ const restarted={...s,memory:createMemoryStore(s.store,s.memory.options)};
+ expect(capture(restarted)).toEqual(recovered);
+ expect(db.prepare('SELECT COUNT(*) AS n FROM memory_source_revisions').get()?.n).toBe(7);
+});
 test('server captured same-millisecond complete turns persist and deduplicate; preference is searchable in Chinese',async()=>{
  const s=setup();turn(s);turn(s,'请记住：报告需要列出来源');const first=capture(s);expect(first.sources).toHaveLength(2);expect(capture(s).jobs.map(j=>j.id)).toEqual(first.jobs.map(j=>j.id));
  await s.pipeline.runNext('worker');expect(s.recall.search(agent,{projectId:'p',query:'中文回答'}).items.some(i=>i.text.includes('中文回答'))).toBe(true);

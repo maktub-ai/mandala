@@ -37,6 +37,7 @@ export function createConversationProgress(store:Store,manager:SessionManager){
  const activity=db.prepare(`SELECT MAX(id) AS cursor,
   MAX(CASE WHEN kind='user' AND json_extract(data,'$.agentMessage') IS NULL AND json_extract(data,'$.task') IS NULL THEN id ELSE 0 END) AS user_cursor,
   MAX(CASE WHEN kind IN ('user','text','status','approval','error') THEN createdAt END) AS at,
+  MAX(CASE WHEN kind='user' AND json_extract(data,'$.agentMessage') IS NULL AND json_extract(data,'$.task') IS NULL THEN createdAt END) AS direct_at,
   MAX(CASE WHEN kind IN ('user','text') OR kind='tool' AND json_extract(data,'$.method')='item/completed' AND json_extract(data,'$.params.item.type')='agentMessage'
    OR kind='metadata' AND json_extract(data,'$.agentMessage.direction')='reply' AND json_extract(data,'$.agentMessage.state') IN ('succeeded','failed') AND json_extract(data,'$.agentMessage.reply') IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM events prior WHERE prior.conversationId=events.conversationId AND prior.superseded=0 AND prior.id<events.id AND prior.kind='metadata'
@@ -46,6 +47,8 @@ export function createConversationProgress(store:Store,manager:SessionManager){
   FROM events WHERE conversationId=? AND superseded=0`);
  const inputStates=db.prepare("SELECT MAX(state='unknown') AS unknown_input,MAX(state IN ('queued','running')) AS pending_input FROM task_user_inputs WHERE conversation_id=? AND state IN ('queued','running','unknown')");
  const preview=db.prepare("SELECT SUBSTR(json_extract(data,'$.text'),1,240) AS text FROM events WHERE conversationId=? AND superseded=0 AND kind='user' AND json_extract(data,'$.agentMessage') IS NULL AND json_extract(data,'$.task') IS NULL ORDER BY id DESC LIMIT 1");
+ // Only a handoff from a Mandala primary chat makes a chat a collaboration of that chat.
+ const handoffs=db.prepare('SELECT source_conversation_id,state,reply_state,created_at FROM agent_messages WHERE target_conversation_id=? ORDER BY created_at DESC,rowid DESC');
  const explicitProgress=db.prepare("SELECT id,data,createdAt FROM events WHERE conversationId=? AND kind='progress' AND superseded=0 ORDER BY id DESC LIMIT 1");
  const turnHead=db.prepare("SELECT id,data FROM events WHERE conversationId=? AND superseded=0 AND (kind='user' OR kind='metadata' AND json_extract(data,'$.execution')='started') ORDER BY id DESC LIMIT 1");
  const latestOutputs=new Map<string,{revision:number;status:string;value:LatestProgress|null}>();
@@ -53,8 +56,8 @@ export function createConversationProgress(store:Store,manager:SessionManager){
  const activityCache=new Map<string,{revision:number;events:NonNullable<ReturnType<typeof activity.get>>}>();
  const read=(id:string)=>{
   const revision=Number(eventRevision.get(id)?.revision??0),cached=activityCache.get(id);
-  if(cached?.revision===revision)return cached;
-  const value={revision,events:activity.get(id)!};activityCache.set(id,value);return value;
+  if(!db.isTransaction&&cached?.revision===revision)return cached;
+  const value={revision,events:activity.get(id)!};if(!db.isTransaction)activityCache.set(id,value);return value;
  };
  return {
   list({now=new Date().toISOString(),windowMinutes=360}:{now?:string;windowMinutes?:number}={}):ConversationProgress[]{
@@ -82,9 +85,11 @@ export function createConversationProgress(store:Store,manager:SessionManager){
     const taskIds=executionTask?[executionTask.id]:[];
     const related=new Set<string>();
     for(const m of db.prepare('SELECT source_conversation_id,target_conversation_id FROM agent_messages WHERE source_conversation_id=? OR target_conversation_id=?').all(chat.id,chat.id))related.add((m.source_conversation_id===chat.id?m.target_conversation_id:m.source_conversation_id) as string);
+    const handoffRow=(handoffs.all(chat.id) as {source_conversation_id:string;state:string;reply_state:string;created_at:string}[]).find(m=>store.getConversation(m.source_conversation_id)?.purpose==='mandala-main');
+    const handoff:ConversationProgress['handoff']=handoffRow?{sourceConversationId:handoffRow.source_conversation_id,state:handoffRow.state as NonNullable<ConversationProgress['handoff']>['state'],replyState:handoffRow.reply_state as NonNullable<ConversationProgress['handoff']>['replyState'],createdAt:handoffRow.created_at}:null;
     const relatedConversationIds=[...related].filter(id=>{try{manager.authorizeConversationRead(id);return true;}catch{return false;}});
     const cached=latestOutputs.get(chat.id);
-    let latestProgress=cached?.revision===revision&&cached.status===chat.status?cached.value:undefined;
+    let latestProgress=!db.isTransaction&&cached?.revision===revision&&cached.status===chat.status?cached.value:undefined;
     if(latestProgress===undefined){
      const report=explicitProgress.get(chat.id);
      const data=report?JSON.parse(report.data as string) as {text:string;source:'cli';runId:string;steps?:import('../shared/conversation-progress').ProgressStep[]}:undefined;
@@ -94,13 +99,13 @@ export function createConversationProgress(store:Store,manager:SessionManager){
      latestProgress=turn?presentTurnText(turn,chat.status).latestProgress:null;
      if(report&&data&&(!runId||data.runId===runId)&&(!latestProgress||Number(report.id)>latestProgress.sourceEventId))latestProgress={text:data.text,updatedAt:report.createdAt as string,source:data.source,runId:data.runId,sourceEventId:Number(report.id),...(data.steps?{steps:data.steps}:{}),historical:false};
      if(latestProgress&&!latestProgress.runId)latestProgress.runId=runId??'';
-     latestOutputs.set(chat.id,{revision,status:chat.status,value:latestProgress});
+     if(!db.isTransaction)latestOutputs.set(chat.id,{revision,status:chat.status,value:latestProgress});
     }
     if(latestProgress)latestProgress={...latestProgress};
     if(latestProgress)latestProgress.historical=!['running','approval'].includes(chat.status)||!manager.executionId(chat.id)||manager.executionId(chat.id)!==latestProgress.runId;
-    rows.push({executionStatus:chat.status??null,latestProgress,id:chat.id,title:chat.title,agentId:chat.agentId,projectId:chat.projectId,cli:chat.cli,state,reopenState,
+    rows.push({executionStatus:chat.status??null,latestProgress,id:chat.id,title:chat.title,agentId:chat.agentId,projectId:chat.projectId,attributedProjectId:chat.attributedProjectId,cli:chat.cli,state,reopenState,
      live,active:state!=='completed'&&(live||withinWindow),withinWindow,activityAt:at,
-     requestPreview:preview.get(chat.id)?.text as string??null,completedAt:completed?marker!.completed_at as string:null,hasNewActivity:completed&&Number(events.reply_cursor)>Number(marker!.event_cursor),taskIds,relatedConversationIds});
+     requestPreview:preview.get(chat.id)?.text as string??null,completedAt:completed?marker!.completed_at as string:null,hasNewActivity:completed&&Number(events.reply_cursor)>Number(marker!.event_cursor),taskIds,relatedConversationIds,handoff,directUserAt:events.direct_at as string??null});
    }
    return rows.sort((a,b)=>b.activityAt.localeCompare(a.activityAt)||a.id.localeCompare(b.id));
   },

@@ -56,12 +56,11 @@ test('list and Kanban keep task relationships, filters and a shared detail witho
 test('Mandala task panel preserves chat scope and reference actions',async({page,request})=>{
  const fixture=await(await request.post('/__test__/mandala-panels')).json();await page.goto('/mandala');
  const panel=page.locator('.mandala-panels'),toggle=page.getByRole('button',{name:/^(展开右侧栏|收起右侧栏)$/});await expect(toggle).toBeVisible();if(await toggle.getAttribute('aria-label')==='展开右侧栏')await toggle.click();await expect(panel).toBeVisible();
- await expect(panel.getByRole('button',{name:/^本对话 /})).toHaveAttribute('aria-pressed','true');
- const expand=panel.getByRole('button',{name:'展开已完成任务',exact:true});if(await expand.count())await expand.click();
+ await expect(panel.getByRole('button',{name:/^本对话 /})).toHaveCount(0);
  await expect(panel.getByRole('button',{name:/^引用 接通跨项目/})).toBeEnabled();
- const title=panel.locator('.task-work-heading > a').filter({hasText:'Long operational goal'});await expect(title).toHaveCount(1);expect(await title.evaluate(node=>node.getBoundingClientRect().height<=2*parseFloat(getComputedStyle(node).lineHeight)+1)).toBe(true);
- await expect(panel.locator('.progress-groups')).toBeVisible();
- await panel.getByRole('textbox',{name:'搜索跟进目标',exact:true}).fill('不存在的目标');await expect(panel.locator('.task-work-card')).toHaveCount(0);
- await panel.getByRole('textbox',{name:'搜索跟进目标',exact:true}).fill('Long operational goal');await expect(panel.locator('.task-work-card')).toHaveCount(1);
+ const title=panel.locator('.mandala-collab-task-title').filter({hasText:'Long operational goal'});await expect(title).toHaveCount(1);expect(await title.evaluate(node=>node.getBoundingClientRect().height<=2*parseFloat(getComputedStyle(node).lineHeight)+1)).toBe(true);
+ await expect(panel.locator('.mandala-collab')).toBeVisible();
+ await panel.getByRole('textbox',{name:'搜索协作',exact:true}).fill('不存在的目标');await expect(panel.locator('.mandala-collab-task')).toHaveCount(0);
+ await panel.getByRole('textbox',{name:'搜索协作',exact:true}).fill('Long operational goal');await expect(panel.locator('.mandala-collab-task')).toHaveCount(1);
  expect((await(await request.get('/api/mandala/goals')).json()).some((goal:{taskId:string})=>goal.taskId===fixture.goalId)).toBe(true);
 });

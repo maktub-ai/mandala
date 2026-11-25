@@ -19,7 +19,7 @@ async function fixture(repository = 'maktub-ai/mandala-language-packs') {
   const files = { ...arabicFiles }, requests: string[] = [];
   const market = createMarket(home, async url => {
     requests.push(url);
-    if (url === 'https://raw.githubusercontent.com/maktub-ai/mandala-plugins/main/catalog.json') return Response.json({ format: 'mandala-plugin-catalog', version: 1, items: [arabicEntry] });
+    if (url === 'https://raw.githubusercontent.com/maktub-ai/mandala-plugins/main/catalogs/v2/catalog.json') return Response.json({ format: 'mandala-plugin-catalog', version: 1, items: [arabicEntry] });
     if (url === 'https://raw.githubusercontent.com/maktub-ai/mandala-plugins/main/catalogs/languages.json') return Response.json(legacyArabicCatalog);
     const prefix = `https://raw.githubusercontent.com/maktub-ai/mandala-plugins/${arabicEntry.package.revision}/`;
     if (url.startsWith(prefix) && files[url.slice(prefix.length)]) return new Response(files[url.slice(prefix.length)]);

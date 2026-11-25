@@ -42,7 +42,7 @@ export default function AppNavigation({ active, disabled = false, library, modul
   const items = orderedSidebarItems(moduleOrder);
   const pinned = items.filter(item => modulePinned(item, modulePins));
   const unpinned = items.filter(item => item.id !== 'settings' && !modulePinned(item, modulePins));
-  const hiddenCurrent = unpinned.some(item => item.id === current);
+  const hiddenCurrent = items.some(item => item.id === current && !modulePinned(item, modulePins));
   const link = (item: typeof items[number]) => <a className="sidebar-destination" key={item.id} href={item.href} data-area={item.id} aria-disabled={disabled || undefined}
     aria-current={current === item.id ? 'page' : undefined} onClick={event => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;

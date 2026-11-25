@@ -111,3 +111,10 @@ section.operation-card > .operation-receipt { padding:0; margin:0; border:0; bac
 .operation-flat > .operation-card-body { font-size:var(--type-body); line-height:1.6; color:var(--text); }
 .operation-card[data-tone=warning]:has(> .operation-flat) { border-color:color-mix(in srgb,var(--warning) 45%,var(--border)); }
 @media(max-width:600px) { .operation-flat-head { padding:12px 12px 8px; gap:8px; } .operation-flat > :is(.operation-card-body,.operation-card-footer) { padding-inline:12px; } }
+
+.blueprint-route-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 12px; margin: 12px 0 16px; }
+.blueprint-route-fields label { display: grid; gap: 5px; min-width: 0; }
+.operation-message-actions > .operation-focus-link { display:inline-flex; align-items:center; min-height:32px; padding:0; border:0; background:none; color:var(--link); font:inherit; font-size:var(--type-meta); cursor:pointer; text-underline-offset:3px; }
+.operation-message-actions > .operation-focus-link:hover { text-decoration:underline; }
+.operation-message-actions > .operation-focus-link:focus-visible { outline:2px solid var(--focus); outline-offset:3px; border-radius:var(--control-radius); }
+@media (pointer: coarse) { .operation-message-actions > .operation-focus-link { min-height:44px; } }

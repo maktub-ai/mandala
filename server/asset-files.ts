@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, posix, relative, resolve } from "node:path";
 import { fileMediaType } from '../shared/file-types';
 import type { ManifestFile, StagedManifest, UploadSource } from "../shared/assets";
 import { DomainError, type Principal } from "../shared/workspace-contracts";
+import { SKILL_PACKAGE_FILE_LIMIT } from './skill-package';
 const FILE_LIMIT = 100 * 1024 * 1024, TOTAL_LIMIT = 250 * 1024 * 1024;
 const invalid = (message: string) => new DomainError("invalid_upload", 422, message);
 type StagingRecord = { principal: Principal; runId: string | null; manifest: StagedManifest };
@@ -58,9 +59,10 @@ export function createAssetFiles(home: string, hooks: FaultHooks = {}) {
       if (Date.parse(record.manifest.expiresAt) <= Date.now()) throw new DomainError("staging_expired", 409, "Staging lease expired");
       return record.manifest;
     },
-    async stageFiles(principal: Principal, runId: string | null, files: UploadSource[]): Promise<StagedManifest> {
+    async stageFiles(principal: Principal, runId: string | null, files: UploadSource[], kind?: 'skill'): Promise<StagedManifest> {
       if (!principal.userId || (principal.runId !== undefined && principal.runId !== runId)) throw invalid("Principal Run mismatch");
-      if (files.length > 100) throw invalid("Submission limit is 100 files");
+      const fileLimit = kind === 'skill' ? SKILL_PACKAGE_FILE_LIMIT : 100;
+      if (files.length > fileLimit) throw invalid(`Submission limit is ${fileLimit} files`);
       const names = files.map(file => safePath(file.manifestPath));
       if (new Set(names).size !== names.length) throw invalid("Duplicate normalized manifest path");
       const sources = [];

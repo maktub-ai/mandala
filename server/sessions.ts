@@ -1,4 +1,9 @@
 import {diagnoseRuntimePrerequisites} from './native-spawn';
+import {createBlueprintService} from './blueprint';
+import {blueprintBindings,canPublishBlueprint} from './blueprint-bindings';
+import {createBlueprintRuntime,type WorkerBlueprint} from './blueprint-runtime';
+import {mayReadBlueprint,readableBlueprints,taskBlueprintFacts} from './blueprint-report';
+import {AsyncLocalStorage} from 'node:async_hooks';
 import { createConversationApprovals, type ConversationApprovalScope } from './conversation-approvals';
 import { supportsConversationApproval } from '../shared/approvals';
 import {isRoutingSpecialist,mandalaDirectory,mandalaRoutingDirectory} from './mandala-directory';
@@ -6,13 +11,14 @@ import {boundTaskCriteria} from './task-criteria';
 import {hasOperationOutcome,projectOperationOutcome} from './operation-results';
 import {isDeepStrictEqual} from 'node:util';
 import type {OperationResult} from '../shared/operation-results';
+import {conversationProjectResolver} from './project-attribution';
 import {discoverWorkDirectories,type WorkDiscoveryInput} from './work-directory-discovery';
 import {discoverTeamCapabilities,type TeamCapabilityInput} from './team-capability-discovery';
 import {mandalaPlanningSkill} from './mandala-planning-skill';
-import {createMandalaContinuity} from './mandala-continuity';
-import {isHumanInput} from '../shared/tasks';
+import {createMandalaContinuity,isContextRejection,hasMandalaTerminal} from './mandala-continuity';
+import {isHumanInput,sourceExecutionConversation} from '../shared/tasks';
 import {createMandalaCoordination} from './mandala-coordination';
-import { mandalaInstructions, mandalaContinuity, mandalaContextBoundary, mandalaWriterBoundary, parkPriorWriterReceipts } from "./mandala";
+import { mandalaInstructions, mandalaHandoffBudget, mandalaContextBoundary, mandalaWriterBoundary, parkPriorWriterReceipts } from "./mandala";
 import { createCodexWriterRecovery } from './codex-writer-recovery';
 import type { CodexWriterRecovery, CodexWriterRecoveryAction } from '../shared/codex-writer-recovery';
 import { effectiveResponseStyle } from "../shared/response-style";
@@ -48,7 +54,7 @@ import { validateEffort, type NativeAttachment, type ReasoningEffort } from "../
 import { createTaskResources, type DirectoryOwner } from './task-resources';
 import {createTaskRecovery, retainNativeOccupancy, canReleaseNativeOccupancy, hasUnprovenNativeOccupancy, type RecoveryReport} from './task-recovery';
 import type {AutomationRun} from '../shared/automations';
-import { questionResponse, projectQuestionAnswer, hasBlockingApprovals } from "../shared/questions";
+import { nativeQuestions, questionResponse, projectQuestionAnswer, firstBlockingApproval, hasBlockingApprovals } from "../shared/questions";
 import { asyncQuestions, asyncQuestionReply, initializeAsyncQuestions } from './async-questions';
 import { nativeApprovalResponse, type ApprovalDecision } from "../shared/approvals";
 import { createAttachmentAssets } from "./attachment-assets";
@@ -108,6 +114,7 @@ export interface SessionManager {
   maintainMandalaContext():Promise<void>;
   writerRecoveryStatus(id: string): CodexWriterRecovery | null;
   recoverCodexWriter(id: string, conflictId: number, action: CodexWriterRecoveryAction): Promise<CodexWriterRecovery>;
+  compactMandalaContext(id:string):Promise<{status:'completed'|'noop'|'fallback'}>;
   coordination: ReturnType<typeof createMandalaCoordination>;
   setAutomationService(service:import('./automations').Automations):void;
   reconcileRuns(hostId:string):Promise<RecoveryReport>;
@@ -137,12 +144,13 @@ export interface SessionManager {
   retryAgentMessage(id:string,attemptId:string):Promise<AgentMessage>;
   createTask(sourceId: string, targetAgentId: string, request: string, targetId?: string, options?: { policy?: "notify" | "resume"; commandKey?: string; boundInvocationId?: string }): Promise<Task>;
   enqueueUserInput(id: string, text: string, commandKey: string, attachments?: string[], references?: ComposerReferenceSelection[]): QueuedInput;
+  interject(id:string,text:string,commandKey:string,attachments?:string[],references?:ComposerReferenceSelection[]):QueuedInput;
   enqueueTelegramInput(id:string,text:string,requestId:string,attachments:string[]):QueuedInput;
   listComposerReferences(id?: string, preview?: ComposerReferencePreview): Promise<ComposerReferenceItem[]>;
   listUserInputs(id: string): QueuedInput[];
   cancelUserInput(id: string): QueuedInput;
   interruptAndSend(id:string,text:string,commandKey:string,expectedExecutionId:string,attachments?:string[],references?:ComposerReferenceSelection[]):Promise<QueuedInput>;
-  sendQueuedInput(id:string,inputId:string,expectedExecutionId?:string|null):Promise<void>;
+  sendQueuedInput(id:string,inputId:string,expectedExecutionId?:string|null,interjection?:boolean):Promise<void>;
   isDedicatedConversation(id: string): boolean;
   authorizeConversationRead(id:string):void;
   authorizeConversationReference(id:string,recipientAgentId:string):void;
@@ -182,7 +190,7 @@ export function createSessionManager(
   onSettled?: (id: string, round?: TaskProgressRound) => void,
   onMessage?: (id: string) => void,
   memoryRuntime?: MemoryRuntime,
-  skillOptions?: { generate?:SystemGenerator; wikiGenerate?:SystemGenerator },
+  skillOptions?: { generate?:SystemGenerator; wikiGenerate?:SystemGenerator; routeGenerate?:SystemGenerator },
 ): SessionManager {
   const skillTools = home ? createSkillService(home, store) : undefined;
   const skillCatalog=home?createSkillCatalog(home,store):undefined;
@@ -214,10 +222,13 @@ export function createSessionManager(
       toolToken?: string;
       businessCli?: BusinessCliRuntime;
       codeGraphScope?: CodeGraphReadScope;
+      blueprintScope?:WorkerBlueprint;
+      blueprintReadable?:Map<string,string>;
       artifacts?: ReturnType<typeof createRunArtifacts>;
       loadedSignature?: string;
       loadedToolToken?: string;
       loadedRuntimeSignature?: string;
+      attributionChecked?: boolean;
       loadedInstructions?: string;
       loadedMemoryCount?: number;
       generation: number;
@@ -231,7 +242,8 @@ export function createSessionManager(
   const routes = new Map<string, () => NonNullable<Run["routing"]>>();
   let automationService:import('./automations').Automations|undefined;
   const tools = new Map<string, { conversationId: string; invocationId: string; projectId:string; agentId:string }>();
-  const revokeBusinessCli = (runtime: { toolToken?: string; businessCli?: BusinessCliRuntime }) => {
+  const revokeBusinessCli = (runtime: { toolToken?: string; businessCli?: BusinessCliRuntime; blueprintScope?:WorkerBlueprint }) => {
+    if(runtime.blueprintScope)blueprints.finish(runtime.blueprintScope.invocationId,'unknown');
     if (runtime.toolToken) tools.delete(runtime.toolToken);
     runtime.businessCli?.dispose();
     runtime.businessCli = undefined;
@@ -246,6 +258,7 @@ export function createSessionManager(
   initializeAsyncQuestions(store);
   const queuePumps = new Set<Promise<void>>();
   const queueStarts = new Map<string,string>();
+  const interjections = new Set<string>();
   const backgroundSends = new Map<string,{inputId:string;timer:ReturnType<typeof setTimeout>}>();
   const queuedSendPending = (id:string) => queueStarts.has(id)||backgroundSends.has(id);
   const queuedSendUnavailable = (id:string,inputId='') => queuedSendPending(id) ||
@@ -316,19 +329,39 @@ export function createSessionManager(
     }
     return refs;
   };
-  const tasks = createTasks(store, { assets, async authorizeObservation(p) {
+  const projectAccess = new AsyncLocalStorage<{agentId:string; projects:Set<string> | null}>();
+  const bindProjectMembership = (config:Config) => {
+    const scope=projectAccess.getStore();
+    if (!scope?.projects) return;
+    scope.projects.clear();
+    if (!config.agents.some(agent=>agent.id===scope.agentId && !agent.archivedAt)) return;
+    for (const project of config.projects) {
+      if (!project.archivedAt && project.agentIds.includes(scope.agentId)) scope.projects.add(project.id);
+    }
+  };
+  const plans=createBlueprintService(home);
+  const blueprints=createBlueprintRuntime(store,id=>blueprintBindings(home)?.plans.get(id),(...args)=>plans.writeRecord(...args),(id,agent,explicit)=>canPublishBlueprint(home,id,agent,explicit),async(id,plan)=>(await plans.readSummary(id,plan)).modules.map(m=>m.lane));
+  const tasks = createTasks(store, { assets, onCompleted(task){
+    if(blueprints.complete(task))queueMicrotask(()=>{if(!closed)void blueprints.flush().catch(()=>{});});
+  }, canReadProject(p,id) {
+    const scope=projectAccess.getStore();
+    return !!scope && scope.agentId===p.agentId && !!scope.projects?.has(id);
+  }, async authorizeObservation(p) {
     const config=await loadConfig();if(p.userId!==store.ownerUserId||!isSystemAgent(config,p.agentId))throw new DomainError('forbidden',403,'System observation unavailable');
-  }, authorizeConversation(p,id) {
+    bindProjectMembership(config);
+  }, authorizeConversation(p,id,purpose) {
     const c=chat(id);if(p.agentId!==undefined&&p.agentId!==c.agentId)throw new DomainError('forbidden',403,'Conversation unavailable to this Agent');
     authorizeConversationRuns(store.listConversationTaskRuns(id),p.agentId);
-    if(p.agentId!==undefined)authorizeReceiptHistory(id,p.agentId);
-    if(memoryRuntime)memoryRuntime.memory.history(p,{projectId:c.projectId||null,items:memoryHistoryReferences(store,id)});
+    // Linking a task back to its origin uses the current context. Reading history still checks every receipt.
+    const after=purpose==='origin'&&p.agentId!==undefined?mandalaContextBoundary(store,id):0;
+    if(p.agentId!==undefined)authorizeReceiptHistory(id,p.agentId,after);
+    if(memoryRuntime)memoryRuntime.memory.history(p,{projectId:c.projectId||null,items:memoryHistoryReferences(store,id,after)});
   }, resolve: (_p, task) => {
     const selected = prepared.get(task.id);
     if (!selected) throw new Error("Task context preparation required");
     return selected;
   } });
-  const coordination=createMandalaCoordination({home,store,tasks});
+  const coordination=createMandalaCoordination({home,store,tasks,routeGenerate:skillOptions?.routeGenerate});
   let closed = false;
   let closing: Promise<void> | undefined;
   const initializations = new Set<Promise<ExecutionClient>>();
@@ -391,11 +424,11 @@ export function createSessionManager(
   };
   const state = (id: string, status: Conversation["status"], diagnostic?:string, reason?:"user_stopped") => {
     store.updateConversation(id, { status });
-    appendEvent(id, "status", { status, ...(reason ? {reason} : {}) });
+    appendEvent(id, "status", { status, ...(reason ? {reason,...(chat(id).purpose==="mandala-main"?{userStopped:true}:{})} : {}) });
     const runtime=live.get(id),invocation=runtime?.invocation;
     if(['idle','interrupted','error'].includes(status)&&runtime)runtime.admitted=false;
     if(['idle','interrupted','error'].includes(status))runtime?.usage?.finish(status==='idle'?'completed':status==='error'?'failed':'interrupted',undefined,diagnostic);
-    if(runtime?.durableRun&&invocation?.nativeTurnId&&(status==='approval'||status==='running'))tasks.setRunApproval({runId:runtime.durableRun.id,hostId:'local',nativeSessionId:invocation.nativeSessionId,nativeTurnId:invocation.nativeTurnId},status==='approval');
+    if(runtime?.durableRun&&invocation?.nativeTurnId&&(status==='approval'||status==='running'))tasks.setRunApproval({runId:runtime.durableRun.id,hostId:'local',nativeSessionId:invocation.nativeSessionId,nativeTurnId:invocation.nativeTurnId},status==='approval',firstBlockingApproval(runtime.approvals.values())?.id);
     if (status === "idle") queueMicrotask(() => { void pump(id); });
   };
   const appendEvent = (id: string, kind: EventKind, data: unknown) => store.appendEvent(id, kind, {
@@ -442,8 +475,9 @@ export function createSessionManager(
       appendEvent(id,"metadata",{contextSnapshotId:run.contextSnapshotId!,actualUse:"acknowledged",sourceVersions:live.get(id)?.sourceVersions ?? [],nativeVisibility:"partial"} satisfies RunContextTrace);
     const runtime=live.get(id);
     for(const [key,approval] of runtime?.approvals??[]){const p=approval.params as {threadId?:string;turnId?:string};if(p.threadId!==nativeSessionId||p.turnId!=null&&p.turnId!==nativeTurnId)runtime!.approvals.delete(key);}
-    if(chat(id).status==='approval'&&!hasBlockingApprovals(runtime?.approvals.values()??[]))state(id,'running');
-    tasks.setRunApproval({runId:run.id,hostId:'local',nativeSessionId,nativeTurnId},hasBlockingApprovals(runtime?.approvals.values()??[]));
+    const approval=firstBlockingApproval(runtime?.approvals.values()??[]);
+    if(chat(id).status==='approval'&&!approval)state(id,'running');
+    tasks.setRunApproval({runId:run.id,hostId:'local',nativeSessionId,nativeTurnId},Boolean(approval),approval?.id);
   };
   const inquiryTaskSource=(input:QueuedInput):string|null=>input.agentMessage?.direction==='reply'?
     store.database.prepare('SELECT r.id FROM agent_messages m JOIN task_runs r ON r.id=m.source_invocation_id WHERE m.id=? AND m.source_conversation_id=?').get(input.agentMessage.id,input.conversationId)?.id as string??null:null;
@@ -540,12 +574,18 @@ export function createSessionManager(
       return true;
     }catch{return false;}
   }
+  const assertPrimaryMessageTarget=(sourceId:string,targetId:string)=>{
+    const prior=messages.outgoingRoutes(sourceId,mandalaContextBoundary(store,sourceId),{conversationId:targetId});
+    if(!prior.length&&!coordination.delegatedChats(sourceId,{conversationId:targetId}).length)
+      throw new DomainError('forbidden',403,'Follow-up destination unavailable. Confirm the intended conversation before retrying. Omitting targetConversationId would open a new chat.');
+  };
   const validateMessageInput=async(input:QueuedInput)=>{
     const marker=input.agentMessage;if(!marker)return;
     const message=messages.get(marker.id),source=chat(message.sourceConversationId),target=chat(message.targetConversationId);
     const config=await loadConfig(),project=config.projects.find(p=>p.id===source.projectId);
     if(source.purpose==='mandala-main')assertPrimaryInquiryScope(config,source,target.agentId,target.projectId);
     else if(!project||!project.agentIds.includes(source.agentId)&&!isSystemAgent(config,source.agentId)||!project.agentIds.includes(target.agentId)&&!isSystemAgent(config,target.agentId)||target.projectId!==source.projectId)throw new DomainError('forbidden',403,'Message context unavailable');
+    if(source.purpose==='mandala-main'&&marker.direction==='request')assertPrimaryMessageTarget(source.id,target.id);
     authorizeConversationRead(input.conversationId,true);
     if(!messages.eligible(input))throw new DomainError('message_stopped',409,'Message continuation stopped');
   };
@@ -638,11 +678,12 @@ export function createSessionManager(
   };
   const backgroundNotConfirmed = (error:unknown) => error instanceof DomainError &&
     ['native_background_active','native_background_check_failed'].includes(error.code);
-  const waitForQueuedBackground = (id:string,inputId:string,client:ExecutionClient,nativeId:string) => {
+  const waitForQueuedBackground = (id:string,inputId:string,client:ExecutionClient|undefined,nativeId:string,
+    check=()=>client!.assertReloadable!(nativeId)) => {
     const executionId=manager.executionId(id);
     const sameThread=()=>{
       const runtime=live.get(id),conversation=store.getConversation(id);
-      return runtime?.client===client&&runtime.runId===executionId&&conversation?.nativeId===nativeId&&
+      return !!runtime&&runtime.client===client&&runtime.runId===executionId&&conversation?.nativeId===nativeId&&
         !runtime.preparing&&!runtime.invocation&&!['running','approval'].includes(conversation.status);
     };
     const release=()=>{
@@ -653,7 +694,7 @@ export function createSessionManager(
       if(backgroundSends.get(id)!==waiting)return;
       if(!sameThread()){release();return;}
       try{
-        await client.assertReloadable!(nativeId);
+        await check();
       } catch(error){
         if(backgroundSends.get(id)!==waiting)return;
         if(backgroundNotConfirmed(error)&&sameThread()){waiting.timer=schedule();return;}
@@ -663,7 +704,11 @@ export function createSessionManager(
       if(backgroundSends.get(id)!==waiting)return;
       if(!sameThread()){release();return;}
       backgroundSends.delete(id);
-      try{await manager.sendQueuedInput(id,inputId,executionId);}
+      try{
+        const input=scheduler.listUserInputs(id).find(i=>i.id===inputId);
+        if(input&&isHumanInput(input))await manager.sendQueuedInput(id,inputId,executionId);
+        else await pump(id);
+      }
       catch(error){if(!closed)store.appendEvent(id,'error',{message:(error as Error).message,nativeTurnSubmitted:false});}
     };
     const schedule=()=>setTimeout(()=>{void poll();},750).unref();
@@ -701,6 +746,7 @@ export function createSessionManager(
     current.durableRun = task;
     current.queuedInputId = queuedInputId;
     revokeBusinessCli(current);
+    current.blueprintScope=undefined;current.blueprintReadable=undefined;
     current.toolToken = randomUUID();
     tools.set(current.toolToken, { conversationId: id, invocationId: current.runId, projectId:before.projectId, agentId:before.agentId });
 
@@ -721,6 +767,7 @@ export function createSessionManager(
     const memoryQuery = recallPlan.query??text;
     const memoryPrincipal = {...root, ...(before.agentId ? {agentId:before.agentId} : {}), ...(task ? {runId:task.id} : {})};
     let handoffSkills:SkillDefinition[]=[];
+    let handoffGoals:ReturnType<typeof conversationGoals>|undefined;
     let receiptSources:VersionRef[]=[];
     const validateHandoff = async () => {
       if(skillCatalog&&handoffSkills.length){
@@ -733,6 +780,10 @@ export function createSessionManager(
       if(memoryRuntime&&layered.length){const kinds=await memoryRuntime.reading(memoryPrincipal);if(layered.some(r=>!kinds.some(kind=>(r.pipelines??['request']).includes(kind))))throw new DomainError('memory_read_disabled',409,'memory_read_disabled');}
       if(!ownsPreparation())throw new Error('native_preparation_cancelled');
       authorizeExecutionHistory(id);
+      if(handoffGoals?.length){
+        const visible=mandalaContextBoundary(store,id)?[]:conversationGoals(id);
+        if(handoffGoals.some(goal=>!visible.some(current=>current.id===goal.id)))throw new DomainError('forbidden',403,'Linked goal access changed before handoff.');
+      }
       if(inputSource?.kind==='coordination'){
         if(coordination.deliveryPaused(id))throw new DomainError('receipt_delivery_paused',409,'Automatic receipt delivery paused');
         for(const receiptId of inputSource.receiptIds)tasks.authorizeReceiptDelivery({...root,agentId:before.agentId},receiptId,id);
@@ -764,6 +815,7 @@ export function createSessionManager(
       const waitingStatus=reason==='background'&&before.status==='interrupted'?'interrupted':'idle';
       if(chat(id).status!==waitingStatus&&!hasUnprovenNativeOccupancy(store,id)&&!store.database.prepare('SELECT owner_id FROM task_directory_claims WHERE conversation_id=? AND submitted=1').get(id))state(id,waitingStatus);
       queueMicrotask(()=>{void wakeDirectories();});
+      return input.id;
     };
     try {
       // Preserve acceptance before config, staging or native preparation can fail.
@@ -807,17 +859,28 @@ export function createSessionManager(
       if (primaryAgent && (before.cli !== primaryAgent.defaultCli || before.model !== (primaryAgent.models[primaryAgent.defaultCli] || null))) {
         if (!enabledRuntimes(config).includes(primaryAgent.defaultCli)) throw new Error("Runtime disabled");
         const previousClient = current.client;
+        if(before.nativeId){
+          const nativeId=before.nativeId;
+          const check=async()=>{
+            if(otherNativeWork(id,queuedInputId))throw new DomainError('native_background_active',409,'Previous native work is still unconfirmed.');
+            await continuity.assertSwitchable(id,nativeId);
+          };
+          try{await check();}
+          catch(error){
+            if(!backgroundNotConfirmed(error)||task)throw error;
+            if(!ownsPreparation())return;
+            const inputId=queueCurrent('background');
+            waitForQueuedBackground(id,inputId,previousClient,nativeId,check);
+            return;
+          }
+          if(!ownsPreparation())return;
+        }
+        authorizeExecutionHistory(id);
         current.client = undefined; current.verification = undefined; current.generation++;
         const patch = { cli:primaryAgent.defaultCli, nativeId:null, turnId:null, model:primaryAgent.models[primaryAgent.defaultCli] || null, effort:null, continuityPending:true };
         store.updateConversation(id, patch); Object.assign(before, patch);
         await previousClient?.close();
         if (!ownsPreparation()) return;
-      }
-      if (before.continuityPending) {
-        const linkedGoals=mandalaContextBoundary(store,id)?[]:conversationGoals(id);
-        const maintained=continuity.latest(id);
-        const handoff=maintained?.status==='fallback'&&maintained.afterEventId===mandalaContextBoundary(store,id)&&maintained.goalIds.every(goalId=>linkedGoals.some(goal=>goal.id===goalId))?maintained.handoff+'\n'+mandalaContinuity(store,id,'maintenance',maintained.throughEventId,acceptedUserEvent?.id):mandalaContinuity(store,id,'runtime',0,acceptedUserEvent?.id);
-        text = [handoff, linkedGoals.length ? "Associated goals (links or coordination ownership):\n" + JSON.stringify(linkedGoals) : "", (inputSource?"Current automatic input:\n":"Current user request:\n") + text].filter(Boolean).join("\n\n");
       }
       const selectedReferences = await resolveComposerReferences({ home, store, manager, config, principal: root, conversationId: id }, references);
       if (selectedReferences.context) text = [text, selectedReferences.context].filter(Boolean).join("\n\n");
@@ -834,6 +897,28 @@ export function createSessionManager(
       if(!ownsPreparation())return;
       if(remote){const directory=await remote.request<{isDirectory:boolean;realpath:string}>('fs.stat',{path:executionContext.project.cwd});if(!directory.isDirectory)throw new Error('Remote working directory is unavailable');executionContext.project.cwd=directory.realpath;}
       else if(before.purpose==='mandala-background'||!executionContext.workspace&&!before.cwd)await mkdir(executionContext.project.cwd,{recursive:true});
+      let attributedProjectId=before.attributedProjectId;
+      if (!current.attributionChecked && !attributedProjectId && (before.projectId || before.cwd || location)) {
+        attributedProjectId=await conversationProjectResolver(config)({...before,cwd:executionContext.project.cwd});
+        if (!ownsPreparation()) return;
+        current.attributionChecked=true;
+        if (attributedProjectId) store.updateConversation(id,{attributedProjectId});
+      }
+      const blueprintProject=attributedProjectId??before.projectId;
+      if(before.cli==='codex'||before.cli==='claude'){
+        if(blueprintProject&&mayReadBlueprint(config,before,blueprintProject)&&before.purpose!=='mandala-main'){
+          const state=await plans.state(blueprintProject);
+          if(!ownsPreparation())return;
+          if(state.status==='ready'&&state.planId){
+            const existing=task?.taskId??store.database.prepare('SELECT task_id FROM task_executions WHERE conversation_id=? AND superseded_by_execution_id IS NULL LIMIT 1').get(id)?.task_id as string|undefined;
+            current.blueprintScope={projectId:blueprintProject,planId:state.planId,conversationId:id,invocationId,agentId:before.agentId,taskId:existing};
+          }
+        }
+        if(current.blueprintScope||before.purpose==='mandala-main'||!before.projectId){
+          current.blueprintReadable=readableBlueprints(config,before);
+          if(current.blueprintScope)current.blueprintReadable.set(blueprintProject,current.blueprintScope.planId);
+        }
+      }
       current.codeGraphScope=remote?undefined:await codeGraph.capture(before,config);
       const extras=(await Promise.all(executionContext.project.resources.filter(r=>r.kind==='local').map(async r=>{if(remote){const directory=await remote.request<{isDirectory:boolean;realpath:string}>('fs.stat',{path:r.location}).catch(()=>null);return directory?.isDirectory?directory.realpath:null;}return (await stat(r.location).catch(()=>null))?.isDirectory()?r.location:null;}))).filter((p):p is string=>!!p);
       let executionAttachments=attachments;
@@ -870,10 +955,21 @@ export function createSessionManager(
       if(memoryRuntime) {
         try {
           const kinds=await memoryRuntime.reading(memoryPrincipal),projectId=before.projectId||null;
-          const [factResult,sceneResult]=kinds.length&&recallPlan.query
-            ? await memoryRuntime.recall.turnContextSearch(memoryPrincipal,{projectId,query:memoryQuery,kinds},
-              AbortSignal.any([lifetime.signal,current.controller.signal,AbortSignal.timeout(1500)]))
-            : [];
+          let results: Awaited<ReturnType<typeof memoryRuntime.recall.turnContextSearch>> | undefined;
+          if (kinds.length && recallPlan.query) {
+            const trace = { memorySearchId: randomUUID(), runId: invocationId };
+            store.appendEvent(id, "metadata", { ...trace, status: "running" });
+            try {
+              results = await memoryRuntime.recall.turnContextSearch(memoryPrincipal, { projectId, query: memoryQuery, kinds },
+                AbortSignal.any([lifetime.signal,current.controller.signal,AbortSignal.timeout(1500)]));
+            } catch (error) {
+              store.appendEvent(id, "metadata", { ...trace, status: "failed" });
+              throw error;
+            }
+            const count = results.reduce((total, result) => total + (result?.items.length ?? 0), 0);
+            store.appendEvent(id, "metadata", { ...trace, status: "completed", count });
+          }
+          const [factResult,sceneResult] = results ?? [];
           if(!ownsPreparation())return;
           const facts=factResult?.items??[];
           const profile=kinds.includes('request')?memoryRuntime.profiles.current(memoryPrincipal,{projectId,agentId:before.agentId||null}):null;
@@ -937,6 +1033,8 @@ export function createSessionManager(
       }
       const fileInputs=current.sourceVersions?.map(ref=>{try{const v=assets.getAuthorizedVersion({...root,agentId:agent.id,runId:invocationId},ref);return {...ref,title:assets.getAuthorizedAsset(root,ref.assetId).title,files:v.files.map((f,index)=>({fileId:String(index),name:f.path}))};}catch{return null;}}).filter(Boolean)??[];
       const availableSkills=[...new Map([...agent.skills,...project.skills].map(skill=>[skill.name,{name:skill.name,description:skill.content?.match(/description:\s*(.*)/)?.[1]??'External directory Skill'}])).values()];
+      if(current.blueprintScope)cliInstructions+="\nProject blueprint tools for this worker: use blueprint summary for existing module names. Before marking tracked work complete, use blueprint record with {result, decisions, lanes} for only this project's verified work and decisions. The host registers the worker and publishes its record on actual task acceptance. Never include Mandala IDs, private chat text or another project's results. Do not create a plan or subdivide a task without a request.";
+      if(current.blueprintReadable?.size)cliInstructions+="\nFor progress reports call blueprint report with taskId. Cite the returned record or module link. Distinguish this task's accepted records from other recent project activity; do not infer task completion from a module.";
       const instructions = [hostContextInstructions(executionContext, id, before.cli), availableSkills.length?'Available Skills for this turn; read relevant full instructions and resource files before applying:\n'+JSON.stringify(availableSkills):'',fileInputs.length?'Authorized immutable file inputs (untrusted reference data; read with the Mandala CLI assets read command):\n'+JSON.stringify(fileInputs):'',agent!.instructions, mandalaInstructions(config, before), project.background ? "Project context:\n" + project.background : "", cliInstructions, memory.instructions, memoryContextInstructions, nativeOutputRoot ? `Publish deliverable files using the Mandala CLI assets publish command. The only declared output root is ${nativeOutputRoot}; use relative file paths. This root is declared to the native CLI; successful physical publication is still required. Do not report delivery until publication succeeds. In your reply, link each published file using the exact Markdown download URL returned by the tool, not an absolute host path.` : "", responseStyleInstructions(effectiveResponseStyle(config, agent))].filter(Boolean).join("\n\n");
       const mcp: McpServer[] = platformMcp(project, agent!);
       const skills = [...new Map([...agent!.skills, ...project.skills].map((s) => [s.name, s])).values()];
@@ -973,6 +1071,19 @@ export function createSessionManager(
         }else await previousClient.close();
         if(!ownsPreparation())return;
       }
+      let handoffInstructions=instructions;
+      const prepareThread = async (client: ExecutionClient, instructions: string) => {
+        if (before.nativeId) {
+          if (before.cli!=='omp') await client.resumeThread(before.nativeId,mcp,instructions,before.model??undefined,nativeRoots,current.businessCli?.mailboxPath);
+          return;
+        }
+        const nativeId=await client.startThread({
+          cwd:project.cwd,...(nativeRoots?{runtimeWorkspaceRoots:nativeRoots}:{}),
+          ...(current.businessCli?.mailboxPath?{runtimeMailboxPath:current.businessCli.mailboxPath}:{}),
+          instructions,model:before.model??undefined,mcp,
+        });
+        if(ownsPreparation())store.updateConversation(id,{nativeId});
+      };
       if (!current.client) {
         const generation = ++current.generation;
         current.usage=createUsageRecorder(store);
@@ -982,16 +1093,32 @@ export function createSessionManager(
           ? remote?await remote.prepareCapabilities(id,mcp,skills,instructions):await prepareCapabilityRuntime(home, id, mcp, skills, instructions, validateHandoff) : "";
         const nativeInstructions=skills.length&&before.cli!=='codex'&&before.cli!=='omp'
           ? instructions+'\n\nBound Skill files: read the relevant full SKILL.md and referenced files before applying the Skill.\n'+JSON.stringify(skills.map(skill=>({name:skill.name,path:join(capabilityRoot,'skills',skill.name,'SKILL.md')}))) : instructions;
+        handoffInstructions=nativeInstructions;
         const accessibleDirs = extras;
         if(!ownsPreparation())return;
         current.approvalScope={conversationId:id,agentId:before.agentId,projectId:before.projectId,cli:before.cli,cwd:remote?project.cwd:realpathSync(project.cwd),hostId:executionContext.executionLocation?.host};
+        // A retiring OMP pipe can still deliver the final frame of an announced child.
+        const ompChildRuns = new Map<string, string>();
+        let retiredAfterCompletion = false;
         const callbacks = {
           cwd: project.cwd,
           model:before.model??config.chatDefaults?.[before.cli]?.model,
           ...runtimeConfig,
           signal: AbortSignal.any([lifetime.signal, current.controller.signal]),
           onEvent(event: RpcMessage) {
-            if (closed || live.get(id) !== current || current.generation !== generation) return;
+            if (closed || live.get(id) !== current) return;
+            const child = event.params?.item;
+            const childKey = before.cli === 'omp' && child?.type === 'nativeSubagent' && typeof child.id === 'string' && typeof child.agentId === 'string'
+              && (event.method === 'item/started' || event.method === 'item/completed')
+              ? JSON.stringify([event.params?.threadId,event.params?.turnId,child.id,child.agentId]) : undefined;
+            if (current.generation !== generation) {
+              const owner = childKey && ompChildRuns.get(childKey);
+              if (retiredAfterCompletion && owner && event.params?.threadId === store.getConversation(id)?.nativeId) {
+                store.appendEvent(id, "tool", {method:event.method,params:event.params,runId:owner});
+                if (event.method === 'item/completed') ompChildRuns.delete(childKey!);
+              }
+              return;
+            }
             if(continuity.event(id,event)){if(event.method==='thread/tokenUsage/updated'&&!current.invocation)current.usage?.event(event);return;}
             const p = event.params ?? {};
             const c = chat(id);
@@ -1001,6 +1128,10 @@ export function createSessionManager(
             if(event.method?.startsWith('item/')&&
               (!current.invocation||!current.invocation.nativeTurnId||p.threadId!==current.invocation.nativeSessionId||p.turnId!==current.invocation.nativeTurnId)){
               store.appendEvent(id,'metadata',{execution:'item_ignored',correlation:'unknown',nativeSessionId:p.threadId,nativeTurnId:p.turnId});return;
+            }
+            if (childKey && current.invocation) {
+              if (event.method === 'item/completed') ompChildRuns.delete(childKey);
+              else ompChildRuns.set(childKey, current.invocation.invocationId);
             }
             const hook = normalizeHookEvent(before.cli, event.method, p);
             if (hook) {
@@ -1060,6 +1191,7 @@ export function createSessionManager(
               }
               queueMicrotask(()=>{void wakeDirectories();});
               current.invocation = undefined;
+              if(current.blueprintScope)blueprints.finish(invocation.invocationId,current.stopRequested||p.turn.status==='interrupted'?'interrupted':p.turn.status==='failed'?'failed':'succeeded');
               revokeBusinessCli(current);
               appendEvent(id, "tool", { method: event.method, params: p });
               current.approvals.clear();
@@ -1072,10 +1204,11 @@ export function createSessionManager(
                       : "idle";
               if (p.turn.error)
                 store.appendEvent(id, "error", {
-                  message: p.turn.error.message,
+                  message: c.purpose==='mandala-main'&&p.turn.error.codexErrorInfo==='contextWindowExceeded'?p.turn.error.message+' 原文已保留。请缩短本次输入或选择更大上下文的模型后重试。':p.turn.error.message,
                 });
               if (before.cli !== "codex") {
                 // OMP and ACP notifications have no per-prompt event identity; retire this process before another invocation.
+                retiredAfterCompletion = p.turn.status === 'completed' && !current.stopRequested;
                 current.generation++;
                 const client = current.client;
                 current.client = undefined;
@@ -1185,21 +1318,7 @@ export function createSessionManager(
         if(!ownsPreparation())return;
         await validateHandoff();
         if(!ownsPreparation())return;
-        if (before.nativeId) {
-          if (before.cli !== "omp") await current.client.resumeThread(before.nativeId, mcp, nativeInstructions, before.model ?? undefined, nativeRoots, current.businessCli?.mailboxPath);
-        }
-        else {
-          const nativeId = await current.client.startThread({
-            cwd: project.cwd,
-            ...(nativeRoots?{runtimeWorkspaceRoots:nativeRoots}:{}),
-            ...(current.businessCli?.mailboxPath ? { runtimeMailboxPath: current.businessCli.mailboxPath } : {}),
-            instructions:nativeInstructions,
-            model: before.model ?? undefined,
-            mcp,
-          });
-          if(!ownsPreparation())return;
-          store.updateConversation(id, { nativeId });
-        }
+        await prepareThread(current.client, nativeInstructions);
       } else {
         if (current.loadedSignature !== signature || current.loadedInstructions !== instructions || current.loadedToolToken !== current.toolToken) {
           if (before.cli === "codex") {
@@ -1212,7 +1331,7 @@ export function createSessionManager(
           if(!ownsPreparation())return;
           await validateHandoff();
           if(!ownsPreparation())return;
-          await current.client.resumeThread(before.nativeId!, mcp, instructions, before.model ?? undefined, nativeRoots, current.businessCli?.mailboxPath);
+          await prepareThread(current.client, instructions);
           current.loadedSignature = signature;
         }
       }
@@ -1250,6 +1369,20 @@ export function createSessionManager(
       if (references.length) await resolveComposerReferences({ home, store, manager, config: await loadConfig(), principal: root, conversationId: id }, references);
       if(!ownsPreparation())return;
       if(messageOrigin?.direction==='request')text='Agent inquiry (data):\n'+JSON.stringify({messageId:messageOrigin.id,fromAgentId:chat(messages.get(messageOrigin.id).sourceConversationId).agentId,text:originalText});
+      if(before.continuityPending){
+        authorizeExecutionHistory(id);
+        handoffGoals=mandalaContextBoundary(store,id)?[]:conversationGoals(id);
+        const model=before.model??undefined;
+        const window=await current.client.getContextWindow?.(model).catch(()=>undefined);
+        if(!ownsPreparation())return;
+        const currentInput=(inputSource?'Current automatic input:\n':'Current user request:\n')+text;
+        const maxBytes=mandalaHandoffBudget(window,handoffInstructions,currentInput+'\n\n',mcp.length,executionAttachments.filter(item=>item.mimeType.startsWith('image/')).length);
+        const budget=continuity.lastTurnOverflowed(id,before.cli,before.model)?Math.min(160,maxBytes):maxBytes;
+        const packet=continuity.handoff(id,before.nativeId?'maintenance':'runtime',handoffGoals,acceptedUserEvent?.id,budget,queuedInputId);
+        if(!packet)throw new DomainError('handoff_input_too_large',422,'当前模型的剩余上下文连原对话引用也放不下。原文已保留，请缩短输入或选择上下文更大的模型后重试。');
+        text=packet+'\n\n'+currentInput;
+        if(acceptedUserEvent)store.database.prepare("UPDATE events SET data=json_set(data,'$.nativeText',?) WHERE id=? AND conversationId=?").run(text,acceptedUserEvent.id,id);
+      }
       const claimed = task ? store.database.prepare("SELECT id,source_run_id FROM task_receipts WHERE claimed_by_run_id=? LIMIT 1").get(task.id) : null;
       if (task) appendEvent(id, "user", { ...(task.snapshot?.rule?{source:{kind:'schedule',automationId:task.snapshot.rule.automationId}}:{}), text: originalText, ...(attachments.length ? { attachments } : {}), ...(references.length ? { references, referenceItems: selectedReferences.items } : {}), ...(attachments.length || references.length ? { nativeText: text } : {}), invocationId: current.runId, task: { id: claimed?.id ?? task.taskId, kind: claimed ? "return" : "dispatch", ...(claimed?.source_run_id ? {sourceConversationId:tasks.getRun(root,claimed.source_run_id as string).routing?.executionConversationId} : {}) } });
       // Local transcript persistence is not native submission acknowledgment.
@@ -1278,6 +1411,12 @@ export function createSessionManager(
         current.sourceVersions=[...new Map([...(current.sourceVersions??[]),...receiptSources].map(ref=>[ref.versionId,ref])).values()];
         appendEvent(id,'metadata',{actualUse:'acknowledged',sourceVersions:receiptSources,receiptContext:true,receiptIds:inputSource.receiptIds,queuedInputId,invocationId});
       }
+      if(current.blueprintScope){
+        const fresh=await loadConfig();
+        if(readableBlueprints(fresh,chat(id)).get(current.blueprintScope.projectId)!==current.blueprintScope.planId)throw new DomainError('blueprint_scope_changed',409,'Blueprint settings changed before worker handoff');
+        if(!ownsPreparation())return;
+        blueprints.start(current.blueprintScope);
+      }
       resources.submitted(owner.kind,owner.id,invocation.invocationId,invocation.nativeSessionId);
       if(owner.kind!=='invocation')retainNativeOccupancy(store,owner.kind,owner.id,id);
       current.preparing = false;
@@ -1294,7 +1433,8 @@ export function createSessionManager(
       store.appendEvent(id, "metadata", { approvalMode, model: before.model, effort: before.effort, status: "loaded", cli: before.cli });
       if (invocation.nativeTurnId !== null && invocation.nativeTurnId !== turnId)
         throw new Error("Native turn identity does not match start response");
-      if (before.continuityPending) store.updateConversation(id, {continuityPending:false});
+      if (before.continuityPending && !store.database.prepare(`SELECT 1 FROM events WHERE conversationId=? AND kind='metadata'
+        AND json_extract(data,'$.contextLimit.nativeId')=? AND json_extract(data,'$.contextLimit.rejectedTurnId')=? LIMIT 1`).get(id,invocation.nativeSessionId,turnId))store.updateConversation(id,{continuityPending:false});
       invocation.nativeTurnId = turnId;
       current.usage?.bind(invocation.nativeSessionId,turnId);
       resources.bindTurn(owner.kind,owner.id,invocation.invocationId,invocation.nativeSessionId,turnId);
@@ -1327,8 +1467,14 @@ export function createSessionManager(
       // Remote runtime errors cross the SSH protocol as plain Errors with code/status.
       if (nativeThreadBusy && !(error instanceof DomainError))
         error = new DomainError("native_thread_busy", 409, "Codex conversation is open in another client");
+      const nativeOverflow=before.continuityPending&&turnSubmitted&&isContextRejection(error);
+      if(nativeOverflow)store.appendEvent(id,'metadata',{contextLimit:{reached:true,cli:before.cli,model:before.model,nativeId:chat(id).nativeId,rejectedTurnId:current.activeTurnId??'unacknowledged'}});
       const reloadBlocked=backgroundNotConfirmed(error)&&!turnSubmitted;
-      const recoveredReceipt=!turnSubmitted&&!!current.queuedInputId&&scheduler.recoverReceiptInput(current.queuedInputId,invocationId);
+      const oversize=error instanceof DomainError&&error.code==='handoff_input_too_large';
+      if(oversize&&!before.nativeId)store.updateConversation(id,{nativeId:null,turnId:null,continuityPending:true});
+      if(oversize&&current.queuedInputId&&scheduler.requeueUnsubmittedInput(current.queuedInputId,'handoff_input_too_large'))current.queuedInputId=undefined;
+      if(current.blueprintScope)blueprints.finish(invocationId,turnSubmitted?'unknown':'failed');
+      const recoveredReceipt=!oversize&&!turnSubmitted&&!!current.queuedInputId&&scheduler.recoverReceiptInput(current.queuedInputId,invocationId);
       const deferredReceipt=!turnSubmitted&&!recoveredReceipt&&inputSource?.kind==='coordination'&&!!current.queuedInputId&&
         error instanceof DomainError&&error.status===403&&hasRevokedReceiptHistory(id)&&scheduler.requeueUnsubmittedInput(current.queuedInputId,'context_rebuild_deferred');
       if(recoveredReceipt||deferredReceipt)current.queuedInputId=undefined;
@@ -1356,9 +1502,10 @@ export function createSessionManager(
       }
       if (!failedQueueInput) {
         reportFailedRecall();
-        appendEvent(id, "error", { message: error.message, nativeTurnSubmitted: turnSubmitted,
+        appendEvent(id, "error", { message: nativeOverflow?error.message+' 原文已保留。请缩短本次输入或选择更大上下文的模型后重试。':error.message, nativeTurnSubmitted: turnSubmitted,
+          ...(oversize&&queuedInputId?{queuedInputId}:{}),
           ...(before.cli==='codex' && turnSubmitted ? { nativeSubmissionState: submittedInvocation?.nativeTurnId ? 'accepted' : 'unknown' } : {}),
-          ...(reloadBlocked?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy',nativeId:before.nativeId}:mailboxFailure?{code:mailboxFailure.code,...mailboxSetupDetails}:{}) });
+          ...(reloadBlocked||oversize?{code:(error as DomainError).code}:nativeThreadBusy?{code:'native_thread_busy',nativeId:before.nativeId}:mailboxFailure?{code:mailboxFailure.code,...mailboxSetupDetails}:{}) });
       }
       const failedAutomaticInput = !turnSubmitted&&current.queuedInputId&&messages.isAutomaticRequest(current.queuedInputId)
         ? current.queuedInputId : undefined;
@@ -1513,13 +1660,14 @@ export function createSessionManager(
     if(closingFailedInquiries.has(id))throw new DomainError('conversation_busy',409,'Receiving Agent is finishing cleanup');
     if(!hasRevokedReceiptHistory(id))authorizeExecutionHistory(id);
   };
+  const otherNativeWork=(id:string,inputId?:string)=>Boolean(
+    store.database.prepare('SELECT claim_id FROM task_native_uncertainty WHERE conversation_id=?').get(id)||
+    store.database.prepare("SELECT id FROM task_runs WHERE json_extract(routing,'$.executionConversationId')=? AND state IN ('starting','running','approval','unknown')").get(id)||
+    store.database.prepare("SELECT id FROM task_user_inputs WHERE conversation_id=? AND (state='unknown' OR state='running' AND id<>?)").get(id,inputId??'')||
+    store.database.prepare('SELECT owner_id FROM task_directory_claims WHERE conversation_id=? AND submitted=1').get(id));
   const resetRevokedContext = async (id:string,inputId?:string) => {
     const c=chat(id),runtime=live.get(id);
-    const occupied=()=>runtime?.preparing||runtime?.invocation||['running','approval'].includes(chat(id).status)||
-      store.database.prepare('SELECT claim_id FROM task_native_uncertainty WHERE conversation_id=?').get(id)||
-      store.database.prepare("SELECT id FROM task_runs WHERE json_extract(routing,'$.executionConversationId')=? AND state IN ('starting','running','approval','unknown')").get(id)||
-      store.database.prepare("SELECT id FROM task_user_inputs WHERE conversation_id=? AND (state='unknown' OR state='running' AND id<>?)").get(id,inputId??'')||
-      store.database.prepare('SELECT owner_id FROM task_directory_claims WHERE conversation_id=? AND submitted=1').get(id);
+    const occupied=()=>runtime?.preparing||runtime?.invocation||['running','approval'].includes(chat(id).status)||otherNativeWork(id,inputId);
     if(continuity.blocked(id)||branching.has(id)||occupied())throw new DomainError('native_context_busy',409,'Current native work must settle before rebuilding context; queued input is preserved.');
     branching.add(id);let inspection:ExecutionClient|undefined;
     try{
@@ -1605,7 +1753,7 @@ export function createSessionManager(
       }
       const branch = store.transaction(() => {
         authorizeConversationRead(id,true);
-        const branch = store.createConversation({ projectId: source.projectId, agentId: source.agentId,
+        const branch = store.createConversation({ projectId: source.projectId, attributedProjectId:source.attributedProjectId || source.projectId || undefined, agentId: source.agentId,
           ...(source.purpose ? {purpose:"mandala-background" as const} : {}), cli: source.cli, model: source.model, effort: source.effort, approvalMode: source.approvalMode, workspaceId: source.workspaceId, cwd: source.cwd, workspaceName: source.workspaceName, executionLocation:source.executionLocation, branchedFrom: { conversationId: id, eventId } });
         store.updateConversation(branch.id, { nativeId });
         store.inheritConversationTaskRuns(branch.id,protectedRuns);
@@ -1701,30 +1849,30 @@ export function createSessionManager(
   }});
   const conversationGoals=(id:string)=>{
     const principal={...root,agentId:chat(id).agentId},visible=tasks.listTasks(principal),owned=new Set(coordination.list().filter(own=>own.conversationId===id).map(own=>own.taskId));
-    return visible.filter(task=>task.conversationIds.includes(id)||owned.has(task.id)).slice(0,20).map(task=>({id:task.id,goal:task.goal.slice(0,1000),state:task.state}));
+    return visible.filter(task=>task.conversationIds.includes(id)||owned.has(task.id)).slice(0,20).map(task=>({id:task.id,goal:task.goal.slice(0,1000),state:task.state,criteria:task.criteria.slice(0,10).map(c=>c.text.slice(0,400)),waitingReason:task.waitingReason}));
   };
   const continuity=createMandalaContinuity({store,closed:()=>closed,
     inputs:id=>scheduler.listUserInputs(id),authorize:authorizeExecutionHistory,
     goals:id=>mandalaContextBoundary(store,id)?[]:conversationGoals(id),
-    busy:id=>queuedSendPending(id)||branching.has(id)||!!live.get(id)?.preparing||!!live.get(id)?.invocation||!['idle','error'].includes(chat(id).status)||hasUnprovenNativeOccupancy(store,id)||
-      !!store.database.prepare("SELECT id FROM task_user_inputs WHERE conversation_id=? AND state IN ('running','unknown')").get(id)||
-      !!store.database.prepare("SELECT id FROM task_runs WHERE json_extract(routing,'$.executionConversationId')=? AND state IN ('starting','running','approval','unknown')").get(id)||
-      !!store.database.prepare('SELECT owner_id FROM task_directory_claims WHERE conversation_id=? AND submitted=1').get(id),
-    lock:id=>branching.add(id),unlock:id=>branching.delete(id),wake:id=>{void pump(id);},
-    async client(id){
+    busy(id){
       const c=chat(id),runtime=live.get(id);
-      if(runtime?.client){runtime.usage?.event({method:'mandala/usageBaseline',params:{threadId:c.nativeId,fresh:false}});return {client:runtime.client,release:async()=>{}};}
+      const terminal=['idle','error'].includes(c.status)||c.status==='interrupted'&&!!c.nativeId&&hasMandalaTerminal(store,id,c.nativeId);
+      return !terminal||queuedSendPending(id)||branching.has(id)||!!runtime?.preparing||!!runtime?.invocation||otherNativeWork(id);
+    },
+    lock:id=>branching.add(id),unlock:id=>branching.delete(id),wake:id=>{void pump(id);},
+    async client(id,inspectOnly){
+      const c=chat(id),runtime=live.get(id);
+      if(runtime?.client){if(!inspectOnly)runtime.usage?.event({method:'mandala/usageBaseline',params:{threadId:c.nativeId,fresh:false}});return {client:runtime.client,release:async()=>{}};}
       const config=await loadConfig(),context=conversationContext(config,c,join(home,'workspaces','conversations',id));
       if(c.cli!=='codex'&&c.cli!=='omp'){
         // ACP prompts are terminal before their process is retired; no autonomous follow-up capability is exposed.
-        const terminal=store.listEvents(id,0).filter(e=>e.kind==='status').at(-1);
-        return {client:{inspectContext:async()=>({settled:(terminal?.data as {status?:string})?.status==='idle'})},release:async()=>{}};
+        return {client:{inspectContext:async nativeId=>({settled:hasMandalaTerminal(store,id,nativeId)})},release:async()=>{}};
       }
       const callbacks={cwd:context.project.cwd,...runtimeOptions(c.cli,context,config),signal:lifetime.signal,
         onEvent:(event:RpcMessage)=>{continuity.event(id,event);},onApproval(){},onExit(){}};
       const client=await startClient(c.cli,{...callbacks,...(c.cli==='omp'?{resume:c.nativeId!}:{})},context,id,config,'inspect');
       clients.add(client);
-      try{if(c.cli==='codex'&&(await client.inspectContext?.(c.nativeId!))?.settled)await client.resumeThread(c.nativeId!);}
+      try{if(!inspectOnly&&c.cli==='codex'&&(await client.inspectContext?.(c.nativeId!))?.settled)await client.resumeThread(c.nativeId!);}
       catch(error){await client.close();clients.delete(client);throw error;}
       return {client,release:async()=>{await client.close();clients.delete(client);}};
     },
@@ -1763,7 +1911,7 @@ export function createSessionManager(
       return { client, cwd };
     },
   });
-  const progressTimer=setInterval(()=>{if(!closed){void progressMonitor.tick().catch(()=>{});void continuity.tick().catch(()=>{});}},60000);progressTimer.unref();
+  const progressTimer=setInterval(()=>{if(!closed){void blueprints.flush().catch(()=>{});void progressMonitor.tick().catch(()=>{});void continuity.tick().catch(()=>{});}},60000);progressTimer.unref();
   const prepareAutomation = async(taskId:string,input:AutomationRun) => {
     const commandKey=`automation:${input.id}`;
     const prior=tasks.findStart(root,taskId,commandKey);if(prior)return prior;
@@ -1792,6 +1940,7 @@ export function createSessionManager(
     writerRecoveryStatus: writerRecovery.status,
     recoverCodexWriter: writerRecovery.request,
     maintainMandalaContext:()=>continuity.tick(),
+    compactMandalaContext:id=>continuity.compact(id),
     setAutomationService(service){automationService=service;},
     reconcileRuns(hostId) {
       // One startup pass; a later caller cannot classify this process's live work as lost.
@@ -1861,6 +2010,7 @@ export function createSessionManager(
       const old=tasks.listRunControls(root,taskId).at(-1);
       const oldExecution=old?task.executions.find(item=>item.id===old.executionId):undefined;
       if(!coordinationRun&&!conversationId&&old?.routing&&oldExecution?.agentId===executor&&oldExecution.projectId===executionProject&&['failed','interrupted','unknown'].includes(old.state))return this.retryTask(taskId,expectedRevision,commandKey);
+      if(!coordinationRun&&!old&&conversationId===undefined)conversationId=sourceExecutionConversation(task);
       const oldChat=old?.routing?chat(old.routing.executionConversationId):null,sameProject=oldChat?.projectId===(executionProject??''),sameScope=oldChat?.agentId===executor&&sameProject;
       const previousContext=!coordinationRun&&old&&sameProject?tasks.getContextSnapshot(root,old.id):null;
       const config=await loadConfig();assertExecutionAvailable(config,{projectId:executionProject??'',agentId:executor});const {project,agent,workspace}=conversationContext(config,{projectId:executionProject??'',agentId:executor},'');
@@ -2033,8 +2183,9 @@ export function createSessionManager(
       if (environment.effort !== undefined) validateEffort(environment.effort);
       const defaults = config.chatDefaults?.[selectedCli];
       const chosenModel = model || agent.models[selectedCli] || (isSystemAgent(config,agent.id) ? null : defaults?.model) || null;
+      const attributedProjectId=await conversationProjectResolver(config)({projectId,cwd:workspace?.cwd ?? environment.cwd,executionLocation});
       return store.createConversation({
-        projectId,
+        projectId, attributedProjectId,
         agentId,
         ...(isSystemAgent(config,agent.id) ? {purpose:"mandala-background" as const,...(!projectId?{cwd:agent.managedWorkspace}:{})} : {}),
         cli: selectedCli,
@@ -2107,7 +2258,7 @@ export function createSessionManager(
       return this.listTasks().find(item => item.id === task.id&&item.targetConversationId===target!.id)!;
     },
     async askAgent(sourceId,input,options){
-      if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['targetAgentId','targetProjectId','text','targetConversationId','policy','automatic'].includes(k))||input.automatic!==undefined&&input.automatic!==true||typeof input.targetAgentId!=='string'||input.targetProjectId!==undefined&&input.targetProjectId!==null&&(typeof input.targetProjectId!=='string'||!input.targetProjectId.trim())||typeof input.text!=='string'||!input.text.trim()||input.text.length>65536||input.targetConversationId!==undefined&&typeof input.targetConversationId!=='string'||input.policy!==undefined&&!['notify','resume'].includes(input.policy)||!options.commandKey?.trim()||options.commandKey.length>200)throw new DomainError('invalid_message',422,'Invalid Agent message');
+      if(!input||typeof input!=='object'||Object.keys(input).some(k=>!['targetAgentId','targetProjectId','text','targetConversationId','policy','automatic'].includes(k))||input.automatic!==undefined&&input.automatic!==true||typeof input.targetAgentId!=='string'||input.targetProjectId!==undefined&&input.targetProjectId!==null&&(typeof input.targetProjectId!=='string'||!input.targetProjectId.trim())||typeof input.text!=='string'||!input.text.trim()||input.text.length>65536||input.targetConversationId!==undefined&&(typeof input.targetConversationId!=='string'||!input.targetConversationId.trim())||input.policy!==undefined&&!['notify','resume'].includes(input.policy)||!options.commandKey?.trim()||options.commandKey.length>200)throw new DomainError('invalid_message',422,'Invalid Agent message');
       const source=chat(sourceId);
       const validate=()=>{if(closed)throw new Error('service closed');if(options.boundInvocationId){const runtime=live.get(sourceId);if(runtime?.runId!==options.boundInvocationId||!runtime.invocation||runtime.stopRequested)throw new DomainError('forbidden',403,'Expired tool binding');}};
       validate();
@@ -2115,7 +2266,7 @@ export function createSessionManager(
       if(primary?input.targetProjectId===undefined:!source.projectId||!source.agentId||input.targetProjectId!==undefined||input.automatic)
         throw new DomainError('invalid_message_source',422,'Primary inquiries require explicit targetProjectId (null when unbound); ordinary inquiries use their source Project');
       if(primary){
-        if(!options.boundInvocationId||!runtime||input.targetConversationId!==undefined)throw new DomainError('forbidden',403,'Primary inquiries require a current bound invocation and a fresh target chat');
+        if(!options.boundInvocationId||!runtime||input.automatic&&input.targetConversationId!==undefined)throw new DomainError('forbidden',403,'Primary inquiries require a current bound invocation, and automatic inquiries require a fresh target chat');
         await coordination.verify({agentId:source.agentId,conversationId:sourceId,invocationId:options.boundInvocationId,humanEventId:runtime.humanEventId,assertActive:validate},true);
       }
       const config=await loadConfig();validate();
@@ -2125,6 +2276,7 @@ export function createSessionManager(
         if(existing&&!input.automatic)throw new DomainError('automatic_inquiry_exists',409,'This human request already has an automatic inquiry');
         return existing?manager.getAgentMessage(existing.id):undefined;
       };
+      if(primary&&input.targetConversationId)assertPrimaryMessageTarget(sourceId,input.targetConversationId);
       const existing=automaticPrior();
       if(existing)return existing;
       const targetProject=primary?input.targetProjectId??'':source.projectId;
@@ -2147,7 +2299,7 @@ export function createSessionManager(
       if(!event)throw new DomainError('message_source_missing',422,'Submitted source request required');
       let target=input.targetConversationId?chat(input.targetConversationId):undefined;
       if(target?.purpose==='mandala-main')throw new DomainError('primary_conversation',422,'Primary chat cannot execute messages');
-      if(target&&(target.projectId!==source.projectId||target.agentId!==agent.id))throw new DomainError('forbidden',403,'Target unavailable');
+      if(target&&(target.projectId!==project.id||target.agentId!==agent.id))throw new DomainError('forbidden',403,'Target unavailable');
       if(!primary)conversationContext(config,{projectId:source.projectId,agentId:source.agentId},'');
       if(!target&&!enabledRuntimes(config).includes(agent.defaultCli))throw new Error('Runtime disabled');
       const location=primary
@@ -2253,6 +2405,22 @@ export function createSessionManager(
       setImmediate(()=>{if(!closed)void pump(id);});
       return input;
     },
+    interject(id,text,commandKey,attachments,references) {
+      if(chat(id).purpose!=='mandala-main')throw new DomainError('invalid_conversation',422,'Interjections require the main chat');
+      const prior=scheduler.listUserInputs(id).some(input=>input.commandKey===commandKey);
+      const input=manager.enqueueUserInput(id,text,commandKey,attachments,references);
+      if(prior || queuedSendPending(id) || continuity.blocked(id) || branching.has(id))return input;
+      const runtime=live.get(id);
+      if(runtime?.preparing || ['running','approval','interrupted','error'].includes(chat(id).status)){
+        // Acknowledge the saved message immediately. Dispatch only after the previous native turn settles.
+        const dispatch=manager.sendQueuedInput(id,input.id,manager.executionId(id),true).catch(error=>{
+          if(!closed && scheduler.listUserInputs(id).find(item=>item.id===input.id)?.state==='queued')
+            store.appendEvent(id,'error',{message:(error as Error).message,queuedInputId:input.id,nativeTurnSubmitted:false});
+        }).finally(()=>queuePumps.delete(dispatch));
+        queuePumps.add(dispatch);
+      }
+      return input;
+    },
     async interruptAndSend(id,text,commandKey,expectedExecutionId,attachments,references) {
       authorizeHumanContinuation(id);
       const prior=scheduler.listUserInputs(id).find(input=>input.commandKey===commandKey);
@@ -2272,7 +2440,7 @@ export function createSessionManager(
       }
       return manager.listUserInputs(id).find(item=>item.id===input.id)!;
     },
-    async sendQueuedInput(id,inputId,expectedExecutionId) {
+    async sendQueuedInput(id,inputId,expectedExecutionId,interjection=false) {
       authorizeHumanContinuation(id);
       if(closed||continuity.blocked(id)||branching.has(id))throw new DomainError('conversation_busy',409,'Conversation is not available to send');
       const read=()=>scheduler.listUserInputs(id).find(input=>input.id===inputId);
@@ -2283,15 +2451,19 @@ export function createSessionManager(
       if(backgroundSends.get(id)?.inputId===inputId)return;
       if(queuedSendUnavailable(id,inputId))throw new DomainError('conversation_busy',409,'A queued message is already being started');
       queueStarts.set(id,inputId);
+      if(interjection)interjections.add(id);
+      const paused=()=>interjection && !interjections.has(id);
       try {
         const attachments=await loadAttachments(home,id,input.attachments??[]);
-        input=read();if(!input||input.state!=='queued')return;
+        input=read();if(!input||input.state!=='queued'||paused())return;
         const executionId=manager.executionId(id);
         if(expectedExecutionId!==undefined&&executionId!==expectedExecutionId)throw new DomainError('execution_changed',409,'Execution changed; refresh before sending');
         const interrupting=live.get(id)?.preparing||['running','approval'].includes(chat(id).status);
         if(interrupting){
-          if(!await manager.stop(id,expectedExecutionId))throw new DomainError('stop_unconfirmed',409,'Stop not confirmed; queued message is preserved');
+          if(interjection)await stopInvocation(id,'user');
+          else if(!await manager.stop(id,expectedExecutionId))throw new DomainError('stop_unconfirmed',409,'Stop not confirmed; queued message is preserved');
         }
+        if(paused())return;
         if(live.get(id)?.preparing||['running','approval'].includes(chat(id).status)||manager.executionId(id)!==null&&manager.executionId(id)!==executionId)throw new DomainError('execution_changed',409,'Execution changed; refresh before sending');
         if(live.get(id)?.invocation||hasUnprovenNativeOccupancy(store,id)||store.database.prepare('SELECT owner_id FROM task_directory_claims WHERE conversation_id=? AND submitted=1').get(id))throw new DomainError('stop_unconfirmed',409,'Stop not confirmed; queued message is preserved');
         authorizeHumanContinuation(id);
@@ -2302,7 +2474,7 @@ export function createSessionManager(
           try{await client.assertReloadable(nativeId);}
           catch(error){
             if(!backgroundNotConfirmed(error))throw error;
-            if(!closed&&read()?.state==='queued'&&live.get(id)?.client===client&&chat(id).nativeId===nativeId)
+            if(!closed&&!paused()&&read()?.state==='queued'&&live.get(id)?.client===client&&chat(id).nativeId===nativeId)
               waitForQueuedBackground(id,inputId,client,nativeId);
             return;
           }
@@ -2310,11 +2482,11 @@ export function createSessionManager(
           if(live.get(id)?.client!==client||chat(id).nativeId!==nativeId)throw new DomainError('execution_changed',409,'Execution changed; refresh before sending');
           authorizeHumanContinuation(id);
         }
-        input=read();if(!input||input.state!=='queued')return;
-        store.database.prepare("UPDATE task_user_inputs SET state='running' WHERE id=? AND state='queued'").run(input.id);
+        input=read();if(!input||input.state!=='queued'||paused())return;
+        store.database.prepare("UPDATE task_user_inputs SET state='running',context_window_hold=0 WHERE id=? AND state='queued'").run(input.id);
         await run(id,input.text,true,false,undefined,input.id,attachments,input.references,true);
       } finally {
-        queueStarts.delete(id);
+        interjections.delete(id);queueStarts.delete(id);
         if(!closed&&!backgroundSends.has(id))queueMicrotask(()=>{void pump(id);});
       }
     },
@@ -2361,10 +2533,57 @@ export function createSessionManager(
     async callBoundTool(token, name, args, commandKey) {
       const bound = tools.get(token), runtime = bound && live.get(bound.conversationId);
       if (!bound || !runtime || runtime.runId !== bound.invocationId || !runtime.invocation || runtime.stopRequested || runtime.controller.signal.aborted) throw new DomainError("forbidden",403,"Expired tool binding");
+      const assertBlueprintInvocation=()=>{
+        if(tools.get(token)!==bound||live.get(bound.conversationId)!==runtime||runtime.runId!==bound.invocationId||!runtime.invocation||runtime.stopRequested||runtime.controller.signal.aborted)throw new DomainError('forbidden',403,'Expired blueprint binding');
+      };
+      const blueprintAccess=(config:Config)=>{
+        assertBlueprintInvocation();bindProjectMembership(config);
+        const source=chat(bound.conversationId);
+        if(source.agentId!==bound.agentId||source.projectId!==bound.projectId)throw new DomainError('forbidden',403,'Execution scope changed');
+        const available=readableBlueprints(config,source);
+        return new Map([...(runtime.blueprintReadable??[])].filter(([id,plan])=>available.get(id)===plan));
+      };
+      const report=async(task:{id:string;revision:number;projectIds:string[]})=>{
+        if(!runtime.blueprintReadable?.size)return [];
+        const available=blueprintAccess(await loadConfig());
+        if(!task.projectIds.some(id=>available.has(id)))return [];
+        const reference=tasks.getTask(root,task.id).moduleRef;
+        const facts=await taskBlueprintFacts({...task,moduleRef:reference},available,plans,blueprints.recordsFor);
+        const principal={...root,...(bound.agentId?{agentId:bound.agentId}:{})};
+        const verifiedConfig=await loadConfig(),final=blueprintAccess(verifiedConfig);
+        const latest=isSystemAgent(verifiedConfig,bound.agentId)?(await tasks.observeTasks(principal)).find(t=>t.id===task.id):tasks.getTask(principal,task.id);
+        assertBlueprintInvocation();
+        if(!latest||latest.revision!==task.revision||task.projectIds.some(id=>!latest.projectIds.includes(id)))throw new DomainError('blueprint_scope_changed',409,'Task changed during blueprint read');
+        if(task.projectIds.some(id=>available.has(id)&&(blueprintBindings(home)?.plans.get(id)!==available.get(id)||!canPublishBlueprint(home,id,bound.agentId,bound.projectId===id))))throw new DomainError('blueprint_scope_changed',403,'Project access changed during blueprint read');
+        return facts.filter(f=>final.get(f.projectId)===available.get(f.projectId)&&latest.projectIds.includes(f.projectId));
+      };
+      if(name.startsWith('blueprint_')){
+        const fields:Record<string,string[]>={blueprint_summary:[],blueprint_record:['result','decisions','lanes'],blueprint_report:['taskId']};
+        if(!fields[name]||Object.keys(args).some(k=>!fields[name].includes(k)))throw new DomainError('invalid_tool_arguments',422,'Invalid blueprint arguments');
+        if(!runtime.blueprintReadable?.size)throw new DomainError('forbidden',403,'Blueprint unavailable');
+        if(name==='blueprint_report'){
+          if(typeof args.taskId!=='string')throw new DomainError('invalid_tool_arguments',422,'Task ID required');
+          const config=await loadConfig();assertBlueprintInvocation();bindProjectMembership(config);
+          const p={...root,...(bound.agentId?{agentId:bound.agentId}:{})};
+          const task=isSystemAgent(config,bound.agentId)?(await tasks.observeTasks(p)).find(t=>t.id===args.taskId):tasks.getTask(p,args.taskId);
+          if(!task)throw new DomainError('task_not_found',404,'Task unavailable');
+          return report(task);
+        }
+        const scope=runtime.blueprintScope,available=blueprintAccess(await loadConfig());
+        if(!scope||available.get(scope.projectId)!==scope.planId)throw new DomainError('forbidden',403,'Blueprint unavailable');
+        const snapshot=await plans.readSummary(scope.projectId,scope.planId);
+        if(blueprintAccess(await loadConfig()).get(scope.projectId)!==scope.planId)throw new DomainError('forbidden',403,'Blueprint scope changed');
+        if(name==='blueprint_summary')return snapshot;
+        if(Array.isArray(args.lanes)&&args.lanes.some(lane=>!snapshot.modules.some(m=>m.lane===lane)))throw new DomainError('blueprint_lane_missing',422,'Select an existing blueprint module');
+        const principal={...root,...(bound.agentId?{agentId:bound.agentId}:{})};
+        const task=scope.taskId?tasks.getTask(principal,scope.taskId):tasks.listLinkedTasks(principal,scope.conversationId).find(t=>t.executions.some(e=>e.conversationId===scope.conversationId&&!e.supersededByExecutionId));
+        if(!task)throw new DomainError('blueprint_task_unavailable',409,'An associated execution task is required before staging a record');
+        return blueprints.stage(scope,task,args,commandKey);
+      }
       if(name.startsWith('mandala_')){
         const source={agentId:bound.agentId,conversationId:bound.conversationId,invocationId:bound.invocationId,humanEventId:runtime.humanEventId,assertActive:()=>assertActive()};
         const assertActive=()=>{if(tools.get(token)!==bound||live.get(bound.conversationId)!==runtime||runtime.runId!==bound.invocationId||!runtime.invocation||runtime.stopRequested||runtime.controller.signal.aborted)throw new DomainError('forbidden',403,'Expired tool binding');};
-        await coordination.verify(source);assertActive();
+        bindProjectMembership(await coordination.verify(source));assertActive();
         const fields:Record<string,string[]>={mandala_directory:['query','projectId'],mandala_discover_capabilities:['runtimes','directories','query','limit'],mandala_discover_work:['runtimes','includePaths','excludePaths','limit'],mandala_planning_guide:[],mandala_goals:[],mandala_receipts:['taskId'],mandala_create:['goal','criteria','projectId'],mandala_takeover:['taskId','expectedRevision','criteria'],mandala_request:['taskId','expectedRevision','text','blocked'],mandala_configure:['change','mode'],mandala_temporary:['templateAgentId','name','projectId'],mandala_delegate:['taskId','targetAgentId','projectId','request','criteria']};
         if(!fields[name]||!args||Array.isArray(args)||Object.keys(args).some(k=>!fields[name].includes(k)))throw new DomainError('invalid_tool_arguments',422,'Unknown coordination argument');
         if(Object.hasOwn(args,'criteria'))args={...args,criteria:boundTaskCriteria(args.criteria)};
@@ -2376,10 +2595,16 @@ export function createSessionManager(
         }
         if(name==='mandala_directory'){
           if(Object.keys(args).length){const current=await coordination.verify(source);assertActive();return mandalaRoutingDirectory(current,args);}
-          const config=await loadConfig();assertActive();return {...mandalaDirectory(config),invocation:{tasks:true,automations:!!automationService,project:!!bound.projectId,assets:!!runtime.artifacts,memory:!!memoryRuntime,skills:!!skillTools,wiki:!!(bound.projectId||bound.agentId),codeGraph:!!runtime.codeGraphScope?.bindings.length,coordinator:true}};}
+          const config=await loadConfig();assertActive();return {...mandalaDirectory(config),invocation:{tasks:true,automations:!!automationService,project:!!bound.projectId,messages:!!bound.projectId||chat(bound.conversationId).purpose==='mandala-main',assets:!!runtime.artifacts,memory:!!memoryRuntime,skills:!!skillTools,wiki:!!(bound.projectId||bound.agentId),codeGraph:!!runtime.codeGraphScope?.bindings.length,coordinator:true}};}
         if(name==='mandala_goals')return coordination.list().map(own=>({...own,task:tasks.getTask({...root,agentId:source.agentId},own.taskId)}));
-        if(name==='mandala_receipts'){coordination.requireOwned(source,String(args.taskId));const p={...root,agentId:source.agentId};return tasks.listReceipts(p,String(args.taskId));}
-        if(name==='mandala_create')return coordination.create(source,args as unknown as Parameters<typeof coordination.create>[1],commandKey);
+        if(name==='mandala_receipts'){
+          const id=String(args.taskId),p={...root,agentId:source.agentId};
+          coordination.requireOwned(source,id);
+          const blueprint=await report(tasks.getTask(p,id));assertActive();
+          const receipts=tasks.listReceipts(p,id);
+          return blueprint.length?receipts.map((r,i)=>i===receipts.length-1?{...r,blueprint}:r):receipts;
+        }
+        if(name==='mandala_create')return coordination.requestCreation(source,args as unknown as Parameters<typeof coordination.create>[1],commandKey);
         if(name==='mandala_takeover')return coordination.takeover(source,args as unknown as Parameters<typeof coordination.takeover>[1],commandKey);
         if(name==='mandala_request')return coordination.request(source,args as unknown as Parameters<typeof coordination.request>[1],commandKey);
         if(name==='mandala_configure')return coordination.configure(source,args.change as import('../shared/mandala-coordination').ManagedChange,args.mode as 'direct'|'propose',commandKey,assertActive);
@@ -2498,7 +2723,9 @@ export function createSessionManager(
         if(!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!allowed.includes(k)))throw new DomainError('invalid_tool_arguments',422,'Unknown Task or conversation argument');
         if(Object.hasOwn(args,'criteria'))args={...args,criteria:boundTaskCriteria(args.criteria)};
         const config=await loadConfig();
-        if(tools.get(token)!==bound||runtime.invocation===undefined||runtime.stopRequested||runtime.controller.signal.aborted)throw new DomainError('forbidden',403,'Expired tool binding');
+        bindProjectMembership(config);
+        const assertActive=()=>{if(tools.get(token)!==bound||live.get(bound.conversationId)!==runtime||runtime.runId!==bound.invocationId||runtime.invocation===undefined||runtime.stopRequested||runtime.controller.signal.aborted)throw new DomainError('forbidden',403,'Expired tool binding');};
+        assertActive();
         const canRead=(id:string)=>{
           const c=chat(id);
           if(source.agentId!==c.agentId)throw new DomainError('forbidden',403,'Conversation unavailable to this Agent');
@@ -2511,19 +2738,33 @@ export function createSessionManager(
         if(name==='conversation_read'||name==='conversation_history'){
           if(typeof args.conversationId!=='string')throw new DomainError('invalid_tool_arguments',422,'Conversation ID required');
           const c=canRead(args.conversationId),after=args.after??0;if(!Number.isSafeInteger(after)||Number(after)<0)throw new DomainError('invalid_tool_arguments',422,'Invalid event cursor');
-          const events=store.listAgentHistory(c.id,Math.max(Number(after),mandalaWriterBoundary(store,c.id)?.id??0),name==='conversation_read');
+          const history=store.listAgentHistory(c.id,Math.max(Number(after),mandalaWriterBoundary(store,c.id)?.id??0),name==='conversation_read');
+          const events=c.id===source.id?messages.withOutgoingRoutes(c.id,history,mandalaContextBoundary(store,c.id)):history;
           return name==='conversation_read'?{conversation:{id:c.id,title:c.title,projectId:c.projectId,agentId:c.agentId,status:c.status},events}:events;
         }
-        if(name==='task_list'&&isSystemAgent(config,source.agentId)){const observed=await tasks.observeTasks(p);return observed.filter(t=>(!args.projectId||t.projectId===args.projectId)&&(!args.query||t.goal.toLowerCase().includes(String(args.query).toLowerCase()))&&(!args.conversationId||tasks.listTasks(p).some(own=>own.id===t.id&&own.conversationIds.includes(String(args.conversationId))))).slice(0,100);}
-        if(name==='task_read'&&isSystemAgent(config,source.agentId)){if(typeof args.taskId!=='string')throw new DomainError('invalid_tool_arguments',422,'Task ID required');const observed=await tasks.observeTasks(p);const task=observed.find(t=>t.id===args.taskId);if(!task)throw new DomainError('task_not_found',404,'task_not_found');return task;}
-        if(name==='task_runs'&&isSystemAgent(config,source.agentId)){if(typeof args.taskId!=='string')throw new DomainError('invalid_tool_arguments',422,'Task ID required');return tasks.observeRuns(p,args.taskId);}
-        if(name==='task_list')return tasks.listTasks(p).filter(t=>(!args.projectId||t.projectId===args.projectId)&&(!args.conversationId||t.conversationIds.includes(String(args.conversationId)))&&(!args.query||t.goal.toLowerCase().includes(String(args.query).toLowerCase()))).slice(0,100);
+        if(name==='task_list'&&isSystemAgent(config,source.agentId)){const observed=await tasks.observeTasks(p);return observed.filter(t=>(!args.projectId||t.projectIds.includes(String(args.projectId)))&&(!args.query||t.goal.toLowerCase().includes(String(args.query).toLowerCase()))&&(!args.conversationId||t.originConversationId===args.conversationId||tasks.listTasks(p).some(own=>own.id===t.id&&own.conversationIds.includes(String(args.conversationId))))).slice(0,100);}
+        if(name==='task_read'&&isSystemAgent(config,source.agentId)){if(typeof args.taskId!=='string')throw new DomainError('invalid_tool_arguments',422,'Task ID required');const observed=await tasks.observeTasks(p);const task=observed.find(t=>t.id===args.taskId);if(!task)throw new DomainError('task_not_found',404,'task_not_found');const blueprint=await report(task);return blueprint.length?{...task,blueprint}:task;}
+        if(name==='task_runs'&&isSystemAgent(config,source.agentId)){
+          if(typeof args.taskId!=='string')throw new DomainError('invalid_tool_arguments',422,'Task ID required');
+          const runs=await tasks.observeRuns(p,args.taskId);
+          if(source.purpose!=='mandala-main')return runs;
+          const routes=new Map(coordination.delegatedChats(source.id,{taskId:args.taskId}).map(({runId,...followUp})=>[runId,followUp]));
+          return runs.map(run=>routes.has(run.id)?{...run,followUp:routes.get(run.id)}:run);
+        }
+        if(name==='task_list')return tasks.listTasks(p).filter(t=>(!args.projectId||t.projectIds.includes(String(args.projectId)))&&(!args.conversationId||t.originConversationId===args.conversationId||t.conversationIds.includes(String(args.conversationId)))&&(!args.query||t.goal.toLowerCase().includes(String(args.query).toLowerCase()))).slice(0,100);
         if(name==='task_runs'){if(typeof args.taskId!=='string')throw new DomainError('invalid_tool_arguments',422,'Task ID required');return tasks.listRuns(p,args.taskId);}
-        if(name==='task_read'){if(typeof args.taskId!=='string')throw new DomainError('invalid_tool_arguments',422,'Task ID required');return tasks.getTask(p,args.taskId);}
+        if(name==='task_read'){if(typeof args.taskId!=='string')throw new DomainError('invalid_tool_arguments',422,'Task ID required');const task=tasks.getTask(p,args.taskId),blueprint=await report(task);return blueprint.length?{...task,blueprint}:task;}
         if(name==='task_create'){
           if(!Object.hasOwn(args,'projectId'))throw new DomainError('invalid_tool_arguments',422,'Explicit projectId required; null is allowed');
           validateTaskConfiguration(config,args);if(args.projectId!==null&&source.agentId&&!isSystemAgent(config,source.agentId)&&!config.projects.find(v=>v.id===args.projectId)?.agentIds.includes(source.agentId))throw new DomainError('forbidden',403,'Project unavailable to this Agent');
-          return tasks.createTask(p,args as unknown as import('../shared/tasks').TaskInput,commandKey);
+          const input=args as unknown as import('../shared/tasks').TaskInput;
+          if(isSystemAgent(config,source.agentId)){
+            const review=await coordination.suggest({agentId:source.agentId,conversationId:source.id,invocationId:bound.invocationId,humanEventId:runtime.humanEventId,assertActive},input,commandKey,false);
+            if(review)return review;
+          }
+          if(input.originConversationId===undefined||input.originConversationId===source.id)
+            return tasks.createTaskFromChat(p,input,source.id,commandKey);
+          return tasks.createTask(p,input,commandKey);
         }
         if(typeof args.taskId!=='string')throw new DomainError('invalid_tool_arguments',422,'Task ID required');
         const {taskId,expectedRevision,...patch}=args;
@@ -2583,7 +2824,7 @@ export function createSessionManager(
       }
       if (name === "delegate" && Object.keys(args).some(key=>!["targetAgentId","request","targetConversationId","policy"].includes(key))) throw new DomainError("invalid_tool_arguments",422,"Unknown delegation argument");
       if (name === "delegate") {
-        if(chat(bound.conversationId).purpose==='mandala-main')throw new DomainError('coordinator_delegation_required',422,'Use mandala create then mandala delegate for a tracked goal with an explicit executor and projectId (null allowed); use messages ask for a conversation-only inquiry. tasks delegate requires a Project and Agent execution context.');
+        if(chat(bound.conversationId).purpose==='mandala-main')throw new DomainError('coordinator_delegation_required',422,'Use mandala directory to select an authorized Agent and Project. For a one-off inquiry, use messages ask with targetAgentId, explicit targetProjectId (null for no Project) and text. For separate execution that needs tracking, use mandala delegate on an owned goal with taskId, targetAgentId, explicit projectId (null allowed), request and criteria.');
         const {id,targetConversationId,status} = await this.createTask(bound.conversationId, String(args.targetAgentId ?? ""), String(args.request ?? ""), args.targetConversationId as string | undefined, {policy:args.policy as "notify" | "resume" | undefined,commandKey,boundInvocationId:bound.invocationId});
         return {id,targetConversationId,status};
       }
@@ -2645,6 +2886,12 @@ export function createSessionManager(
       if (expectedExecutionId !== undefined && (live.get(id)?.runId ?? null) !== expectedExecutionId)
         throw new DomainError('execution_changed', 409, 'Execution changed; refresh before stopping');
       if(chat(id).purpose==='mandala-main'){
+        if(!continueQueued){
+          interjections.delete(id);
+          const waiting=backgroundSends.get(id);
+          if(waiting){clearTimeout(waiting.timer);backgroundSends.delete(id);}
+        }
+        messages.stop(id);
         coordination.pauseDelivery(id);
         if(live.get(id)?.preparing||['running','approval'].includes(chat(id).status))await stopInvocation(id,source);
         const confirmed=!live.get(id)?.invocation&&!hasUnprovenNativeOccupancy(store,id)&&!store.database.prepare('SELECT owner_id FROM task_directory_claims WHERE conversation_id=? AND submitted=1').get(id);
@@ -2689,7 +2936,8 @@ export function createSessionManager(
         if(!approval)throw new Error('question expired');
         const text=asyncQuestionReply(approval,answers);
         const input=telegramRequestId?manager.enqueueTelegramInput(id,text,telegramRequestId,[]):manager.enqueueUserInput(id,text,approval.id);
-        store.appendEvent(id,'metadata',{answeredQuestionId:approval.id,queuedInputId:input.id});
+        const publicQuestionItems=nativeQuestions(approval).flatMap((q,index)=>q.isSecret===false||q.isSecret===undefined?[JSON.stringify(['request_user_input_async',approval.nativeRequestId,index])]:[]);
+        store.appendEvent(id,'metadata',{answeredQuestionId:approval.id,queuedInputId:input.id,publicQuestionItems});
         return input;
       };
       return store.database.isTransaction?submit():store.transaction(submit);
@@ -2830,6 +3078,7 @@ export function createSessionManager(
         state(id,'interrupted','service_closed');
       }
       for (const runtime of runtimes) {
+        if(runtime.blueprintScope)blueprints.finish(runtime.blueprintScope.invocationId,'unknown');
         if(runtime.queuedInputId&&messages.metadata(runtime.queuedInputId))messages.finish(runtime.queuedInputId,'unknown','');
         if(runtime.durableRun)tasks.markUnknown(runtime.durableRun.id);
         if(runtime.queuedInputId)scheduler.reconcileInput(runtime.queuedInputId,false);
@@ -2837,7 +3086,7 @@ export function createSessionManager(
       }
       lifetime.abort();
       for(const r of runtimes)r.finishStop?.();
-      const stops=[writerRecovery.close(),...(skillLearning?[skillLearning.close()]:[]),...nativeClients.map(async client=>{
+      const stops=[writerRecovery.close(),blueprints.flush(),...(skillLearning?[skillLearning.close()]:[]),...nativeClients.map(async client=>{
         const inputs=entries.filter(([id,runtime])=>!chat(id).executionLocation&&chat(id).cli==='omp'&&runtime.client===client&&!runtime.durableRun&&runtime.queuedInputId&&runtime.invocation?.nativeTurnId);
         await client.close();
         // OMP close waits for its process to exit. Its outcome remains unconfirmed,
@@ -2865,7 +3114,17 @@ export function createSessionManager(
       return closing;
     },
   };
-  const invoke=manager.callBoundTool.bind(manager);
+  void blueprints.flush().catch(()=>{});
+  const call=manager.callBoundTool.bind(manager);
+  const invoke:SessionManager['callBoundTool']=async(token,name,args,key)=>{
+    const agentId=tools.get(token)?.agentId;
+    if (!agentId || !name.startsWith('task_') && !name.startsWith('mandala_') && !name.startsWith('blueprint_')) return call(token,name,args,key);
+    // Coordinating commands can rebuild the principal. Keep membership local to this verified call.
+    const scope:{agentId:string; projects:Set<string> | null}={agentId,projects:new Set()};
+    try { return await projectAccess.run(scope,()=>call(token,name,args,key)); }
+    finally { scope.projects=null; }
+  };
+
   // Payload proof lives only as a digest while the invocation binding exists;
   // do not expose it in timeline events or attempt to reconstruct it on reload.
   const uncertainPayloads=new WeakMap<object,Map<string,string>>();
@@ -2905,7 +3164,11 @@ export function createSessionManager(
     const inquiryOutcome:NonNullable<ReturnType<typeof projectOperationOutcome>>={kind:'task',name:'',facts:{}};
     try{
       const result=await invoke(token,name,args,commandKey),outcome=inquiry?inquiryOutcome:projectOperationOutcome(name,args,result);
-      if(outcome)record(outcome,'succeeded');return result;
+      if(outcome){
+        if(name==='task_start'&&!scheduler.didDispatch(result as Run))outcome.facts.unchanged='true';
+        record(outcome,'succeeded');
+      }
+      return result;
     }catch(error){
       const active=tools.get(token)===bound&&live.get(bound.conversationId)===runtime&&runtime.runId===bound.invocationId&&!!runtime.invocation&&!runtime.stopRequested&&!runtime.controller.signal.aborted;
       if(inquiry){

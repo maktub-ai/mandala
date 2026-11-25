@@ -25,6 +25,49 @@ async function setup(limit?:number, prepare?:()=>Promise<void>,stage:'resume'|'t
  const started=(entry=entries[0])=>entry.options.onEvent({method:'turn/started',params:{threadId:entry.native,turn:{id:entry.native+'-turn-'+entry.turn}}});
  return {home,store,manager,chat,entries,finish,started,factory};
 }
+it('recovers a primary-chat input shut down before native binding and delivers the next interjection once',async()=>{
+ const {manager,chat,store,entries,finish}=await setup();
+ const old=manager.enqueueUserInput(chat.id,'Old question','old');
+ // The service closed during preparation, after logging the input but before binding its native invocation.
+ store.database.prepare("UPDATE task_user_inputs SET state='unknown' WHERE id=?").run(old.id);
+ store.database.prepare("INSERT INTO task_native_uncertainty VALUES ('input',?,?)").run(old.id,chat.id);
+ store.appendEvent(chat.id,'user',{queuedInputId:old.id,invocationId:'old-run',runId:'old-run',text:'Old question'});
+ store.appendEvent(chat.id,'error',{runId:'old-run',code:'service_closed'});
+ store.updateConversation(chat.id,{status:'interrupted'});
+ await manager.reconcileRuns('local');
+ expect(manager.listUserInputs(chat.id).find(item=>item.id===old.id)?.state).toBe('cancelled');
+ const next=manager.interject(chat.id,'Current question','current');
+ await expect.poll(()=>store.listEvents(chat.id,0).filter(e=>e.kind==='user'&&(e.data as any).queuedInputId===next.id)).toHaveLength(1);
+ await expect.poll(()=>entries.at(-1)?.input).toContain('Current question');
+ finish(entries.at(-1)!);
+ expect(store.listEvents(chat.id,0).filter(e=>e.kind==='user'&&(e.data as any).queuedInputId===old.id)).toHaveLength(1);
+});
+it('honors an explicit stop while a main chat correction waits for its predecessor',async()=>{
+ const {manager,chat,entries,started,finish}=await setup();
+ await manager.send(chat.id,'First');const first=entries[0];started(first);
+ let stopped!:()=>void;first.onInterrupt=()=>{stopped=()=>finish(first,'interrupted');};
+ const input=manager.interject(chat.id,'Wait for my correction','correct');
+ await expect.poll(()=>typeof stopped).toBe('function');
+ const stop=manager.stop(chat.id,manager.executionId(chat.id));stopped();
+ expect(await stop).toBe(true);
+ await new Promise<void>(resolve=>setImmediate(resolve));
+ expect(manager.listUserInputs(chat.id).find(i=>i.id===input.id)?.state).toBe('queued');
+ expect(entries[0].input).toBe('First');
+});
+it('accepts a main chat correction immediately and continues once after the foreground turn settles',async()=>{
+ const {manager,chat,entries,started,finish,store}=await setup();
+ await manager.send(chat.id,'Use yesterday');const original=entries[0];started(original);
+ let acknowledge!:()=>void;
+ original.onInterrupt=()=>{acknowledge=()=>finish(original,'interrupted');};
+ const input=manager.interject(chat.id,'Use today','correction');
+ expect(input.state).toBe('queued');
+ expect(manager.interject(chat.id,'Use today','correction').id).toBe(input.id);
+ await expect.poll(()=>typeof acknowledge).toBe('function');acknowledge();
+ await expect.poll(()=>entries.at(-1)?.input).toContain('Use today');
+ expect(store.listEvents(chat.id,0).filter(e=>e.kind==='user'&&(e.data as any).text==='Use today')).toHaveLength(1);
+ expect(store.listEvents(chat.id,0).some(e=>e.kind==='status'&&(e.data as any).userStopped)).toBe(true);
+ finish(entries.at(-1)!);
+});
 it('waits for the interrupted Codex thread before sending the selected input once',async()=>{
  const {manager,store,chat,entries,finish,started}=await setup();
  const unrelated=await manager.create('','worker');
@@ -351,6 +394,19 @@ it.each(['direct','queued'] as const)('revoked receipt history remains denied wh
  await recovered.send(chat.id,'Use this new file',await loadAttachments(home,chat.id,[fresh.id]));
  expect(entries.at(-1)!.input).toContain('fresh.txt');
  expect(entries.at(-1)!.instructions).not.toContain(published.asset.id);
+
+ const coordinator=entries.at(-1)!;
+ const nextGoal=await recovered.callBoundTool(coordinator.token,'mandala_create',{goal:'New public goal',criteria,projectId:null},'new-goal') as {id:string};
+ const nextRun=await recovered.callBoundTool(coordinator.token,'mandala_delegate',{taskId:nextGoal.id,targetAgentId:'worker',projectId:null,request:'Public follow-up',criteria},'new-child') as import('../shared/tasks').Run;
+ await expect.poll(()=>recovered.taskService.getRun(root,nextRun.id).state).toBe('running');
+ const worker=entries.at(-1)!;
+ expect(worker.input).toContain('Public follow-up');
+ expect(worker.input).not.toContain('DERIVED_PRIVATE_TEXT');
+ finish(worker);finish(coordinator);
+ await expect.poll(()=>recovered.taskService.listReceipts(root,nextGoal.id)[0]?.deliveryState).toBe('consumed');
+ expect(recovered.coordination.ownership(nextGoal.id)?.conversationId).toBe(chat.id);
+ expect(()=>assets.getAuthorizedAsset({...root,agentId:chat.agentId},published.asset.id)).toThrow('forbidden');
+ await expect(recovered.callBoundTool(entries.at(-1)!.token,'conversation_history',{conversationId:chat.id},'after-delegation')).rejects.toMatchObject({status:403});
 });
 it('lowering an Agent limit preserves active work and delays new admission until below capacity',async()=>{
  const {manager,home,entries,finish,store}=await setup(2);const chats=await Promise.all([1,2,3].map(()=>manager.create('','worker')));
@@ -566,10 +622,25 @@ it('executes ordinary system Project chats and self delegation without membershi
  expect(manager.taskService.listTasks({userId:store.ownerUserId})).toEqual([]);
  await manager.send(ordinary.id,'Coordinate Project work');expect(entries[0].cwd).toBe(home);
  const goal=await manager.callBoundTool(entries[0].token,'mandala_create',{goal:'Project goal',criteria,projectId:'p'},'goal') as {id:string};
+ expect(manager.taskService.getTask({userId:store.ownerUserId},goal.id)).toMatchObject({originConversationId:ordinary.id,conversationIds:[ordinary.id]});
+ expect(manager.taskService.listRuns({userId:store.ownerUserId},goal.id)).toEqual([]);
  const run=await manager.callBoundTool(entries[0].token,'mandala_delegate',{taskId:goal.id,targetAgentId:chat.agentId,projectId:'p',request:'Self work',criteria},'self') as import('../shared/tasks').Run;
  finish(entries[0]);await expect.poll(()=>entries.length).toBe(2);expect(entries[1].cwd).toBe(home);
  expect(run.continuation?.conversationId).toBe(ordinary.id);
  expect((await readConfig(home)).config.projects[0].agentIds).toEqual(['worker']);
+});
+it('global observation keeps task visibility without granting the system Agent repository labels',async()=>{
+ const {home,manager,chat,entries,store}=await setup(),owner={userId:store.ownerUserId};
+ const {config,revision}=await readConfig(home);
+ await writeConfig(home,{...config,projects:[...config.projects,{id:'restricted',name:'Restricted',cwd:home,resources:[],mcp:[],skills:[],agentIds:['worker']}]},revision);
+ const linked=store.createConversation({projectId:'',agentId:chat.agentId,attributedProjectId:'restricted',cli:'codex',model:null});
+ const task=manager.taskService.createTask(owner,{goal:'Check inherited visibility'},'observation-scope');
+ manager.taskService.attachExecution(owner,task.id,task.revision,linked.id,'observer-execution');
+ expect(manager.taskService.getTask(owner,task.id).projectIds).toEqual(['restricted']);
+ await manager.send(chat.id,'Observe');
+ const summary=await manager.callBoundTool(entries[0].token,'task_read',{taskId:task.id},'observe-scope');
+ expect(summary).toMatchObject({readOnly:true,id:task.id,projectIds:[]});
+ expect(await manager.callBoundTool(entries[0].token,'task_list',{projectId:'restricted'},'filter-scope')).toEqual([]);
 });
 it('system task observation projects global state without task mutation or raw conversation authority',async()=>{
  const {manager,chat,entries,store}=await setup();const root={userId:store.ownerUserId};
@@ -638,6 +709,115 @@ it('ordinary coordinator reports return to ownership source after restart',async
  expect(restarted.listUserInputs(chat.id)).toEqual([]);expect(restarted.coordination.ownership(goal.id)?.conversationId).toBe(ordinary.id);
 });
 
+it('returns an explicitly scoped one-off Agent reply to the primary chat without a Task',async()=>{
+ const {manager,home,chat,store,entries,finish}=await setup(),cfg=await readConfig(home),cwd=join(home,'worker-project');
+ await mkdir(cwd);
+ await writeConfig(home,{...cfg.config,projects:[{id:'p',name:'Project',cwd,agentIds:['worker'],resources:[],mcp:[],skills:[]}]},cfg.revision);
+ await manager.send(chat.id,'请 Worker 帮忙看一下，把结果发回这里');
+ const input={targetAgentId:'worker',targetProjectId:'p',text:'Check this figure'};
+ expect(entries[0].instructions).toMatch(/Available commands:[^.]*messages ask/);
+ const message=await manager.callBoundTool(entries[0].token,'message_ask',input,'ask') as import('../shared/agent-messages').AgentMessage;
+ expect((await manager.callBoundTool(entries[0].token,'message_ask',input,'ask'))).toMatchObject({id:message.id});
+ await expect(manager.callBoundTool(entries[0].token,'message_ask',{...input,targetProjectId:null},'ask')).rejects.toMatchObject({code:'idempotency_conflict'});
+ expect(store.getConversation(message.targetConversationId)).toMatchObject({projectId:'p',agentId:'worker',cwd});
+ const route={messageId:message.id,targetConversationId:message.targetConversationId,targetAgentId:'worker',targetProjectId:'p'};
+ const args={conversationId:chat.id};
+ const history=await manager.callBoundTool(entries[0].token,'conversation_history',args,'find-prior-inquiry') as import('../shared/types').DisplayEvent[];
+ expect(history.find(event=>event.id===message.sourceRequestEventId)?.data).toMatchObject({outgoingInquiries:[route]});
+ const latest=await manager.callBoundTool(entries[0].token,'conversation_read',args,'read-prior-inquiry') as {events:typeof history};
+ expect(latest.events.find(event=>event.id===message.sourceRequestEventId)?.data).toMatchObject({outgoingInquiries:[route]});
+ const later=await manager.callBoundTool(entries[0].token,'conversation_history',{...args,after:message.sourceRequestEventId},'later-history');
+ expect(JSON.stringify(later)).not.toContain(message.targetConversationId);
+ await expect(manager.callBoundTool(entries[0].token,'conversation_read',{conversationId:message.targetConversationId},'worker-history')).rejects.toMatchObject({status:403});
+ finish();await expect.poll(()=>entries.find(entry=>entry.input.includes('Check this figure'))?.turn).toBe(1);
+ const worker=entries.find(entry=>entry.input.includes('Check this figure'))!;
+ expect(worker.cwd).toBe(cwd);expect(worker.input).not.toContain('请 Worker');
+ await expect(manager.callBoundTool(worker.token,'conversation_read',{conversationId:chat.id},'primary-history')).rejects.toMatchObject({status:403});
+ worker.options.onEvent({method:'item/completed',params:{threadId:worker.native,turnId:worker.native+'-turn-1',item:{type:'agentMessage',id:'answer',phase:'final_answer',text:'Figure confirmed'}}});
+ finish(worker);
+ await expect.poll(()=>entries.some(entry=>entry.input.includes('Figure confirmed'))).toBe(true);
+ expect(store.getConversation(chat.id)?.cwd).toBe(chat.cwd);
+ expect(manager.taskService.listTasks({userId:store.ownerUserId})).toEqual([]);
+ expect(store.listConversations()).toHaveLength(2);
+});
+it('continues an earlier primary inquiry in the same worker thread',async()=>{
+ const {manager,chat,store,entries,finish}=await setup();
+ const request={targetAgentId:'worker',targetProjectId:null,text:'Check the report',policy:'notify'};
+ await manager.send(chat.id,'Ask the worker');
+ const first=await manager.callBoundTool(entries[0].token,'message_ask',request,'first') as import('../shared/agent-messages').AgentMessage;
+ finish();await expect.poll(()=>entries[1]?.turn,{timeout:5000}).toBe(1);
+ const worker=entries[1];
+ finish(worker);
+ await manager.send(chat.id,'Add the first-load detail to the same investigation');
+ const followup={...request,targetConversationId:first.targetConversationId,text:'Check the first load'};
+ const result=await manager.callBoundTool(entries.at(-1)!.token,'message_ask',followup,'followup') as import('../shared/agent-messages').AgentMessage;
+ expect(result.targetConversationId).toBe(first.targetConversationId);
+ await expect.poll(()=>entries.filter(entry=>entry.native===worker.native).at(-1)?.input,{timeout:5000}).toContain('Check the first load');
+ expect(store.listConversations()).toHaveLength(2);
+ expect(manager.taskService.listTasks({userId:store.ownerUserId})).toEqual([]);
+});
+it('queues a primary clarification on its running delegated execution and preserves Task acceptance',async()=>{
+ const {manager,chat,store,entries,finish}=await setup(),root={userId:store.ownerUserId};
+ await manager.send(chat.id,'Track the report investigation');const token=entries[0].token;
+ const goal=await manager.callBoundTool(token,'mandala_create',{goal:'Investigate the report',criteria,projectId:null},'goal') as {id:string};
+ const run=await manager.callBoundTool(token,'mandala_delegate',{taskId:goal.id,targetAgentId:'worker',projectId:null,request:'Check the report',criteria},'delegate') as import('../shared/tasks').Run;
+ await expect.poll(()=>entries[1]?.turn,{timeout:5000}).toBe(1);const worker=entries[1],target=run.routing!.executionConversationId;
+ finish();
+ await manager.send(chat.id,'Also check the first load');
+ const followup={targetAgentId:'worker',targetProjectId:null,targetConversationId:target,text:'Check the first load',policy:'notify'};
+ const sourceToken=entries.filter(entry=>entry.native===entries[0].native).at(-1)!.token;
+ const message=await manager.callBoundTool(sourceToken,'message_ask',followup,'clarification') as import('../shared/agent-messages').AgentMessage;
+ expect(await manager.callBoundTool(sourceToken,'message_ask',followup,'clarification')).toMatchObject({id:message.id});
+ expect(message).toMatchObject({targetConversationId:target,state:'queued'});
+ expect(manager.taskService.getRun(root,run.id).state).toBe('running');
+ finish(worker);
+ await expect.poll(()=>entries.filter(entry=>entry.native===worker.native).at(-1)?.input,{timeout:5000}).toContain('Check the first load');
+ const resumed=entries.filter(entry=>entry.native===worker.native).at(-1)!;
+ const targetChat=store.getConversation(target)!;
+ expect(targetChat.nativeId).toBe(worker.native);
+ expect(store.listEvents(target,0).filter(event=>event.kind==='user')).toHaveLength(2);
+ const before=manager.taskService.getTask(root,goal.id);
+ resumed.options.onEvent({method:'item/completed',params:{threadId:resumed.native,turnId:targetChat.turnId,item:{type:'agentMessage',id:'answer',phase:'final_answer',text:'First load checked'}}});
+ finish(resumed);await expect.poll(()=>manager.getAgentMessage(message.id).reply,{timeout:5000}).toBe('First load checked');
+ expect(manager.taskService.listRuns(root,goal.id).map(item=>item.id)).toEqual([run.id]);
+ expect(manager.taskService.getTask(root,goal.id)).toMatchObject({state:before.state,revision:before.revision,completion:before.completion});
+ expect(store.listConversations()).toHaveLength(2);
+});
+it('rejects a queued primary follow-up if its exact receiver is archived before delivery',async()=>{
+ const {manager,chat,store,entries,finish}=await setup();
+ await manager.send(chat.id,'Ask the worker');const token=entries[0].token;
+ const input={targetAgentId:'worker',targetProjectId:null,text:'Investigate',policy:'notify'};
+ const first=await manager.callBoundTool(token,'message_ask',input,'first') as import('../shared/agent-messages').AgentMessage;
+ await expect.poll(()=>manager.getAgentMessage(first.id).state,{timeout:5000}).toBe('running');
+ const followup={...input,targetConversationId:first.targetConversationId,text:'Additional detail'};
+ const second=await manager.callBoundTool(token,'message_ask',followup,'second') as import('../shared/agent-messages').AgentMessage;
+ store.archiveConversation(first.targetConversationId,true);
+ await expect(manager.callBoundTool(token,'message_ask',followup,'after-archive')).rejects.toMatchObject({status:403});
+ finish(entries[1]);
+ await expect.poll(()=>manager.getAgentMessage(second.id).state,{timeout:5000}).toBe('failed');
+ expect(store.listEvents(first.targetConversationId,0).filter(event=>event.kind==='user')).toHaveLength(1);
+ expect(store.listConversations()).toHaveLength(2);
+});
+it('enforces primary inquiry scope, membership and access to existing chats',async()=>{
+ const {manager,home,chat,entries,store}=await setup(),cfg=await readConfig(home);
+ await writeConfig(home,{...cfg.config,projects:[{id:'p',name:'Project',cwd:home,agentIds:[],resources:[],mcp:[],skills:[]}]},cfg.revision);
+ const privateChat=await manager.create('','worker');
+ await manager.send(chat.id,'Ask the worker');const args={targetAgentId:'worker',text:'Confirm'};
+ await expect(manager.callBoundTool(entries[0].token,'message_ask',args,'no-project')).rejects.toMatchObject({status:422});
+ await expect(manager.callBoundTool(entries[0].token,'message_ask',{...args,targetProjectId:'p'},'not-member')).rejects.toThrow();
+ await expect(manager.callBoundTool(entries[0].token,'message_ask',{...args,targetProjectId:null,targetConversationId:privateChat.id},'private')).rejects.toMatchObject({status:403});
+ expect(store.listConversations()).toHaveLength(2);expect(manager.listUserInputs(privateChat.id)).toEqual([]);
+});
+it('parks an outstanding unbound primary inquiry when the user stops its source',async()=>{
+ const {manager,chat,entries,store,finish}=await setup();await manager.send(chat.id,'Ask the worker');
+ const message=await manager.callBoundTool(entries[0].token,'message_ask',{targetAgentId:'worker',targetProjectId:null,text:'One-off question'},'unbound') as import('../shared/agent-messages').AgentMessage;
+ finish();await expect.poll(()=>manager.getAgentMessage(message.id).state).toBe('running');
+ await manager.stop(chat.id);
+ const target=entries.find(entry=>entry.input.includes('One-off question'))!;finish(target);
+ await expect.poll(()=>manager.getAgentMessage(message.id).replyState).toBe('parked');
+ expect(manager.listUserInputs(chat.id).filter(input=>input.agentMessage?.direction==='reply')).toEqual([]);
+ expect(manager.taskService.listTasks({userId:store.ownerUserId})).toEqual([]);
+});
 it('system Project askAgent executes without source membership and retains the Project directory',async()=>{
  const {manager,home,chat,entries,finish}=await setup();const cfg=await readConfig(home);
  await writeConfig(home,{...cfg.config,projects:[{id:'p',name:'Project',cwd:home,agentIds:['worker'],resources:[],mcp:[],skills:[]}]},cfg.revision);

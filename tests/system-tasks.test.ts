@@ -590,7 +590,7 @@ it('settled task progress calls the restricted native generator with only the ex
   }),close:vi.fn()};
  });
  config.system={cli:'omp',model:'fallback',tasks:{taskProgress:{cli:'codex',model:'judge-model'}}};
- const task:import('../shared/tasks').Task={automaticProgress:true,originConversationId:null,executions:[],id:'linked',goal:'Verify weekly list',criteria:[],state:'todo',revision:1,conversationIds:[id],ownerUserId:'local',creatorAgentId:null,acceptance:'human',projectId:null,assigneeAgentId:null,participantAgentIds:[],waitingReason:null,continuationEpoch:0,futureAutoResume:false,completion:null,legacyId:null,createdAt:new Date().toISOString()};
+ const task:import('../shared/tasks').Task={projectIds:[],projectIdsMode:'auto',moduleRef:null,automaticProgress:true,originConversationId:null,executions:[],id:'linked',goal:'Verify weekly list',criteria:[],state:'todo',revision:1,conversationIds:[id],ownerUserId:'local',creatorAgentId:null,acceptance:'human',projectId:null,assigneeAgentId:null,participantAgentIds:[],waitingReason:null,continuationEpoch:0,futureAutoResume:false,completion:null,legacyId:null,createdAt:new Date().toISOString()};
  const apply=vi.fn();
  const service=createSystemTasks({home,store,loadConfig:async()=>config,tasks:{snapshotProgress:()=>[{task,executions:[]}],applyTaskProgress:apply,applyTaskProgressBatch:()=>[]}});services.push(service);
  const sourceEventId=store.listEvents(id,0).at(-1)!.id;

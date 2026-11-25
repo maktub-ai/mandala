@@ -6,7 +6,7 @@ import {taskActivity} from './task-progress-view';
 import type { createAssets } from './assets';
 import { initializeTaskSchema } from './task-schema';
 import type { TaskExecution, TaskExecutionInput, Criterion, ContextSnapshot, Continuation, Receipt, Run, RunControl, RunIdentity, RunRouting, Task, TaskInput, TaskPatch, TaskProgressSnapshot, TaskProgressState, PlanStepInput, TerminalRunEvent, ExpectedOutput } from '../shared/tasks';
-import {isHumanInput} from '../shared/tasks';
+import {isHumanInput,projectTaskExecutions} from '../shared/tasks';
 import { DomainError, type Principal, type VersionRef } from '../shared/workspace-contracts';
 
 // Supplied by the trusted configuration/context service, never by a model tool argument.
@@ -17,7 +17,7 @@ export type TaskResolver = (principal: Principal, task: Task) => {
  continuation?: Continuation;
  reportRule?: NonNullable<Run['snapshot']>['rule'];
 };
-type TaskOptions = { authorizeObservation?: (principal: Principal) => Promise<void>; resolve?: TaskResolver; authorizeConversation?: (principal: Principal, id: string) => void; assets?: Pick<ReturnType<typeof createAssets>, 'getAuthorizedVersion' | 'getAuthorizedAsset' | 'readAssetFile'> };
+type TaskOptions = { onCompleted?: (task:Task)=>void; canReadProject?: (principal:Principal,projectId:string)=>boolean; authorizeObservation?: (principal: Principal) => Promise<void>; resolve?: TaskResolver; authorizeConversation?: (principal: Principal, id: string, purpose?: 'origin') => void; assets?: Pick<ReturnType<typeof createAssets>, 'getAuthorizedVersion' | 'getAuthorizedAsset' | 'readAssetFile'> };
 const fail = (code: string, status: number): never => { throw new DomainError(code, status, code); };
 function canonical(value: unknown): string {
  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -32,18 +32,22 @@ const parse = <T>(value: unknown): T => JSON.parse(value as string) as T;
 export function createTasks(store: Store, options: TaskOptions = {}) {
  const db = store.database;
  initializeTaskSchema(store);
- const taskRow = (row: Record<string, unknown>): Task => ({
-  ...taskActivity(store,row.id as string,row.created_at as string),
-  creationSource:(db.prepare('SELECT source FROM task_creation_sources WHERE task_id=?').get(row.id as string)?.source??(row.creator_agent_id?'agent':'unknown')) as Task['creationSource'],
-  id: row.id as string, ownerUserId: row.owner_user_id as string, creatorAgentId: row.creator_agent_id as string | null,
-  automaticProgress: Boolean(row.automatic_progress), goal: row.goal as string, criteria: parse(row.criteria), acceptance: row.acceptance as Task['acceptance'],
-  projectId: row.project_id as string | null, assigneeAgentId: row.assignee_agent_id as string | null, originConversationId: row.origin_conversation_id as string | null, executions: executionRows(row.id as string),
-  participantAgentIds: db.prepare('SELECT agent_id FROM task_participants WHERE task_id=? ORDER BY agent_id').all(row.id as string).map(r=>r.agent_id as string),
-  conversationIds: executionRows(row.id as string).filter(execution=>!execution.supersededByExecutionId).map(execution=>execution.conversationId),
-  state: row.state as Task['state'], waitingReason: row.waiting_reason as Task['waitingReason'], revision: Number(row.revision),
-  continuationEpoch: Number(row.continuation_epoch), futureAutoResume: Boolean(row.future_auto_resume), completion: row.completion ? parse(row.completion) : null,
-  legacyId: row.legacy_id as string | null, createdAt: row.created_at as string,
- });
+ const taskRow = (row:Record<string,unknown>):Task => {
+  const executions=executionRows(row.id as string);
+  return projectTaskExecutions({
+   ...taskActivity(store,row.id as string,row.created_at as string),
+   creationSource:(db.prepare('SELECT source FROM task_creation_sources WHERE task_id=?').get(row.id as string)?.source??(row.creator_agent_id?'agent':'unknown')) as Task['creationSource'],
+   id: row.id as string, ownerUserId: row.owner_user_id as string, creatorAgentId: row.creator_agent_id as string | null,
+   automaticProgress: Boolean(row.automatic_progress), goal: row.goal as string, criteria: parse(row.criteria), acceptance: row.acceptance as Task['acceptance'],
+   projectId: row.project_id as string | null, assigneeAgentId: row.assignee_agent_id as string | null, originConversationId: row.origin_conversation_id as string | null, executions,
+   participantAgentIds: db.prepare('SELECT agent_id FROM task_participants WHERE task_id=? ORDER BY agent_id').all(row.id as string).map(r=>r.agent_id as string),
+   conversationIds:[],projectIds:row.project_ids_override===null?[]:parse<string[]>(row.project_ids_override),
+   projectIdsMode:row.project_ids_override===null?'auto':'manual',moduleRef:typeof row.module_ref==='string'&&row.module_ref.trimStart().startsWith('{')?parse<NonNullable<Task['moduleRef']>>(row.module_ref):null,
+   state: row.state as Task['state'], waitingReason: row.waiting_reason as Task['waitingReason'], revision: Number(row.revision),
+   continuationEpoch: Number(row.continuation_epoch), futureAutoResume: Boolean(row.future_auto_resume), completion: row.completion ? parse(row.completion) : null,
+   legacyId: row.legacy_id as string | null, createdAt: row.created_at as string,
+  },executions);
+ };
  const loadTask = (id: string): Task => { const row = db.prepare('SELECT * FROM work_tasks WHERE id=?').get(id); return row ? taskRow(row) : fail('task_not_found', 404); };
  const authorize = (p: Principal, task: Pick<Task, 'ownerUserId' | 'creatorAgentId' | 'assigneeAgentId' | 'participantAgentIds' | 'executions'>) => {
   if (!p.userId || p.userId !== task.ownerUserId || p.agentId !== undefined && p.agentId !== task.creatorAgentId && p.agentId !== task.assigneeAgentId && !task.participantAgentIds.includes(p.agentId) && !task.executions.some(execution=>execution.agentId===p.agentId)) fail('forbidden', 403);
@@ -68,9 +72,10 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
  });
  const executionRow = (row:Record<string,unknown>):TaskExecution => {
   const latest=db.prepare('SELECT * FROM task_runs WHERE execution_id=? ORDER BY attempt DESC LIMIT 1').get(row.id as string);
-  return {id:row.id as string,taskId:row.task_id as string,supersededByExecutionId:row.superseded_by_execution_id as string|null,conversationId:row.conversation_id as string,agentId:row.agent_id as string,projectId:row.project_id as string|null,request:row.request as string,criteria:parse(row.criteria),createdByAgentId:row.created_by_agent_id as string|null,commandKey:row.command_key as string|null,createdAt:row.created_at as string,title:store.getConversation(row.conversation_id as string)?.title??null,latestRun:latest?{...controlRow(latest)}:null};
+  const chat=store.getConversation(row.conversation_id as string);
+  return {...(chat?.attributedProjectId?{attributedProjectId:chat.attributedProjectId}:{}),id:row.id as string,taskId:row.task_id as string,supersededByExecutionId:row.superseded_by_execution_id as string|null,conversationId:row.conversation_id as string,agentId:row.agent_id as string,projectId:row.project_id as string|null,request:row.request as string,criteria:parse(row.criteria),createdByAgentId:row.created_by_agent_id as string|null,commandKey:row.command_key as string|null,createdAt:row.created_at as string,title:chat?.title??null,latestRun:latest?{...controlRow(latest)}:null};
  };
- const executionRows = (taskId:string):TaskExecution[] => db.prepare('SELECT * FROM task_executions WHERE task_id=? ORDER BY created_at,id').all(taskId).map(executionRow);
+ const executionRows = (taskId:string):TaskExecution[] => db.prepare('SELECT * FROM task_executions WHERE task_id=? ORDER BY created_at,rowid').all(taskId).map(executionRow);
  const loadExecution = (id:string):TaskExecution => {const row=db.prepare('SELECT * FROM task_executions WHERE id=?').get(id);return row?executionRow(row):fail('execution_not_found',404);};
  const writeExecution = (p:Principal,taskId:string,input:TaskExecutionInput,commandKey:string|null):TaskExecution => {
   const task=getTask(p,taskId);
@@ -95,12 +100,12 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
  const insertReceipt = (r: Receipt) => db.prepare('INSERT INTO task_receipts(id,task_id,source_run_id,destination_conversation_id,execution_id,captured_epoch,policy,delivery_state,claimed_by_run_id,summary,artifact_versions,legacy_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(
   r.id, r.taskId, r.sourceRunId, r.destinationConversationId, r.executionId, r.capturedEpoch, r.policy, r.deliveryState, r.claimedByRunId, r.summary, JSON.stringify(r.artifactVersions), r.legacyId, r.createdAt,
  );
- const replay = (p: Principal, key: string, body: unknown) => {
+ const replay = (p: Principal, key: string, body: unknown, legacyBody?:unknown) => {
   if (!nonempty(p.userId)) fail('forbidden', 403);
   if (!nonempty(key) || key.length > 200) fail('invalid_command_key', 422);
   const principal = canonical(p), payloadHash = hash(canonical(body));
   const row = db.prepare('SELECT * FROM task_command_dedup WHERE principal=? AND command_key=?').get(principal, key);
-  if (row && row.payload_hash !== payloadHash) fail('idempotency_conflict', 409);
+  if (row && row.payload_hash !== payloadHash && (legacyBody===undefined || row.payload_hash!==hash(canonical(legacyBody)))) fail('idempotency_conflict', 409);
   return { row, principal, payloadHash };
  };
  const saveCommand = (p: Principal, key: string, body: unknown, taskId: string, runId: string | null) => {
@@ -150,8 +155,13 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
    }
    return true;
   }catch(error){if(error instanceof DomainError&&(error.status===403||error.code==='assets_required'))return false;throw error;}
+ }).map(execution=>{
+  if(p.agentId===undefined||!execution.attributedProjectId||options.canReadProject?.(p,execution.attributedProjectId))return execution;
+  const {attributedProjectId,...visible}=execution;
+  return visible;
  });
- const taskView = <T extends Task>(p:Principal,task:T):T => {const executions=visibleExecutions(p,task);return {...task,executions,conversationIds:executions.filter(execution=>!execution.supersededByExecutionId).map(execution=>execution.conversationId)};};
+ const taskView = <T extends Task>(p:Principal,task:T):T => projectTaskExecutions(task,visibleExecutions(p,task),
+  p.agentId===undefined?undefined:projectId=>options.canReadProject?.(p,projectId)??false);
  const executionView = (p:Principal,execution:TaskExecution):TaskExecution => visibleExecutions(p,{...getTask(p,execution.taskId),executions:[execution]})[0]??fail('forbidden',403);
  // Execution state changes do not invalidate a sibling's suspended inquiry.
  // Goal edits and explicit task control deliberately leave its marker stale.
@@ -239,6 +249,15 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
     return loadRun(runId);
    } };
  };
+ const matchesTaskGoal=(task:Task,snapshot:Run['snapshot']|null)=>!snapshot||snapshot.goal===task.goal&&canonical(snapshot.criteria)===canonical(task.criteria)&&snapshot.acceptance===task.acceptance;
+ const reviewDelivery=(task:Task):{runId:string|null;conversationId:string|null}|null=>{
+  if(task.state!=='review')return null;
+  const latest=db.prepare(`SELECT r.id,r.state,r.execution_snapshot,e.conversation_id,e.superseded_by_execution_id FROM task_runs r JOIN task_executions e ON e.id=r.execution_id
+    WHERE r.task_id=? ORDER BY r.attempt DESC LIMIT 1`).get(task.id);
+  if(!latest)return {runId:null,conversationId:null};
+  const snapshot=latest.execution_snapshot?parse<NonNullable<Run['snapshot']>>(latest.execution_snapshot):null;
+  return latest.state==='succeeded'&&!latest.superseded_by_execution_id&&matchesTaskGoal(task,snapshot)?{runId:latest.id as string,conversationId:latest.conversation_id as string}:null;
+ };
  const executionProgress = (task:Task,fallback:Task['waitingReason']=null):{state:Task['state'];reason:Task['waitingReason'];completion:Task['completion']} => {
   if(['completed','cancelled'].includes(task.state))return {state:task.state,reason:task.waitingReason,completion:task.completion};
   const latest=db.prepare('SELECT r.* FROM task_executions e JOIN task_runs r ON r.id=(SELECT id FROM task_runs WHERE execution_id=e.id ORDER BY attempt DESC LIMIT 1) WHERE e.task_id=? AND e.superseded_by_execution_id IS NULL').all(task.id);
@@ -246,7 +265,7 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
   const failed=latest.find(row=>row.state&&row.state!=='succeeded'||row.state==='succeeded'&&!row.delivery_valid);
   if(failed)return {state:'waiting',reason:(failed.waiting_reason as Task['waitingReason'])??fallback??'run_failed',completion:null};
   if(!latest.length)return {state:'todo',reason:null,completion:null};
-  const matchesGoal=(row:Record<string,unknown>)=>{const snapshot=row.execution_snapshot?parse<NonNullable<Run['snapshot']>>(row.execution_snapshot):null;return !snapshot||snapshot.goal===task.goal&&canonical(snapshot.criteria)===canonical(task.criteria)&&snapshot.acceptance===task.acceptance;};
+  const matchesGoal=(row:Record<string,unknown>)=>{const snapshot=row.execution_snapshot?parse<NonNullable<Run['snapshot']>>(row.execution_snapshot):null;return matchesTaskGoal(task,snapshot);};
   const checked=task.acceptance==='checks'&&latest.every(row=>matchesGoal(row)&&row.completion&&parse<NonNullable<Task['completion']>>(row.completion).completedBy==='checks');
   const agent=latest.length===1&&latest[0].completion&&parse<NonNullable<Task['completion']>>(latest[0].completion).completedBy==='agent';
   const checkedCompletions=checked?latest.map(row=>parse<NonNullable<Task['completion']>>(row.completion)):[];
@@ -259,6 +278,7 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
   const task=loadTask(id),next=executionProgress(task);
   if(task.state===next.state&&task.waitingReason===next.reason)return;
   db.prepare('UPDATE work_tasks SET state=?,waiting_reason=?,completion=?,revision=revision+1 WHERE id=?').run(next.state,next.reason,next.completion?JSON.stringify(next.completion):null,id);
+  if(next.state==='completed'&&task.state!=='completed')options.onCompleted?.(loadTask(id));
   advanceInquiryRevision(id,task.revision);
   store.enqueueOutbox({type:'task.progress_updated',aggregateId:id,aggregateRevision:task.revision+1,causationId:`executions:${id}:${task.revision}`,payload:{taskId:id,state:next.state}});
  };
@@ -278,7 +298,7 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
     const delivered = available && Boolean(event.summary.trim() || outputs.length) && !invalidOutput && (snapshot?.requiredOutputAssetIds ?? []).every(id => outputs.some(v => v.assetId === id));
     const terminal=['completed','cancelled'].includes(task.state);
     const checkedRun = delivered && integrity==='passed' && event.outcome==='succeeded';
-    const currentGoal = !run.snapshot || run.snapshot.goal===task.goal&&canonical(run.snapshot.criteria)===canonical(task.criteria)&&run.snapshot.acceptance===task.acceptance;
+    const currentGoal = matchesTaskGoal(task,run.snapshot);
     const intent=db.prepare('SELECT * FROM task_completion_intents WHERE run_id=?').get(run.id);
     const pendingInquiries=Boolean(run.routing&&db.prepare("SELECT name FROM sqlite_master WHERE name='agent_messages'").get()&&db.prepare("SELECT id FROM agent_messages WHERE source_conversation_id=? AND auto_resume_allowed=1 AND reply_state IN ('pending','queued') LIMIT 1").get(run.routing.executionConversationId));
     const deferredInquiry=!terminal&&pendingInquiries&&event.outcome==='succeeded'&&available&&!invalidOutput&&integrity!=='failed';
@@ -296,6 +316,7 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
     const accepted=terminal?task.completion:aggregate.completion;
     if(!terminal&&state==='completed')db.prepare("UPDATE task_receipts SET policy='notify' WHERE task_id=? AND captured_epoch=? AND delivery_state IN ('pending','presented')").run(task.id,task.continuationEpoch);
     db.prepare('UPDATE work_tasks SET state=?,waiting_reason=?,completion=?,revision=revision+1 WHERE id=?').run(state,reason,accepted?JSON.stringify(accepted):null,task.id);
+    if(!terminal&&state==='completed')options.onCompleted?.(loadTask(task.id));
     advanceInquiryRevision(task.id,task.revision);
     if(deferredInquiry)db.prepare('INSERT INTO task_inquiry_waits VALUES (?,?,?,?,NULL)').run(run.id,currentGoal?task.revision+1:-1,task.continuationEpoch,intent?.task_revision===task.revision&&currentGoal?intent.agent_id as string:null);
     const continuation = run.continuation;
@@ -312,6 +333,12 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
     db.prepare("UPDATE task_receipts SET delivery_state=CASE WHEN ?='succeeded' THEN 'consumed' ELSE delivery_state END,claim_error=? WHERE claimed_by_run_id=?").run(event.outcome, event.outcome === 'succeeded' ? null : event.outcome, run.id);
 
  };
+ const validateProjectFields=(p:Principal,input:Pick<TaskInput,'projectIds'|'moduleRef'>)=>{
+  if(p.agentId!==undefined&&(input.projectIds!==undefined||input.moduleRef!==undefined))fail('forbidden',403);
+  const {projectIds,moduleRef}=input;
+  if(projectIds!=null&&(!Array.isArray(projectIds)||projectIds.some(id=>!nonempty(id))||new Set(projectIds).size!==projectIds.length))fail('invalid_task',422);
+  if(moduleRef!=null&&(typeof moduleRef!=='object'||Array.isArray(moduleRef)||Object.keys(moduleRef).some(key=>!['projectId','lane'].includes(key))||!nonempty(moduleRef.projectId)||!nonempty(moduleRef.lane)))fail('invalid_task',422);
+ };
  const validateInput = (input: Required<TaskInput>) => {
   if (typeof input.automaticProgress!=='boolean' || !nonempty(input.goal) || !['delivery','checks','human'].includes(input.acceptance) ||
    !Array.isArray(input.criteria) || input.criteria.some(c=>!c||!nonempty(c.id)||!nonempty(c.text)||c.checkRef!==null&&!nonempty(c.checkRef)) ||
@@ -319,14 +346,14 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
    [input.projectId,input.assigneeAgentId,input.originConversationId].some(id=>id!==null&&!nonempty(id)) ||
    [input.participantAgentIds].some(ids=>!Array.isArray(ids)||ids.some(id=>!nonempty(id))||new Set(ids).size!==ids.length))fail('invalid_task',422);
  };
- const authorizeConversation = (p:Principal,id:string) => {
+ const authorizeConversation = (p:Principal,id:string,purpose?:'origin') => {
   const conversation=store.getConversation(id);if(!conversation)return fail('conversation_not_found',404);
-  if(options.authorizeConversation)options.authorizeConversation(p,id);
+  if(options.authorizeConversation)options.authorizeConversation(p,id,purpose);
   else if(p.userId!==store.ownerUserId||p.agentId!==undefined&&p.agentId!==conversation.agentId)fail('forbidden',403);
   for(const runId of store.listConversationTaskRuns(id))readRun(p,loadRun(runId));
  };
  const validateLinks = (p:Principal,input:Required<TaskInput>,previous?:Task) => {
-  if(input.originConversationId&&previous?.originConversationId!==input.originConversationId)authorizeConversation(p,input.originConversationId);
+  if(input.originConversationId&&previous?.originConversationId!==input.originConversationId)authorizeConversation(p,input.originConversationId,'origin');
  };
  const writeLinks = (id:string,input:Required<TaskInput>) => {
   db.prepare('DELETE FROM task_participants WHERE task_id=?').run(id);
@@ -340,34 +367,44 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
   if(!nonempty(p.userId))fail('forbidden',403);
   return db.prepare('SELECT * FROM work_tasks WHERE owner_user_id=? ORDER BY created_at DESC,id').all(p.userId).map(taskRow).filter(task=>p.agentId===undefined||p.agentId===task.creatorAgentId||p.agentId===task.assigneeAgentId||task.participantAgentIds.includes(p.agentId)||task.executions.some(execution=>execution.agentId===p.agentId));
  };
- const listLinkedTasks = (p:Principal,conversationId:string):Task[] => {authorizeConversation(p,conversationId);return listTasks(p).filter(task=>task.conversationIds.includes(conversationId));};
- const prepareCreate = (p: Principal, submitted: TaskInput, commandKey: string, creationSource?:'system') => {
-   if(!submitted||typeof submitted!=='object'||Array.isArray(submitted)||Object.keys(submitted).some(key=>!['goal','criteria','acceptance','projectId','assigneeAgentId','originConversationId','participantAgentIds','automaticProgress'].includes(key)))fail('invalid_task',422);
-   const {goal,criteria=[],acceptance='human',projectId=null,assigneeAgentId=null,originConversationId=null,participantAgentIds=[],automaticProgress=true}=submitted;
-   const input:Required<TaskInput>={goal,criteria,acceptance,projectId,assigneeAgentId,originConversationId,participantAgentIds,automaticProgress};validateInput(input);
-   const body = { action: 'create', input:submitted,...(creationSource?{creationSource}:{}) };
+ const listLinkedTasks = (p:Principal,conversationId:string,includeSource=false):Task[] => {authorizeConversation(p,conversationId);return listTasks(p).filter(task=>task.conversationIds.includes(conversationId)||includeSource&&task.originConversationId===conversationId);};
+ const prepareCreate = (p: Principal, submitted: TaskInput, commandKey: string, creationSource?:'system', sourceChat?:string) => {
+   if(!submitted||typeof submitted!=='object'||Array.isArray(submitted)||Object.keys(submitted).some(key=>!['goal','criteria','acceptance','projectId','assigneeAgentId','originConversationId','participantAgentIds','automaticProgress','projectIds','moduleRef'].includes(key)))fail('invalid_task',422);
+   validateProjectFields(p,submitted);
+   const chat=sourceChat?store.getConversation(sourceChat):null;
+   const {goal,criteria=[],acceptance='human',projectId=chat?.projectId||null,assigneeAgentId=chat?.purpose==='mandala-main'?null:chat?.agentId||null,participantAgentIds=[],automaticProgress=true}=submitted;
+   const originConversationId=sourceChat??submitted.originConversationId??null;
+   const input:Required<TaskInput>={goal,criteria,acceptance,projectId,assigneeAgentId,originConversationId,participantAgentIds,automaticProgress,projectIds:submitted.projectIds??null,moduleRef:submitted.moduleRef??null};validateInput(input);
+   const createBody = { action: 'create', input:submitted,...(creationSource?{creationSource}:{}) };
+   const body = sourceChat?{...createBody,sourceChat}:createBody;
    return { commit: () => {
     if (!db.isTransaction) fail('transaction_required',500);
-    const previous = replay(p, commandKey, body).row;
+    const previous = replay(p, commandKey, body, sourceChat?createBody:undefined).row;
     validateLinks(p,input);
-    if (previous) return getTask(p, previous.task_id as string);
+    if (previous) return taskView(p,getTask(p, previous.task_id as string));
     const id = randomUUID();
-    db.prepare(`INSERT INTO work_tasks (
-     id,owner_user_id,creator_agent_id,goal,criteria,acceptance,project_id,assignee_agent_id,origin_conversation_id,
-     state,waiting_reason,revision,continuation_epoch,future_auto_resume,completion,legacy_id,created_at,automatic_progress
-    ) VALUES (?,?,?,?,?,?,?,?,?,'todo',NULL,1,0,0,NULL,NULL,?,?)`).run(id, p.userId, p.agentId ?? null,
-     input.goal, JSON.stringify(input.criteria), input.acceptance, input.projectId, input.assigneeAgentId, input.originConversationId, new Date().toISOString(),Number(input.automaticProgress));
+    db.prepare(`INSERT INTO work_tasks(id,owner_user_id,creator_agent_id,goal,criteria,acceptance,project_id,assignee_agent_id,origin_conversation_id,state,revision,continuation_epoch,future_auto_resume,created_at,automatic_progress,project_ids_override,module_ref)
+     VALUES (?,?,?,?,?,?,?,?,?,'todo',1,0,0,?,?,?,?)`).run(id, p.userId, p.agentId ?? null,
+     input.goal, JSON.stringify(input.criteria), input.acceptance, input.projectId, input.assigneeAgentId, input.originConversationId, new Date().toISOString(),Number(input.automaticProgress),input.projectIds===null?null:JSON.stringify(input.projectIds),input.moduleRef===null?null:JSON.stringify(input.moduleRef));
     db.prepare('INSERT INTO task_creation_sources VALUES (?,?)').run(id,p.agentId?'agent':creationSource??'user');
     writeLinks(id,input);
+    if(chat?.agentId&&chat.purpose!=='mandala-main'&&chat.agentId===assigneeAgentId&&(chat.projectId||null)===projectId&&
+      !db.prepare('SELECT id FROM task_executions WHERE conversation_id=?').get(chat.id)){
+     authorizeConversation(p,chat.id);
+     writeExecution(p,id,{conversationId:chat.id,agentId:chat.agentId,projectId,request:goal,criteria},commandKey);
+    }
     saveCommand(p, commandKey, body, id, null);
     store.enqueueOutbox({ type: 'task.created', aggregateId: id, aggregateRevision: 1, causationId: commandKey, payload: { taskId: id } });
 
-    return loadTask(id);
+    const created=taskView(p,loadTask(id));
+    if(input.moduleRef&&!created.projectIds.includes(input.moduleRef.projectId))fail('invalid_task',422);
+    return created;
    } };
  };
  const commitUpdateTask = (p:Principal,id:string,revision:number,patch:TaskPatch,commandKey:string,body:unknown):Task => {
     const previous=replay(p,commandKey,body).row,task=getTask(p,id);
-    if(!patch||typeof patch!=='object'||Array.isArray(patch)||Object.keys(patch).some(key=>!['goal','criteria','projectId','assigneeAgentId','originConversationId','participantAgentIds','state','automaticProgress'].includes(key)))fail('invalid_task',422);
+    if(!patch||typeof patch!=='object'||Array.isArray(patch)||Object.keys(patch).some(key=>!['goal','criteria','projectId','assigneeAgentId','originConversationId','participantAgentIds','state','automaticProgress','projectIds','moduleRef'].includes(key)))fail('invalid_task',422);
+    validateProjectFields(p,patch);
     const updated={...task,...patch};validateInput(updated);validateLinks(p,updated,task);
     if(patch.state!==undefined&&!['todo','running','waiting','review'].includes(patch.state))fail('invalid_task',422);
     if(previous)return task;
@@ -376,8 +413,16 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
     if(patch.assigneeAgentId!==undefined&&patch.assigneeAgentId!==task.assigneeAgentId&&db.prepare("SELECT id FROM task_runs WHERE task_id=? AND state IN ('queued','starting','running','approval','unknown')").get(id))fail('assignment_unavailable',409);
     const state=patch.state??task.state,reason=state==='waiting'?(patch.state==='waiting'?'input':task.waitingReason??'input'):null;
     db.prepare('UPDATE work_tasks SET goal=?,criteria=?,project_id=?,assignee_agent_id=?,origin_conversation_id=?,state=?,waiting_reason=?,automatic_progress=?,revision=revision+1 WHERE id=?').run(updated.goal,JSON.stringify(updated.criteria),updated.projectId,updated.assigneeAgentId,updated.originConversationId,state,reason,Number(updated.automaticProgress),id);
+    if(patch.projectIds!==undefined||patch.moduleRef!==undefined){
+     const previousOverride=task.projectIdsMode==='manual'?task.projectIds:null;
+     const manual=patch.projectIds===undefined?previousOverride:patch.projectIds;
+     const proposed:Task={...updated,projectIds:manual??[],projectIdsMode:manual===null?'auto':'manual'};
+     const visible=taskView(p,proposed);
+     if(patch.moduleRef&&!visible.projectIds.includes(patch.moduleRef.projectId))fail('invalid_task',422);
+     db.prepare('UPDATE work_tasks SET project_ids_override=?,module_ref=? WHERE id=?').run(manual===null?null:JSON.stringify(manual),visible.moduleRef?JSON.stringify(visible.moduleRef):null,id);
+    }
     writeLinks(id,updated);saveCommand(p,commandKey,body,id,null);
-    store.enqueueOutbox({type:'task.updated',aggregateId:id,aggregateRevision:revision+1,causationId:commandKey,payload:{taskId:id}});
+    store.enqueueOutbox({type:'task.updated',aggregateId:id,aggregateRevision:revision+1,causationId:commandKey,payload:{taskId:id,...(state!==task.state?{state}:{})}});
     return loadTask(id);
  };
  const isMandalaOwned=(id:string)=>Boolean(db.prepare("SELECT name FROM sqlite_master WHERE name='mandala_ownership'").get()&&db.prepare('SELECT task_id FROM mandala_ownership WHERE task_id=?').get(id));
@@ -406,8 +451,8 @@ export function createTasks(store: Store, options: TaskOptions = {}) {
   const receipt:Receipt={id:randomUUID(),taskId:task.id,sourceRunId:run.id,destinationConversationId:task.originConversationId??run.routing?.destinationConversationId??null,executionId:run.executionId,capturedEpoch:continuation?.epoch??task.continuationEpoch,policy:continuation?.policy??'notify',deliveryState:parked?'parked':'pending',claimedByRunId:null,claimError:null,claimEpoch:null,summary,artifactVersions:run.artifactVersions,legacyId:null,createdAt:new Date().toISOString()};
   insertReceipt(receipt);store.enqueueOutbox({type:'task.decision_receipt',aggregateId:task.id,aggregateRevision:loadTask(task.id).revision,causationId:receipt.id,payload:{taskId:task.id,runId:run.id,receiptId:receipt.id}});
  };
-function commitUserCommand(p:Principal,id:string,revision:number,action:'complete'|'accept'|'reopen'|'request_changes'|'assign',value:string|null=null,expectedOutput?:ExpectedOutput,commandKey?:string):Task {
-    const body={action,id,revision,value,expectedOutput},previous=commandKey?replay(p,commandKey,body).row:undefined;
+function commitUserCommand(p:Principal,id:string,revision:number,action:'complete'|'accept'|'reopen'|'request_changes'|'assign',value:string|null=null,expectedOutput?:ExpectedOutput,commandKey?:string,expectedRunId?:string|null):Task {
+    const body={action,id,revision,value,expectedOutput,expectedRunId},previous=commandKey?replay(p,commandKey,body).row:undefined;
     const task=getTask(p,id);
     if(expectedOutput){
      if(!['reopen','request_changes'].includes(action)||!nonempty(expectedOutput.assetId)||!nonempty(expectedOutput.versionId)||!nonempty(expectedOutput.runId))fail('invalid_expected_output',422);
@@ -428,6 +473,7 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
      state='review';completion=null;
     } else if(action==='accept') {
      if(state!=='review')fail('acceptance_unavailable',409);
+     if(expectedRunId!==undefined&&reviewDelivery(task)?.runId!==expectedRunId)fail('review_delivery_changed',409);
      const row=db.prepare("SELECT * FROM task_runs WHERE task_id=? AND state='succeeded' ORDER BY attempt DESC LIMIT 1").get(id),run=row?readRun(p,runRow(row)):null;
      state=run?.snapshot?.rule&&run.snapshot.rule.schedule.kind!=='once'&&!run.snapshot.rule.executionMode?'todo':'completed';completion={completedBy:p.agentId?'agent':'user',...(p.agentId?{completedByAgentId:p.agentId}:{}),sourceRunId:run?.id??null,artifactVersions:run?.artifactVersions??[],acceptedAt:new Date().toISOString()};
      if(run)db.prepare('UPDATE task_runs SET completion=? WHERE id=?').run(JSON.stringify(completion),run.id);
@@ -441,6 +487,7 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
      state='todo';completion=null;
     }
     db.prepare('UPDATE work_tasks SET state=?,waiting_reason=?,completion=?,assignee_agent_id=?,continuation_epoch=continuation_epoch+?,future_auto_resume=CASE WHEN ? THEN 0 ELSE future_auto_resume END,revision=revision+1 WHERE id=?').run(state,state==='waiting'?task.waitingReason:null,completion?JSON.stringify(completion):null,assignee,Number(action==='accept'||action==='reopen'),Number(action==='accept'||action==='reopen'),id);
+    if(state==='completed'&&task.state!=='completed')options.onCompleted?.(loadTask(id));
     if(action==='accept'||action==='reopen')db.prepare("UPDATE task_receipts SET delivery_state='parked' WHERE task_id=? AND delivery_state<>'consumed'").run(id);
     if(action==='complete'&&inquiry)db.prepare('UPDATE task_inquiry_waits SET task_revision=? WHERE run_id=?').run(revision+1,inquiry.id);
     if(action==='accept'&&inquiry)writeInquiryDecision(task,inquiry,'Task marked completed by '+(p.agentId?'Agent '+p.agentId:'user')+' while waiting for an Agent reply');
@@ -453,7 +500,7 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
   // Observation is a separate server-verified capability; never reuse these projections for control.
   async observeTasks(p:Principal) {
    if(!options.authorizeObservation)fail('forbidden',403);await options.authorizeObservation!(p);
-   return listTasks({userId:p.userId}).map(task=>({readOnly:true as const,id:task.id,goal:task.goal,projectId:task.projectId,assigneeAgentId:task.assigneeAgentId,originConversationId:task.originConversationId,state:task.state,waitingReason:task.waitingReason,revision:task.revision,createdAt:task.createdAt}));
+   return listTasks({userId:p.userId}).map(task=>({readOnly:true as const,id:task.id,goal:task.goal,projectId:task.projectId,projectIds:taskView(p,task).projectIds,assigneeAgentId:task.assigneeAgentId,originConversationId:task.originConversationId,state:task.state,waitingReason:task.waitingReason,revision:task.revision,createdAt:task.createdAt}));
   },
   async observeRuns(p:Principal,taskId:string) {
    if(!options.authorizeObservation)fail('forbidden',403);await options.authorizeObservation!(p);
@@ -469,6 +516,11 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
     return {readOnly:true as const,id:run.id,taskId:run.taskId,attempt:run.attempt,state:run.state,summary,createdAt:run.createdAt,deliveries};
    });
   },
+  getReviewDelivery(p:Principal,id:string){return reviewDelivery(getTask(p,id));},
+  findTaskCommand(p:Principal,key:string):Task|null {
+   const row=db.prepare('SELECT task_id FROM task_command_dedup WHERE principal=? AND command_key=?').get(canonical(p),key);
+   return row?taskView(p,getTask(p,row.task_id as string)):null;
+  },
   getTask(p:Principal,id:string):Task {return taskView(p,getTask(p,id));},
   createExecution(p:Principal,taskId:string,input:TaskExecutionInput,commandKey:string):TaskExecution {return executionView(p,db.isTransaction?writeExecution(p,taskId,input,commandKey):store.transaction(()=>writeExecution(p,taskId,input,commandKey)));},
   getExecution(p:Principal,id:string):TaskExecution {const execution=loadExecution(id);getTask(p,execution.taskId);return executionView(p,execution);},
@@ -477,7 +529,7 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
   listExecutions(p:Principal,taskId:string):TaskExecution[] {return visibleExecutions(p,getTask(p,taskId));},
   planVersions,
   listTasks(p:Principal):Task[] {return listTasks(p).map(task=>taskView(p,task));},
-  listLinkedTasks(p:Principal,id:string):Task[] {return listLinkedTasks(p,id).map(task=>taskView(p,task));},
+  listLinkedTasks(p:Principal,id:string):Task[] {return listLinkedTasks(p,id,true).map(task=>taskView(p,task));},
   snapshotProgress(p:Principal,conversationId:string):TaskProgressSnapshot[] {return listLinkedTasks(p,conversationId).filter(task=>task.automaticProgress&&!isMandalaOwned(task.id)&&!['completed','cancelled'].includes(task.state)).map(task=>progressSnapshot(p,task.id));},
   applyTaskProgress(p:Principal,snapshot:TaskProgressSnapshot,nextState:TaskProgressState,guard?:()=>boolean):boolean {
    requireRoot(p);return store.transaction(()=>commitTaskProgress(p,snapshot,nextState,guard));
@@ -617,9 +669,9 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
     return taskView(p,loadTask(id));
    });
   },
-  userCommand(p:Principal,id:string,revision:number,action:'complete'|'accept'|'reopen'|'request_changes'|'assign',value:string|null=null,expectedOutput?:ExpectedOutput,commandKey?:string):Task {
+  userCommand(p:Principal,id:string,revision:number,action:'complete'|'accept'|'reopen'|'request_changes'|'assign',value:string|null=null,expectedOutput?:ExpectedOutput,commandKey?:string,expectedRunId?:string|null):Task {
 
-   return taskView(p,store.transaction(()=>commitUserCommand(p,id,revision,action,value,expectedOutput,commandKey)));
+   return taskView(p,store.transaction(()=>commitUserCommand(p,id,revision,action,value,expectedOutput,commandKey,expectedRunId)));
   },
   adoptPlan(p:Principal,plan:VersionRef,steps:PlanStepInput[],commandKey:string):Task[] {
    requireRoot(p);
@@ -660,9 +712,13 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
    return snapshot;
   },
   prepareCreate,
+  createTaskFromChat(p:Principal,input:TaskInput,conversationId:string,commandKey:string):Task {
+   const prepared=prepareCreate(p,input,commandKey,undefined,conversationId);
+   return store.transaction(()=>prepared.commit());
+  },
   createTask(p: Principal, input: TaskInput, commandKey: string, creationSource?:'system'): Task {
    const prepared = prepareCreate(p,input,commandKey,creationSource);
-   return taskView(p,store.transaction(() => prepared.commit()));
+   return store.transaction(() => prepared.commit());
   },
   markUnknown(runId: string) {
    store.transaction(() => {
@@ -673,7 +729,7 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
     const task=loadTask(run.taskId);
     const changed=db.prepare("UPDATE work_tasks SET state='waiting',waiting_reason='input',revision=revision+1 WHERE id=? AND state='running'").run(run.taskId);
     if(changed.changes)advanceInquiryRevision(run.taskId,task.revision);
-    store.enqueueOutbox({type:'task.recovery_unknown',aggregateId:run.taskId,aggregateRevision:loadTask(run.taskId).revision,causationId:runId,payload:{runId}});
+    store.enqueueOutbox({type:'task.recovery_unknown',aggregateId:run.taskId,aggregateRevision:loadTask(run.taskId).revision,causationId:runId,payload:{taskId:run.taskId,runId,state:'unknown'}});
 
    });
   },
@@ -804,11 +860,12 @@ function commitUserCommand(p:Principal,id:string,revision:number,action:'complet
    });
   },
   // Internal adapter boundary; stale identities and terminal states cannot be revived.
-  setRunApproval(identity:RunIdentity,approval:boolean):void {
+  setRunApproval(identity:RunIdentity,approval:boolean,approvalId?:string):void {
    store.transaction(()=>{
     const before=db.prepare('SELECT task_id,state FROM task_runs WHERE id=?').get(identity.runId);
     const changed=db.prepare("UPDATE task_runs SET state=? WHERE id=? AND host_id=? AND native_session_id=? AND native_turn_id=? AND state IN ('running','approval')").run(approval?'approval':'running',identity.runId,identity.hostId,identity.nativeSessionId,identity.nativeTurnId);
-    if(changed.changes&&approval&&before?.state!=='approval')store.enqueueOutbox({type:'task.execution_attention',aggregateId:before!.task_id as string,aggregateRevision:1,causationId:`${identity.runId}:approval`,payload:{taskId:before!.task_id,runId:identity.runId,reason:'approval',state:'approval'}});
+    if(changed.changes&&approval&&(before?.state!=='approval'||approvalId))store.enqueueOutbox({type:'task.execution_attention',aggregateId:before!.task_id as string,aggregateRevision:1,causationId:approvalId??`${identity.runId}:approval`,payload:{taskId:before!.task_id,runId:identity.runId,approvalId,reason:'approval',state:'approval'}});
+    if(changed.changes&&!approval&&before?.state==='approval')store.enqueueOutbox({type:'task.execution_resumed',aggregateId:before.task_id as string,aggregateRevision:1,causationId:randomUUID(),payload:{taskId:before.task_id,runId:identity.runId}});
     if(changed.changes)refreshExecutionProgress(before!.task_id as string);
    });
   },

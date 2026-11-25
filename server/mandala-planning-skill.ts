@@ -39,6 +39,8 @@ Lead with the candidate paths, proposed business scope and material unknowns. Ke
 
 Invite the user to add, remove or exclude candidate paths before finalizing scope; rediscover only as needed for the current request. If the user asks for activity evidence, label sessionCount as observed native sessions, not message or model-call counts. Tokens are cumulative for observed sessions, not window cost. Timestamps are metadata, not verified last human activity. Keep unknown values unknown. No activity count, recent update or skill description establishes ownership, longevity or permission. Repository names and metadata alone cannot establish business responsibility.
 
+A task creation response of awaiting_confirmation is a pending blueprint routing suggestion. Ask the human to confirm or edit the route in the task card. Do not retry with another command, delegate work, or claim a task exists until it has been confirmed.
+
 ## 3. Map business scope, shared knowledge and module Agents
 
 Start with the business the human wants to organize. A Project is its working scope: related working paths may span multiple repositories and workspaces, and Project Wiki holds authorized shared business facts, conventions and decisions. Map each candidate path to that scope; do not create a Project per repository by default. Split Projects when business context or access/knowledge boundaries warrant it. Keep repository instructions scoped to the relevant workspace.

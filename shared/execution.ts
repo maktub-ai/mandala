@@ -1,7 +1,7 @@
 import type { RunContextTrace } from "./tasks";
 import type { DisplayEvent } from "./types";
 import type { HookEventData } from "./hooks";
-type PlatformHook = Omit<HookEventData, "source" | "status"> & { status: HookEventData["status"] | "pending"; source: "platform"; task: "title" | "memory" | "recall" };
+type PlatformHook = Omit<HookEventData, "source" | "status"> & { status: HookEventData["status"] | "pending"; source: "platform"; task: "title" | "memory" | "recall" | "capture" | "search" };
 export type NativeItem = {
   id: string;
   type: string;
@@ -62,20 +62,26 @@ export function summarizeOperations(events: DisplayEvent[]): Operation[] {
         operations.set(key,{key,item:{id:key,type:"dynamicToolCall",tool:"Mandala context",result:context},output:"",status:context.actualUse === "acknowledged" ? "completed" : "running",eventIds:[...previous?.eventIds ?? [],event.id]});
         continue;
       }
-      const data = event.data as { systemTask?: string; memoryRecall?: string; status?: string;
+      const data = event.data as { memoryCapture?: string; memorySearchId?: string; systemTask?: string; memoryRecall?: string; status?: string;
         message?: string; count?: number; entryIds?: string[]; entries?: { title: string; kind: string; assetId?: string; versionId?: string }[]; cli?: string; model?: string | null;
         sourceEventId?: number; applied?: boolean; title?: string; code?: string; stage?: string; jobId?: string };
-      const task = data.memoryRecall ? "recall" : data.systemTask;
-      if (!["title", "memory", "recall"].includes(task ?? "") ||
+      if (data.memoryCapture === "failed") {
+        const key = `hook:platform:capture:${event.id}`;
+        const hook: PlatformHook = { id: key, source: "platform", task: "capture", name: "capture", event: "systemTask", status: "failed" };
+        operations.set(key, { key, item: { id: key, type: "hook", hook }, status: "failed", output: data.message ?? "", eventIds: [event.id] });
+        continue;
+      }
+      const task = data.memorySearchId ? "search" : data.memoryRecall ? "recall" : data.systemTask;
+      if (!["title", "memory", "recall", "search"].includes(task ?? "") ||
           !["running", "completed", "failed", "queued", "pending"].includes(data.status ?? "")) continue;
-      const key = data.memoryRecall ? `hook:platform:recall:${data.memoryRecall}` :
-        data.jobId ? `hook:platform:${task}:${data.jobId}` :
+      const traceId = data.memorySearchId ?? data.memoryRecall ?? data.jobId;
+      const key = traceId ? `hook:platform:${task}:${traceId}` :
         data.status === "running" ? `hook:platform:${task}:${event.id}` :
           platformRuns.get(task!) ?? `hook:platform:${task}:${event.id}`;
-      if (data.status === "running" && !data.jobId) platformRuns.set(task!, key);
+      if (data.status === "running" && !traceId) platformRuns.set(task!, key);
       const previous = operations.get(key);
       const hook: PlatformHook = { id: key, source: "platform", task: task as PlatformHook["task"],
-        name: task!, event: task === "recall" ? "beforeTurn" : "systemTask", status: (data.status === "queued" ? "pending" : data.status) as PlatformHook["status"] };
+        name: task!, event: task === "recall" || task === "search" ? "beforeTurn" : "systemTask", status: (data.status === "queued" ? "pending" : data.status) as PlatformHook["status"] };
       operations.set(key, { key, item: { id: key, type: "hook", hook,
         result: { ...(data.count !== undefined ? { count: data.count } : {}),
           ...(data.entryIds ? { entryIds: data.entryIds } : {}),
@@ -87,7 +93,7 @@ export function summarizeOperations(events: DisplayEvent[]): Operation[] {
           ...(data.code ? { code: data.code } : {}), ...(data.stage ? { stage: data.stage } : {}), ...(data.jobId ? {jobId:data.jobId} : {}) } },
         output: data.message ?? (data.jobId && data.status === "completed" ? "" : previous?.output ?? ""), status: hook.status,
         eventIds: [...previous?.eventIds ?? [], event.id] });
-      if (data.status !== "running" && !data.memoryRecall && !data.jobId) platformRuns.delete(task!);
+      if (data.status !== "running" && !traceId) platformRuns.delete(task!);
       continue;
     }
     if (event.kind === "hook") {

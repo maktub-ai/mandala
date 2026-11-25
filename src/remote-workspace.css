@@ -239,3 +239,8 @@
  .remote-mandala-heading > div > span { display:none; }
  .remote-mandala-mark.brand-mark { width:22px; height:22px; }
 }
+
+.remote-task-capture { display:grid; gap:8px; padding:0 var(--page-gutter) 16px; }
+.remote-task-capture label { display:grid; gap:4px; }
+.remote-task-capture p { margin:0; }
+.remote-task-capture button { justify-self:start; }

@@ -1,4 +1,6 @@
+import {blueprintBindings,publishBlueprintBindings} from './blueprint-bindings';
 import { responseStyles } from "../shared/response-style";
+import {isBlueprintPlanId} from '../shared/blueprint';
 import { renameSync, readFileSync } from "node:fs";
 import { createSkillCatalog } from "./skill-catalog";
 import { withSkillEvidenceRead } from "./skill-evidence";
@@ -19,9 +21,10 @@ import { isRemoteAbsolutePath, isValidSshHost } from "../shared/execution-machin
 import { validateRuntimeArgs, validateRuntimeEnv } from "./runtime";
 import { validateManagedSkillContent } from "../shared/skills";
 import { isIdentityEmoji, projectIcons } from "../shared/identity";
-import { clawHubCatalogIdPattern } from "../shared/market";
+import { clawHubCatalogIdPattern, marketSkillImage } from "../shared/market";
 const mandalaAuthority = Symbol("mandala-config");
 const windowsReplaceBackoff = [15, 35] as const;
+const blueprintAuthority = Symbol("blueprint-config");
 const empty: Config = { version: 2, projects: [], agents: [] };
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 function normalizeConfig(value: unknown): Config {
@@ -60,6 +63,11 @@ export function validateConfig(value: unknown): asserts value is Config {
   )
     invalid();
   if (c.responseStyle !== undefined && !responseStyles.includes(c.responseStyle)) invalid();
+  if (c.blueprintDefaultEnabled !== undefined && typeof c.blueprintDefaultEnabled !== 'boolean') invalid();
+  for (const project of c.projects) {
+    if (project.blueprintEnabled !== undefined && typeof project.blueprintEnabled !== 'boolean') invalid();
+    if (project.planId !== undefined && !isBlueprintPlanId(project.planId)) invalid();
+  }
   if (c.runtimes !== undefined && (!Array.isArray(c.runtimes) ||
       c.runtimes.some((cli) => !isCli(cli)) ||
       new Set(c.runtimes).size !== c.runtimes.length)) invalid();
@@ -87,6 +95,7 @@ export function validateConfig(value: unknown): asserts value is Config {
           typeof item.version !== "string" || !item.version || item.version.length > 100 ||
           typeof item.sourceUrl !== "string" || !/^https:\/\//.test(item.sourceUrl) || item.sourceUrl.length > 2048 ||
           typeof item.installedAt !== "string" || !Number.isFinite(Date.parse(item.installedAt)) ||
+          (item.skillIcon !== undefined && (item.kind !== "skill" || !isIdentityEmoji(item.skillIcon) && !marketSkillImage(item.skillIcon))) ||
           (item.packageId !== undefined && (item.kind !== "skill" || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(item.packageId)))) invalid();
       seen.add(item.id);
     }
@@ -289,6 +298,7 @@ export async function readConfig(
   home: string,
   options: { hydrateSkills?: boolean } = {},
 ): Promise<{ config: Config; revision: string }> {
+  const beforeRead=blueprintBindings(home);
   await mkdir(home, { recursive: true, mode: 0o700 });
   const path = join(home, "config.json");
   let text: string;
@@ -317,7 +327,9 @@ export async function readConfig(
     const store=openStore(home);try{const catalog=createSkillCatalog(home,store);if(!writes.has(home))catalog.recover(config);config.skillLibrary=withSkillEvidenceRead(store,config,()=>config.skillLibrary!.map(skill=>{try{return catalog.read(skill,undefined,config);}catch{return {...skill,content:undefined,unavailable:true};}}));}finally{store.close();}
   }
   validateConfig(config);
-  return { config, revision: hash(text) };
+  const revision=hash(text);
+  if(blueprintBindings(home)===beforeRead)publishBlueprintBindings(home,revision,config);
+  return { config, revision };
 }
 const writes = new Map<string, Promise<unknown>>();
 const codeGraphRevisions = new Map<string,number>();
@@ -330,6 +342,7 @@ export async function writeConfig(
   expectedRevision: string,
   assertAuthorized?: () => void,
   authority?: symbol,
+  skillPackages?: ReadonlyMap<string,string>,
 ): Promise<string> {
   const operation = (writes.get(home) ?? Promise.resolve())
     .catch(() => {})
@@ -339,6 +352,18 @@ export async function writeConfig(
       validateConfig(config);
       const previous = await readConfig(home);
       if (previous.revision !== expectedRevision) throw new Error("configuration changed");
+      for (const project of config.projects) {
+        const before = previous.config.projects.find(item => item.id === project.id);
+        if (authority !== blueprintAuthority) {
+          if (project.planId === undefined && before?.planId) project.planId = before.planId;
+          else if (project.planId !== before?.planId) throw new Error('Blueprint binding is managed by project settings');
+        }
+        if (project.blueprintEnabled === undefined && (before || config.blueprintDefaultEnabled !== undefined)) {
+          if (before?.blueprintEnabled !== undefined) project.blueprintEnabled = before.blueprintEnabled;
+          else if (before && previous.config.blueprintDefaultEnabled !== config.blueprintDefaultEnabled) project.blueprintEnabled = previous.config.blueprintDefaultEnabled ?? false;
+          else if (!before) project.blueprintEnabled = config.blueprintDefaultEnabled ?? false;
+        }
+      }
       if (authority !== mandalaAuthority) {
         const old = previous.config.mandala, next = config.mandala;
         if (JSON.stringify(old) !== JSON.stringify(next)) throw new Error("Mandala settings are system managed");
@@ -354,8 +379,10 @@ export async function writeConfig(
         } else if (config.agents.some(a => a.systemRole || a.managedWorkspace)) throw new Error("Mandala identity is system managed");
       }
       for (const p of config.projects) {
+        const existing = authority === blueprintAuthority ? previous.config.projects.find(project=>project.id===p.id)?.workspaces : undefined;
         for (const workspace of p.workspaces ?? []) {
           if (workspace.machineId !== undefined) continue;
+          if (existing?.some(old=>old.id===workspace.id&&old.machineId===workspace.machineId&&old.cwd===workspace.cwd)) continue;
           if (!workspace.cwd) {
             workspace.cwd = workspace.id === "default" ? join(home, "workspaces", p.id) : join(home, "workspaces", p.id, workspace.id);
             await mkdir(workspace.cwd, { recursive: true });
@@ -368,8 +395,8 @@ export async function writeConfig(
       }
       if(config.skillLibrary?.some(skill=>skill.path===""&&typeof skill.content==="string")) {
         const store=openStore(home);try{const catalog=createSkillCatalog(home,store);config.skillLibrary=await Promise.all(config.skillLibrary.map(async skill=>{
-          if(skill.versionRef&&typeof skill.content==='string'&&skill.content!==catalog.read(skill).content)skill={...skill,humanMaintained:skill.humanMaintained??!assertAuthorized};
-          return catalog.persist(skill,()=>assertAuthorized?.());
+          if(skill.versionRef&&typeof skill.content==='string'&&skill.content!==catalog.read(skill).content)skill={...skill,humanMaintained:skill.humanMaintained||!assertAuthorized&&!skillPackages?.has(skill.id)};
+          return catalog.persist(skill,()=>assertAuthorized?.(),skillPackages?.get(skill.id));
         }));}finally{store.close();}
       }
       const text = JSON.stringify({ ...config, projects: config.projects.map(({ cwd, resources, ...project }) => project) }, null, 2) + "\n";
@@ -405,6 +432,7 @@ export async function writeConfig(
             await delay(wait);
           }
         }
+        publishBlueprintBindings(home,hash(text),config);
         codeGraphRevisions.set(home,(codeGraphRevisions.get(home)??0)+1);
         if(config.skillLibrary?.some(skill=>skill.versionRef)){const store=openStore(home);try{createSkillCatalog(home,store).recover(config);}finally{store.close();}}
       } catch(error){
@@ -433,6 +461,10 @@ export async function writeConfig(
 }
 
 // Lazy migration keeps old homes and ordinary configuration reads unchanged.
+export function writeBlueprintConfig(home:string, config:Config, expectedRevision:string) {
+  return writeConfig(home, config, expectedRevision, undefined, blueprintAuthority);
+}
+
 export async function ensureMandalaConfig(home: string, assertActive?:()=>void): Promise<{ config: Config; revision: string }> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const current = await readConfig(home);
@@ -452,8 +484,8 @@ export async function ensureMandalaConfig(home: string, assertActive?:()=>void):
   throw new Error("configuration changed");
 }
 export async function updateMandalaSettings(home: string, value: unknown, revision: string) {
-  const patch = value as { name: string; soul: string; cli: Config["agents"][number]["defaultCli"]; maxParallel: number; models?: Config["agents"][number]["models"] };
-  if (!patch || Object.keys(patch).some(key => !["name", "soul", "cli", "maxParallel", "models"].includes(key)) ||
+  const patch = value as { name: string; soul: string; cli: Config["agents"][number]["defaultCli"]; maxParallel: number; showExecutionDetails?: boolean; models?: Config["agents"][number]["models"] };
+  if (!patch || Object.keys(patch).some(key => !["name", "soul", "cli", "maxParallel", "models", "showExecutionDetails"].includes(key)) ||
       typeof patch.name !== "string" || !patch.name.trim() || patch.name.length > 100 || !isCli(patch.cli))
     throw new Error("invalid Mandala settings");
   if (patch.models !== undefined && (!patch.models || typeof patch.models !== "object" || Array.isArray(patch.models) ||
@@ -463,7 +495,8 @@ export async function updateMandalaSettings(home: string, value: unknown, revisi
   if (revision !== current.revision) throw new Error("configuration changed");
   if (!enabledRuntimes(current.config).includes(patch.cli)) throw new Error("Runtime disabled");
   const config: Config = { ...current.config,
-    mandala: { ...current.config.mandala!, soul: patch.soul, maxParallel: patch.maxParallel },
+    mandala: { ...current.config.mandala!, soul: patch.soul, maxParallel: patch.maxParallel,
+      ...(patch.showExecutionDetails !== undefined ? {showExecutionDetails:patch.showExecutionDetails} : {}) },
     agents: current.config.agents.map(a => a.id === current.config.mandala!.agentId ? { ...a, name: patch.name.trim(), defaultCli: patch.cli, models: {...a.models,...patch.models} } : a) };
   await writeConfig(home, config, revision, undefined, mandalaAuthority);
   return readConfig(home);

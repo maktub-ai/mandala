@@ -1,3 +1,4 @@
+import {migrateLegacyBlueprint} from './blueprint-migration';
 import { claimServiceHome } from './service-home-lock';
 import { claimServiceRecord, handleServiceControl, removeServiceRecord, type IdleStopResult } from '../desktop/service-discovery';
 import { productEnv, productHome } from "../cli/product-env.mjs";
@@ -8,6 +9,7 @@ import { createAutomations } from "./automations";
 import { resolve } from "node:path";
 import { readConfig } from "./config";
 import { openStore } from "./store";
+import { backfillConversationProjects } from "./project-attribution";
 import { migrateWorkspace } from "./workspace-migrations";
 import { createSessionManager } from "./sessions";
 import { createSystemTasks } from "./system-tasks";
@@ -42,9 +44,11 @@ const serviceHome=claimServiceHome(home);
 process.once('exit',()=>{try{serviceHome.release();}catch{/* An unsafe replaced lock is never removed. */}});
 const setupToken = process.env.MANDALA_DESKTOP === "1" ? randomBytes(32).toString("base64url") : undefined;
 const serviceRecord = (persistentDesktop || Boolean(process.env.MANDALA_ACCOUNT_WORKER_KEY)) ? claimServiceRecord(home, `http://127.0.0.1:${reservedPort}`, setupToken!) : undefined;
-await readConfig(home);
+await migrateLegacyBlueprint(home).catch(()=>console.warn('Legacy blueprint upgrade pending; the installed extension and original files are retained.'));
+const startupConfig=await readConfig(home);
 await migrateWorkspace(home, "apply");
 const store = openStore(home);
+await backfillConversationProjects(store,startupConfig.config);
 const memoryRuntime = createMemoryRuntime({home,store,loadConfig:async()=>(await readConfig(home,{hydrateSkills:false})).config,authorizeConversationRead:(_p,id)=>manager.authorizeConversationRead(id)});
 let systemWork = 0;
 const trackSystemWork = (work: Promise<void>) => {

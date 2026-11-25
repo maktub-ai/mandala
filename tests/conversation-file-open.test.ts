@@ -45,6 +45,15 @@ it('opens only authorized chat or workspace files and serves HTML with an opaque
    expect(result.headers['Content-Security-Policy']).not.toContain('allow-same-origin');
   }
   expect((await call(other.id,'local-file/preview?href='+encodeURIComponent(path),{},'GET')).status).toBe(403);
+  const pdf=join(home,'report.pdf'), pdfUrl='local-file/media?href='+encodeURIComponent(pdf);
+  await writeFile(pdf,'%PDF-1.4\nfixture');
+  expect((await call(chat.id,pdfUrl,{},'GET')).status).toBe(403);
+  store.appendEvent(chat.id,'text',{itemId:'pdf',text:`[PDF](<${pdf}>)`});
+  const response=await call(chat.id,pdfUrl,{},'GET');
+  expect(response.status).toBe(200);expect(response.headers['Content-Type']).toBe('application/pdf');
+  expect((await call(other.id,pdfUrl,{},'GET')).status).toBe(403);
+  await writeFile(pdf,'plain text');
+  expect((await call(chat.id,pdfUrl,{},'GET')).status).toBe(415);
   const original=manager.authorizeConversationRead.bind(manager);let checks=0;
   const revoke=vi.spyOn(manager,'authorizeConversationRead').mockImplementation(id=>{original(id);if(++checks===2)throw new DomainError('forbidden',403,'Access revoked');});
   expect((await call(chat.id,'local-file/open',{href:path})).status).toBe(403);

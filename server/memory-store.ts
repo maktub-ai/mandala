@@ -3,7 +3,7 @@ import { isObsoleteMemoryError } from '../shared/memory-job-policy';
 import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import type { Store } from './store';
-import type { createAssets } from './assets';
+import { withAssetVersionRead, type createAssets } from './assets';
 import type { createTasks } from './tasks';
 import { canUseKnowledge } from '../shared/knowledge-access';
 import type { KnowledgeEntry, DisplayEvent } from '../shared/types';
@@ -64,8 +64,6 @@ export function createMemoryStore(store:Store, options:Options) {
  let queryCache:{collections:Map<string,MemoryCollection>;sources:Map<string,MemorySource>;rawSources:Map<string,MemorySource>;records:Map<string,MemoryRevision>;eventData:Map<string,{text?:unknown;agentMessage?:unknown;task?:unknown}>;eventHashes:Map<string,Map<number,string>>;permissions:Set<string>;checkedTranscripts:Set<string>}|null=null;
  // Cache data only, never an authorization result. Source writes from every connection
  // invalidate snapshots; transaction reads cannot populate the committed cache.
- const sourceSnapshots=new Map<string,{source:MemorySource;bytes:number}>();
- let snapshotBytes=0,snapshotVersion=-1;
  const authorityQuery=<T>(fn:()=>T):T=>{
   if(queryCache){
    if(db.isTransaction&&queryCache.eventHashes===eventHashes){
@@ -74,15 +72,23 @@ export function createMemoryStore(store:Store, options:Options) {
    return fn();
   }
   const transactional=db.isTransaction;
-  if(!transactional){const version=Number(sourceChanges.get()!.revision);if(version!==snapshotVersion){sourceSnapshots.clear();snapshotBytes=0;snapshotVersion=version;}}
-  // Transactional digests stay private and are discarded on exit. Keep the
-  // committed cache: rolled-back revisions still describe its original events.
+  // Transactional digests are isolated and discarded; unrelated transactions
+  // do not invalidate the separately retained committed transcript digests.
   queryCache={collections:new Map(),sources:new Map(),rawSources:new Map(),records:new Map(),eventData:new Map(),eventHashes:transactional?new Map():eventHashes,permissions:new Set(),checkedTranscripts:new Set()};
-  try{return fn();}finally{queryCache=null;}
+  try{return withAssetVersionRead(store,fn);}finally{queryCache=null;}
  };
  const queryKey=(p:Principal,id:string,projectId?:string|null)=>JSON.stringify([p,id,projectId===undefined?'scope-unset':projectId]);
  const atomic=<T>(fn:()=>T):T=>db.isTransaction?fn():store.transaction(fn);
- store.transaction(()=>{db.exec(`
+ store.transaction(()=>{
+  // Older installations tracked all sources with one integer key. Only this
+  // cache invalidation counter is disposable; source IDs and revisions stay intact.
+  if(db.prepare("SELECT 1 FROM pragma_table_info('memory_source_changes') WHERE name='id' AND upper(type)='INTEGER'").get()){
+   db.exec(`DROP TRIGGER IF EXISTS memory_source_insert;
+    DROP TRIGGER IF EXISTS memory_source_update;
+    DROP TRIGGER IF EXISTS memory_source_delete;
+    DROP TABLE memory_source_changes;`);
+  }
+  db.exec(`
  CREATE TABLE IF NOT EXISTS memory_generation_state(kind TEXT PRIMARY KEY,enabled INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS memory_generation_exclusions(kind TEXT NOT NULL,start_event_id INTEGER NOT NULL,end_event_id INTEGER);
  CREATE TABLE IF NOT EXISTS memory_generation_task_exclusions(task_id TEXT PRIMARY KEY,last_revision INTEGER NOT NULL);
@@ -90,11 +96,17 @@ export function createMemoryStore(store:Store, options:Options) {
  CREATE TABLE IF NOT EXISTS memory_task_capture_cutoffs(task_id TEXT PRIMARY KEY,last_revision INTEGER NOT NULL);
  CREATE TABLE IF NOT EXISTS memory_collections(id TEXT PRIMARY KEY REFERENCES assets(id),scope_key TEXT UNIQUE NOT NULL,data TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS memory_sources(id TEXT PRIMARY KEY,source_key TEXT UNIQUE NOT NULL,data TEXT NOT NULL);
- CREATE TABLE IF NOT EXISTS memory_source_changes(id INTEGER PRIMARY KEY CHECK(id=1),revision INTEGER NOT NULL);
- INSERT OR IGNORE INTO memory_source_changes VALUES(1,0);
- CREATE TRIGGER IF NOT EXISTS memory_source_insert AFTER INSERT ON memory_sources BEGIN UPDATE memory_source_changes SET revision=revision+1 WHERE id=1; END;
- CREATE TRIGGER IF NOT EXISTS memory_source_update AFTER UPDATE ON memory_sources BEGIN UPDATE memory_source_changes SET revision=revision+1 WHERE id=1; END;
- CREATE TRIGGER IF NOT EXISTS memory_source_delete AFTER DELETE ON memory_sources BEGIN UPDATE memory_source_changes SET revision=revision+1 WHERE id=1; END;
+ CREATE TABLE IF NOT EXISTS memory_source_changes(id TEXT PRIMARY KEY,revision INTEGER NOT NULL);
+ CREATE TRIGGER IF NOT EXISTS memory_source_change_insert AFTER INSERT ON memory_sources BEGIN
+  INSERT INTO memory_source_changes VALUES(NEW.id,1) ON CONFLICT(id) DO UPDATE SET revision=revision+1;
+ END;
+ CREATE TRIGGER IF NOT EXISTS memory_source_change_update AFTER UPDATE ON memory_sources BEGIN
+  INSERT INTO memory_source_changes VALUES(OLD.id,1) ON CONFLICT(id) DO UPDATE SET revision=revision+1;
+  INSERT INTO memory_source_changes SELECT NEW.id,1 WHERE NEW.id!=OLD.id ON CONFLICT(id) DO UPDATE SET revision=revision+1;
+ END;
+ CREATE TRIGGER IF NOT EXISTS memory_source_change_delete AFTER DELETE ON memory_sources BEGIN
+  INSERT INTO memory_source_changes VALUES(OLD.id,1) ON CONFLICT(id) DO UPDATE SET revision=revision+1;
+ END;
  CREATE TABLE IF NOT EXISTS memory_source_revisions(source_id TEXT NOT NULL,revision INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(source_id,revision));
  CREATE TABLE IF NOT EXISTS memory_records(id TEXT PRIMARY KEY,collection_id TEXT NOT NULL REFERENCES memory_collections(id),data TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS memory_records_legacy_id ON memory_records(json_extract(data,'$.legacyId'));
@@ -110,7 +122,6 @@ export function createMemoryStore(store:Store, options:Options) {
  CREATE INDEX IF NOT EXISTS memory_links_lookup ON memory_record_links(kind,target_id,record_id);
  CREATE TABLE IF NOT EXISTS memory_index(record_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,text TEXT NOT NULL);
  `);db.prepare('INSERT OR IGNORE INTO schema_migrations VALUES (?,?)').run('memory_core_001',new Date().toISOString());});
- const sourceChanges=db.prepare('SELECT revision FROM memory_source_changes WHERE id=1');
  const principal=(p:Principal)=>{
   if(!p?.userId||p.userId!==options.localUserId)memoryFail('forbidden',403);
   if(p.runId){
@@ -142,21 +153,32 @@ export function createMemoryStore(store:Store, options:Options) {
   const key=value as string,cached=queryCache!.eventData.get(key);if(cached)return cached;
   const data=parse<{text?:unknown;agentMessage?:unknown;task?:unknown}>(value);queryCache!.eventData.set(key,data);return data;
  };
- const sourceRow=db.prepare('SELECT data FROM memory_sources WHERE id=?');
+ // Only decoding is retained. Triggers track direct writes from every connection.
+ const sourceRevision=db.prepare('SELECT revision FROM memory_source_changes WHERE id=?');
+ const decodedSources=new Map<string,{revision:number;characters:number;source:MemorySource}>();
+ const maxSourceCharacters=64*1024*1024;let sourceCharacters=0;
+ const forgetSource=(id:string)=>{const prior=decodedSources.get(id);if(prior){sourceCharacters-=prior.characters;decodedSources.delete(id);}};
  const loadSource=(id:string):MemorySource=>authorityQuery(()=>{
   const cached=queryCache?.rawSources.get(id);if(cached)return cached;
-  const snapshot=!db.isTransaction?sourceSnapshots.get(id):undefined;
-  if(snapshot){sourceSnapshots.delete(id);sourceSnapshots.set(id,snapshot);queryCache?.rawSources.set(id,snapshot.source);return snapshot.source;}
-  const row=sourceRow.get(id);if(!row)memoryFail('memory_source_not_found',404);
-  const source=parse<MemorySource>(row!.data),pending:object[]=[source];
-  while(pending.length){const value=pending.pop()!;Object.freeze(value);for(const child of Object.values(value))if(child&&typeof child==='object')pending.push(child);}
-  queryCache?.rawSources.set(id,source);
-  const bytes=(row!.data as string).length*2,limit=128*1024*1024;
-  if(!db.isTransaction&&bytes<=limit){
-   while(snapshotBytes+bytes>limit&&sourceSnapshots.size){const key=sourceSnapshots.keys().next().value!;snapshotBytes-=sourceSnapshots.get(key)!.bytes;sourceSnapshots.delete(key);}
-   sourceSnapshots.set(id,{source,bytes});snapshotBytes+=bytes;
+  const revision=Number(sourceRevision.get(id)?.revision??0),prior=decodedSources.get(id);
+  let source:MemorySource;
+  if(prior?.revision===revision){source=prior.source;decodedSources.delete(id);decodedSources.set(id,prior);}
+  else{
+   const row=db.prepare('SELECT data FROM memory_sources WHERE id=?').get(id);
+   if(!row){if(!db.isTransaction)forgetSource(id);memoryFail('memory_source_not_found',404);}
+   const data=row!.data as string;source=parse<MemorySource>(data);
+   const pending:object[]=[source];
+   while(pending.length){const value=pending.pop()!;Object.freeze(value);for(const child of Object.values(value))if(child&&typeof child==='object')pending.push(child);}
+   // Rolled-back change counters can be reused: never publish transactional values.
+   if(!db.isTransaction){
+    forgetSource(id);
+    if(data.length<=maxSourceCharacters){
+     while(sourceCharacters+data.length>maxSourceCharacters)forgetSource(decodedSources.keys().next().value!);
+     decodedSources.set(id,{revision,characters:data.length,source});sourceCharacters+=data.length;
+    }
+   }
   }
-  return source;
+  queryCache?.rawSources.set(id,source);return source;
  });
  // Verified user assertions cite their quoted events, not unrelated recalled Agent context.
  // This read projection also handles already stored broad evidence without rewriting it.
@@ -195,10 +217,14 @@ export function createMemoryStore(store:Store, options:Options) {
   if(s.conversationId){
    if(!queryCache!.checkedTranscripts.has(s.conversationId)){
     const revision=Number(eventRevision.get(s.conversationId)?.revision??0);
-    if(eventHashVersions.get(s.conversationId)!==revision){queryCache!.eventHashes.delete(s.conversationId);if(queryCache!.eventHashes===eventHashes)eventHashVersions.set(s.conversationId,revision);}
+    if(eventHashVersions.get(s.conversationId)!==revision){queryCache!.eventHashes.delete(s.conversationId);if(!db.isTransaction&&queryCache!.eventHashes===eventHashes)eventHashVersions.set(s.conversationId,revision);}
     queryCache!.checkedTranscripts.add(s.conversationId);
    }
-   let hashes=queryCache!.eventHashes.get(s.conversationId);if(!hashes){hashes=new Map();queryCache!.eventHashes.set(s.conversationId,hashes);}
+   let hashes=queryCache!.eventHashes.get(s.conversationId);if(!hashes){
+    // A transaction may reuse committed digests only at that exact transcript revision.
+    const committed=eventHashVersions.get(s.conversationId)===Number(eventRevision.get(s.conversationId)?.revision??0)?eventHashes.get(s.conversationId):undefined;
+    hashes=new Map(committed);queryCache!.eventHashes.set(s.conversationId,hashes);
+   }
    const missing=s.events.filter(event=>!hashes!.has(event.id));
    // Keep each query below SQLite's parameter limit without reading unrelated events.
    for(let offset=0;offset<missing.length;offset+=500){
@@ -613,6 +639,7 @@ export function createMemoryStore(store:Store, options:Options) {
   return {items,notices};
  });
  const collections=(p:Principal):MemoryCollection[]=>{principal(p);return db.prepare('SELECT id FROM memory_collections').all().flatMap(row=>{try{return [collection(p,row.id as string)];}catch{return [];}});};
+ // Public source values must not expose the mutable objects retained by the decoder.
  return {store,options,withAuthorityQuery:authorityQuery,enqueue,publishedSourceKeys,principal,collection,collections,listAll,ensureCollection,profile,profileId,captureConversation,captureTask,source,validateSource,validateReferences,compatibleRevision,history,list,read,staleScenes,applyProposal,confirm,correct,repairLegacyContexts,retireUnscopedProfiles,retract,restore,retractSource,importLegacy};
 }
 export type MemoryStore=ReturnType<typeof createMemoryStore>;

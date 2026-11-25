@@ -81,6 +81,16 @@
 .object-summary-task + .object-summary-task { border-top:1px solid var(--border-soft); }
 .object-summary-task > span { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .object-summary-task > small { color:var(--warning); white-space:nowrap; }
+.project-activity-row { display:flex; align-items:center; gap:var(--space-2); padding:var(--space-3) var(--card-padding); color:var(--text); text-decoration:none; }
+.project-activity-row + .project-activity-row { border-top:1px solid var(--border-soft); }
+.project-activity-row:hover { background:var(--raised); }
+.project-activity-row > span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.project-activity-row time { color:var(--muted); font-size:var(--type-meta); white-space:nowrap; }
+.project-activity-more { border-top:1px solid var(--border-soft); }
+.project-activity-more > summary { padding-inline:var(--card-padding); }
+.project-activity-more > .ui-disclosure-content { padding:0; }
+.project-participants { display:flex; flex-wrap:wrap; gap:var(--space-3); padding:var(--card-padding); }
+.project-participants a, .project-workbench .object-group-heading > a { display:inline-flex; align-items:center; gap:var(--space-2); overflow-wrap:anywhere; }
 .object-settings-groups { margin-bottom:var(--space-5); }
 .object-experience .settings-card { max-width:none; }
 .object-experience .agent-overview { max-width:none; }

@@ -77,3 +77,8 @@
 .task-work-card > .task-work-related[open] > summary { grid-column:2; grid-row:2; align-self:end; width:auto; margin:4px 0 0; }
 .task-work-card[data-selection-only] > .task-work-related[open] > summary { grid-row:1; align-self:start; margin:0; }
 .task-work-card > .task-work-related[open] > .ui-disclosure-content { grid-column:1 / -1; padding:8px 0 0; }
+
+.task-work-meta { flex-wrap:wrap; }
+.task-work-project { flex:0 1 auto; max-width:100%; }
+a.task-work-project:hover { text-decoration:underline; text-underline-offset:3px; }
+.task-work-card[data-selection-only] .task-work-heading { display:block; min-width:0; }

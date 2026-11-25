@@ -27,7 +27,7 @@ async function fixture(mode = 'normal', safeSystem = false) {
 const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
 fs.writeFileSync(${JSON.stringify(launch)}, JSON.stringify({args:process.argv.slice(2),home:process.env.HOME}));
 let path = ${JSON.stringify(join(dir, 'native.jsonl'))};
-const model = {provider:'test',id:'model',name:'Test model',reasoning:true,input:['text','image']};
+const model = {provider:'test',id:'model',contextWindow:24576,name:'Test model',reasoning:true,input:['text','image']};
 require('node:readline').createInterface({input:process.stdin}).on('line', line => {
  fs.appendFileSync(${JSON.stringify(capture)}, line+'\\n');
  const r = JSON.parse(line);
@@ -81,7 +81,9 @@ async function thread(client: CodexClient, cwd: string) { return client.startThr
 
 it('negotiates without a ready event and returns the exact durable session path', async () => {
  const f=await fixture();
- expect(await thread(f.client,f.dir)).toBe(join(f.dir,'native.jsonl'));
+ expect(await f.client.getContextWindow!('test/model')).toBe(24576);
+    expect(await f.client.getContextWindow!('absent')).toBeUndefined();
+    expect(await thread(f.client,f.dir)).toBe(join(f.dir,'native.jsonl'));
  expect((await f.requests())[0].type).toBe('get_state');
  const args=(await f.launch()).args;
  expect(args).toEqual(expect.arrayContaining(['--mode','rpc','--no-extensions','-e']));

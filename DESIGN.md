@@ -164,6 +164,7 @@ Build on the source-owned shadcn/ui Radix foundation, Tailwind CSS 4, Mandala se
 - **Provenance and references** use concise labels with expandable detail; never stack paragraphs of implementation detail on operational pages.
 - **States.** Loading, empty, error and offline states preserve drafts and name the recovery action. Use one of these forms:
   - *Loading*: `LoadingState` skeleton rows for a region that is reading; never block content that is already ready.
+  - *First-use workspace* (Tasks, Projects, Agents and Schedules): centre a narrow, left-aligned group in the available canvas. Use a small monochrome layered illustration above a heading, a short description and one contextual action. The built-in Mandala Agent keeps its own row.
   - *Page or list empty*: `EmptyState` — a 20px muted icon beside a `--type-ui` / 500 title, a one-line `--type-meta` explanation and an optional action, left aligned on the content edge.
   - *Narrow panel empty* (popovers, inspectors): the same parts, centred.
   - *Section empty* (a column, a run history, an association list): one muted `--type-meta` line without an icon.
@@ -194,7 +195,7 @@ Bubbles are speech; bordered cards are objects. The rule is the same in every ch
 - **Lanes follow what the user does next:** 需要你处理 → 待验收 → 进行中 → 待办 → 已完成. An execution Chat awaiting approval, needing a reply or failed lifts an unfinished Task into 需要你处理 with one reason line and the action that resolves it; completed and cancelled Tasks stay put. Grouped rows carry no status label (the lane says it); they end in one mark per execution Chat plus the count. The status label stays in chat cards, the detail dialog and search results.
 - **Detail is one dialog.** Opening a Task from anywhere shows the same centred dialog over the current page; the page behind neither reflows nor loses its scroll. ‹ › and ←/→ step through the Task links visible behind it; Esc closes. `/tasks/:id` opens the Tasks page with the dialog; elsewhere the dialog offers "在任务页打开". Full screen below 640px. Execution chats appear directly under the title and actions, expanded, ahead of criteria and deliveries. Task text uses the reading role.
 - Discrete task segments show actual Task states and completed counts; they never infer a goal percentage or acceptance.
-- The execution-rules section on Tasks is absent when no rule exists and titled "执行规则 N 条" otherwise; up to 8 rules list without search or filters.
+- The Schedules page lists all execution rules and run history. Task details can manage rules linked to the selected Task.
 
 ### Settings
 

@@ -2,10 +2,11 @@ import Button from './ui/Button';
 import Disclosure from './ui/Disclosure';
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Approval, DisplayEvent } from "../shared/types";
-import { summarizeOperations } from "./execution";
+import { platformHookLabel, summarizeOperations } from "./execution";
 import type { ChatTurn } from "./chatTurns";
 import { eventTime, formatDuration, presentRun, type RunOperation, type RunApproval } from "./runView";
 import { useLanguage } from "./i18n";
+import {NativeSubagentList} from './NativeSubagents';
 import ExplicitProgressView from "./ExplicitProgressView";
 import ExecutionTrace, { ApprovalContent, statusLabels } from "./ExecutionTrace";
 import MarkdownMessage from "./MarkdownMessage";
@@ -26,15 +27,10 @@ const mailboxErrorChinese: Record<keyof typeof codexMailboxErrors, string> = {
 const running = (status: string) => ["running", "inProgress", "approval"].includes(status);
 const failed = (status: string) => ["failed", "error", "declined", "blocked"].includes(status);
 function operationTitle(op: RunOperation, t: ReturnType<typeof useLanguage>["t"]) {
-  if (op.item.hook?.source === "platform") return t(op.item.hook.task === "title" ? "生成标题" : op.item.hook.task === "recall" ? ((op.item.result as { entries?: {kind: string}[] })?.entries?.some(entry => entry.kind === "document") ? "资料加载" : "记忆加载") : "提炼记忆");
+  const label = platformHookLabel(op.item);
+  if (label) return t(label);
   if (op.item.type === "fileChange") return t("修改文件");
   return op.item.command || op.item.hook?.name || op.item.tool || op.item.model || op.item.query || op.item.type;
-}
-
-function isHookEvent(event: DisplayEvent) {
-  return event.kind === "hook" || event.kind === "metadata" && !!(
-    (event.data as { systemTask?: string; memoryRecall?: string }).systemTask ||
-    (event.data as { memoryRecall?: string }).memoryRecall);
 }
 
 function ActivityDisclosure({title,children,className=''}:{title:ReactNode;children:ReactNode;className?:string}){
@@ -72,9 +68,27 @@ function ApprovalHistory({approval,events}:{approval:RunApproval;events:DisplayE
  </ActivityDisclosure>;
 }
 
-export default function TurnProcess({turn,run:providedRun,onInspect,approvals=[],renderApproval,writerRecoveryAvailable=false}:{
+function writerConflict(data:unknown) {
+ const failure=data as {code?:string;nativeTurnSubmitted?:boolean}|null;
+ return failure?.code==='native_thread_busy'&&failure.nativeTurnSubmitted===false;
+}
+
+export function turnErrorText(turn:ChatTurn,message:{key:number;text:string},localize:ReturnType<typeof useLanguage>['text'],errorText:ReturnType<typeof useLanguage>['errorText'],writerRecoveryAvailable:boolean) {
+  const data=turn.events.find(event=>event.kind==='error'&&event.id===message.key)?.data as {nativeSubmissionState?:string} | undefined;
+  const code=unsubmittedCodexMailboxCode(data);
+  if(writerRecoveryAvailable&&writerConflict(data))return localize('原生会话被另一个 Codex 客户端占用。本轮未提交。', 'Another Codex client held the native session. This turn was not submitted.');
+  if(data?.nativeSubmissionState==='unknown')return errorText(message.text)+' '+localize('Codex 是否接收此请求尚未确认。请检查原生会话后再继续。', 'Codex acceptance is unconfirmed. Check the native session before continuing.');
+  if(data?.nativeSubmissionState==='accepted')return errorText(message.text)+' '+localize('Codex 已接收此请求。', 'Codex accepted this request.');
+  if(!code)return errorText(message.text);
+  return localize(
+   mailboxErrorChinese[code]+' 消息未发送到 Codex。排除故障后，请检查已保存的请求。',
+   codexMailboxErrors[code]+' The message was not sent to Codex. Please review the saved request after the issue is resolved.',
+  );
+}
+
+export default function TurnProcess({turn,run:providedRun,onInspect,approvals=[],renderApproval,quietStop=false,mainChat=false,writerRecoveryAvailable=false}:{
  turn:ChatTurn;run?:ReturnType<typeof presentRun>;onInspect:()=>void;
- approvals?:Approval[];writerRecoveryAvailable?:boolean;renderApproval?:(approval:Approval)=>ReactNode;
+ mainChat?:boolean;writerRecoveryAvailable?:boolean;quietStop?:boolean;approvals?:Approval[];renderApproval?:(approval:Approval)=>ReactNode;
 }){
  const {text: localize, t,errorText}=useLanguage();
  const [expanded,setExpanded]=useState(false),[now,setNow]=useState(Date.now());
@@ -94,32 +108,16 @@ export default function TurnProcess({turn,run:providedRun,onInspect,approvals=[]
  const connection=[...turn.events].reverse().find(event=>event.kind==='metadata'&&typeof (event.data as {remoteConnection?:unknown}).remoteConnection==='string')?.data as {remoteConnection:string;machineName?:string;host?:string}|undefined;
  const connecting=active&&connection?.remoteConnection==='connecting',machineLabel=connection?.machineName||connection?.host||'';
  const nativeAccepted=turn.events.some(event=>{const data=event.data as {method?:string;status?:string;cli?:string};return event.kind==='tool'&&data.method==='turn/started'||event.kind==='metadata'&&data.status==='loaded'&&!!data.cli;});
- const showIncompleteError=run.incomplete&&!run.userStopped;
- const writerConflict=(data:unknown)=>{
-  const failure=data as {code?:string;nativeTurnSubmitted?:boolean}|null;
-  return writerRecoveryAvailable&&failure?.code==='native_thread_busy'&&failure.nativeTurnSubmitted===false;
- };
- const status=connecting?localize(`正在连接执行机器 ${machineLabel}…`,`Connecting to ${machineLabel}…`):run.status==='queued'?t(run.queueReason==='directory'?'等待目录释放':run.queueReason==='concurrency'?'等待执行名额':'等待执行'):run.status==='approval'?t('等待审批'):active?t(current?'正在执行的操作':nativeAccepted||latestReport||run.progress.length||run.reasoning.length||run.answers.length?'正在生成回复':'正在启动执行端'):run.userStopped?localize('本轮已停止','Stopped this turn'):showIncompleteError?t('本轮未完成'):run.answers.length?localize('本轮已回复','Replied this turn'):t('本轮结束');
+ const showIncompleteError=run.incomplete&&!run.userStopped&&!quietStop;
+ const status=connecting?localize(`正在连接执行机器 ${machineLabel}…`,`Connecting to ${machineLabel}…`):run.status==='queued'?t(run.queueReason==='directory'?'等待目录释放':run.queueReason==='concurrency'?'等待执行名额':'等待执行'):run.status==='approval'?t('等待审批'):active?t(current?'正在执行的操作':nativeAccepted||latestReport||run.progress.length||run.reasoning.length||run.answers.length?'正在生成回复':'正在启动执行端'):quietStop?t('已中断'):run.userStopped?localize('本轮已停止','Stopped this turn'):showIncompleteError?t('本轮未完成'):run.answers.length?localize('本轮已回复','Replied this turn'):t('本轮结束');
  const quietTime=run.lastActivityAt===undefined?0:Math.max(0,now-run.lastActivityAt);
- const renderRunError=(message:{key:number;text:string})=>{
-  const data=turn.events.find(event=>event.kind==='error'&&event.id===message.key)?.data as {nativeSubmissionState?:string} | undefined;
-  const code=unsubmittedCodexMailboxCode(data);
-  if(writerConflict(data))return localize('原生会话被另一个 Codex 客户端占用。本轮未提交。', 'Another Codex client held the native session. This turn was not submitted.');
-  if(data?.nativeSubmissionState==='unknown')return errorText(message.text)+' '+localize('Codex 是否接收此请求尚未确认。请检查原生会话后再继续。', 'Codex acceptance is unconfirmed. Check the native session before continuing.');
-  if(data?.nativeSubmissionState==='accepted')return errorText(message.text)+' '+localize('Codex 已接收此请求。', 'Codex accepted this request.');
-  if(!code)return errorText(message.text);
-  return localize(
-   mailboxErrorChinese[code]+' 消息未发送到 Codex。排除故障后，请检查已保存的请求。',
-   codexMailboxErrors[code]+' The message was not sent to Codex. Please review the saved request after the issue is resolved.',
-  );
- };
- const visible=showHistory?run.activityTimeline:run.activityTimeline.filter(entry=>entry.kind==='error'||entry.kind==='approval'&&liveApprovals.has(entry.approval.request.id)||entry.kind==='operation'&&['interrupted','unknown'].includes(entry.operation.status));
+ const visible=showHistory?run.activityTimeline.filter(entry=>!mainChat||entry.kind!=='message'):run.activityTimeline.filter(entry=>entry.kind==='error'||entry.kind==='approval'&&liveApprovals.has(entry.approval.request.id)||entry.kind==='operation'&&['interrupted','unknown'].includes(entry.operation.status));
  return <section className="turn-process" aria-label={t('执行过程')} onClick={event=>{if((event.target as HTMLElement).closest('summary'))onInspect();}}>
   <div className="turn-process-row"><Button type="button" className="turn-process-toggle" variant="ghost" aria-label={t(showHistory?'收起本轮过程':'展开本轮过程')} aria-expanded={showHistory} aria-controls={'run-'+turn.key} onClick={()=>{onInspect();setExpanded(!showHistory);}}>
    <Icon name={showHistory?'chevronDown':'chevronRight'} size={14}/>{(active||showIncompleteError)&&<Icon name={active?'activity':'error'} size={14}/>}<span className="turn-process-status">{status}</span><span className="turn-process-time">{elapsed===undefined?'—':elapsed<60000?localize(`${Math.floor(elapsed/1000)} 秒`,`${Math.floor(elapsed/1000)}s`):localize(`${Math.floor(elapsed/60000)} 分 ${Math.floor(elapsed/1000)%60} 秒`,`${Math.floor(elapsed/60000)}m ${Math.floor(elapsed/1000)%60}s`)}</span>{operations.length>0&&<span className="turn-process-count">{t('{count} 次操作',{count:operations.length})}</span>}
   </Button></div>
   {connecting&&<p className="run-quiet" title={connection?.host}>{localize('首次使用这台机器时会在远端安装执行服务，可能需要一分钟。','The first run on a machine installs the remote execution service and can take about a minute.')}</p>}
-  {!showHistory&&(active||run.incomplete)&&run.latestProgress&&<ExplicitProgressView progress={run.latestProgress} compact hideOutputLabel live={active}/>}
+  {!showHistory&&(active||run.incomplete)&&run.latestProgress&&(!mainChat||run.latestProgress.source==='cli')&&<ExplicitProgressView progress={run.latestProgress} compact hideOutputLabel live={active}/>}
   {turn.events.map(event=>{
    const display=event.kind==='metadata'?readQuestionAnswerDisplay(event.data):null;
    if(!display)return null;
@@ -139,18 +137,19 @@ export default function TurnProcess({turn,run:providedRun,onInspect,approvals=[]
   })}
   {active&&quietTime>=15000&&<p className="run-quiet" title={t('仅表示最近收到的事件，不代表 CLI 失去响应。')}>{t('{duration} 未收到新事件',{duration:formatDuration(quietTime)})}</p>}
   <div id={'run-'+turn.key} className="turn-process-detail" data-expanded={showHistory}>
-   {showHistory&&!run.timeline.length&&<p>{t('本轮没有可展示的过程事件。')}</p>}
+   {mainChat&&showHistory&&<NativeSubagentList rows={run.subagents}/>}
+   {!mainChat&&showHistory&&!run.timeline.length&&<p>{t('本轮没有可展示的过程事件。')}</p>}
    <ol className="run-process-timeline">{visible.map(entry=><li key={entry.key} data-timeline-key={entry.key} data-activity-kind={entry.kind}>
     {entry.kind==='progress'?<><ExplicitProgressView progress={entry.progress} latest={entry.progress.sourceEventId===latestReport?.progress.sourceEventId}/>{entry.technicalOperation&&<ActivityDisclosure title={t('上报调用')}><ExecutionTrace events={turn.events.filter(event=>entry.technicalOperation!.eventIds.includes(event.id))} lazy/></ActivityDisclosure>}</>:
      entry.kind==='operationGroup'?<OperationGroup entry={entry} events={turn.events}/>:
      entry.kind==='operation'?<ExecutionTrace events={turn.events.filter(event=>entry.operation.eventIds.includes(event.id))} lazy/>:
      entry.kind==='message'?<div className="run-commentary" data-source={run.output.some(message=>message.key===entry.message.key)?'output':'commentary'}><span className="run-commentary-label" aria-hidden="true"><span className="progress-dot" data-live={active&&entry.key===run.activityTimeline.filter(item=>item.kind==='message').at(-1)?.key||undefined}/></span><MarkdownMessage text={entry.message.text} streaming={active}/></div>:
      entry.kind==='reasoning'||entry.kind==='reasoningGroup'?<ReasoningActivity entry={entry} events={turn.events}/>:
-     entry.kind==='error'?<p className="run-event-error" role="alert"><Icon name="error" size={14}/>{renderRunError(entry.message)}</p>:
+     entry.kind==='error'?<p className="run-event-error" role="alert"><Icon name="error" size={14}/>{turnErrorText(turn,entry.message,localize,errorText,writerRecoveryAvailable)}</p>:
      !entry.approval.decision&&renderApproval&&liveApprovals.has(entry.approval.request.id)?renderApproval(liveApprovals.get(entry.approval.request.id)!):<ApprovalHistory approval={entry.approval.state==='pending'&&!liveApprovals.has(entry.approval.request.id)?{...entry.approval,state:'unknown'}:entry.approval} events={turn.events}/>}
    </li>)}</ol>
   </div>
-  {showIncompleteError&&!turn.events.some(event=>event.kind==='error'&&writerConflict(event.data))&&<p className="run-incomplete">{t(turn.events.some(event=>event.kind==='error'&&(event.data as {nativeTurnSubmitted?:boolean}).nativeTurnSubmitted===false)?'请求已保存，执行端尚未接受。可复制消息或在新对话中使用。':'本轮没有完整的最终答复；已收到的内容保留在过程中。')}</p>}
+  {showIncompleteError&&(!mainChat||!turn.messages.some(message=>message.kind==='error'))&&!turn.events.some(event=>event.kind==='error'&&writerRecoveryAvailable&&writerConflict(event.data))&&<p className="run-incomplete">{t(turn.events.some(event=>event.kind==='error'&&(event.data as {nativeTurnSubmitted?:boolean}).nativeTurnSubmitted===false)?'请求已保存，执行端尚未接受。可复制消息或在新对话中使用。':'本轮没有完整的最终答复；已收到的内容保留在过程中。')}</p>}
  </section>;
 }
 
@@ -168,6 +167,7 @@ export function TurnFooter({ turn, run: providedRun, turns, onInspect, actions }
     return () => clearInterval(timer);
   }, [overview]);
   const hooks = useMemo(() => summarizeOperations(turn.events).filter(op => op.item.type === "hook"), [turn]);
+  const hookEventIds = useMemo(() => new Set(hooks.flatMap(op => op.eventIds)), [hooks]);
   if (!actions && !hooks.length && !settled) return null;
   return <div className="turn-footer">
     <div className="turn-footer-row">
@@ -180,7 +180,7 @@ export function TurnFooter({ turn, run: providedRun, turns, onInspect, actions }
       </Button>}
     </div>
     <div id={`hooks-${turn.key}`} className="turn-hooks" hidden={!expanded}>
-      {expanded && <ExecutionTrace events={turn.events.filter(event => isHookEvent(event) || event.kind === "status")} label="Hooks" lazy />}
+      {expanded && <ExecutionTrace events={turn.events.filter(event => hookEventIds.has(event.id))} label="Hooks" lazy />}
     </div>
     {overview && <ExecutionOverview turn={turn} turns={turns} now={now} onClose={() => setOverview(false)} />}
   </div>;

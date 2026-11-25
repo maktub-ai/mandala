@@ -33,6 +33,10 @@ it("exposes the real service installation/link/unlink/uninstall lifecycle and or
   expect((await post("/install", { catalogId: detail.catalogId, version: detail.version, revision, targets: [{ kind: "agent", id: "a" }] }, "https://foreign.example")).status).toBe(403);
   const response = await post("/install", { catalogId: detail.catalogId, version: detail.version, revision, targets: [{ kind: "agent", id: "a" }] });
   expect(response.status).toBe(201); const installed = await response.json();
+  const installedRevision = (await readConfig(home)).revision;
+  expect((await post(`/installed/${installed.id}/upgrade`, { revision: installedRevision, version: '2.0.0' }, 'https://foreign.example')).status).toBe(403);
+  expect((await post(`/installed/${installed.id}/upgrade`, { revision: installedRevision })).status).toBe(400);
+  expect((await post(`/installed/${installed.id}/upgrade`, { revision: installedRevision, version: '2.0.0' })).status).toBe(400);
   expect((await (await fetch(url + "/api/market/installed")).json())[0].targets[0].name).toBe("Reader");
   expect((await post(`/installed/${installed.id}/uninstall`, { revision: (await readConfig(home)).revision })).status).toBe(409);
   expect((await post(`/installed/${installed.id}/unlink`, { target: { kind: "agent", id: "a" }, revision: (await readConfig(home)).revision })).status).toBe(200);

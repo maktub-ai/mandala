@@ -1,3 +1,4 @@
+import {BlueprintDecision,type ReadBlueprintReview} from './BlueprintDecision';
 import Button from './ui/Button';
 import Disclosure from './ui/Disclosure';
 import EmptyState from './ui/EmptyState';
@@ -29,7 +30,7 @@ export function relativeTime(iso: string | undefined, say: Say, language: string
 
 /** Owned goals beside the primary chat. Each goal links only to execution Chats this browser can already read. */
 export function MandalaGoals({ goals, unsupported, chats, agents, projects, say, statusLabel, waitingLabel, onOpenChat, onStop, disabled, stopDisabled }: {
-  goals: MandalaGoal[] | null; unsupported: boolean; chats: Conversation[]; agents: Named[]; projects: Named[]; say: Say;
+  goals: MandalaGoal[] | null; unsupported: boolean; chats: Pick<Conversation,'id'|'title'|'status'>[]; agents: Named[]; projects: Named[]; say: Say;
   statusLabel: (state: string) => string; waitingLabel: (reason: string) => string;
   onOpenChat: (id: string) => void; onStop: (task: Task) => void; disabled: boolean; stopDisabled: boolean;
 }) {
@@ -54,9 +55,9 @@ export function MandalaGoals({ goals, unsupported, chats, agents, projects, say,
 }
 
 /** In-chat receipts that Mandala writes as metadata: decision requests and configuration proposals. */
-export function MandalaTurnCards({ events, allEvents, resolved, agents, projects, say, canDecide, unsupported, busy, onDecide }: {
+export function MandalaTurnCards({ events, allEvents, resolved, agents, projects, say, canDecide, unsupported, busy, onDecide,routeCall }: {
   events: DisplayEvent[]; allEvents: DisplayEvent[]; resolved: Record<string, ManagementProposal>; agents: Named[]; projects: Named[]; say: Say;
-  canDecide: boolean; unsupported: boolean; busy: boolean; onDecide: (proposal: ManagementProposal, decision: 'approve' | 'reject') => void;
+  routeCall:ReadBlueprintReview; canDecide: boolean; unsupported: boolean; busy: boolean; onDecide: (proposal: ManagementProposal, decision: 'approve' | 'reject') => void;
 }) {
   const latest = new Map<string, ManagementProposal>(), seen = new Set<string>();
   for (const event of allEvents) { const proposal = event.kind === 'metadata' && (event.data as { mandalaProposal?: ManagementProposal }).mandalaProposal; if (proposal) latest.set(proposal.id, proposal); }
@@ -65,7 +66,12 @@ export function MandalaTurnCards({ events, allEvents, resolved, agents, projects
   const cards = [];
   for (const event of events) {
     if (event.kind !== 'metadata') continue;
-    const data = event.data as { mandalaRequest?: { taskId: string; text: string; blocked: boolean }; mandalaProposal?: ManagementProposal };
+    const data = event.data as { blueprintRouteReview?:string; mandalaRequest?: { taskId: string; text: string; blocked: boolean }; mandalaProposal?: ManagementProposal };
+    if (data.blueprintRouteReview) {
+      const title=say('蓝图分派建议','Blueprint routing suggestion');
+      cards.push(<section key={event.id} className="remote-card" aria-label={title}><header><Icon name="project" size={15}/><strong>{title}</strong></header><BlueprintDecision url={'/api/remote/mandala/route-reviews/'+encodeURIComponent(data.blueprintRouteReview)} call={routeCall} disabled={busy||!canDecide}/></section>);
+      continue;
+    }
     if (data.mandalaRequest) {
       cards.push(<section key={event.id} className="remote-card" data-tone="warning"><header><Icon name="approval" size={15} /><strong>{data.mandalaRequest.blocked ? say('目标受阻', 'Goal blocked') : say('需要你的决定', 'Your decision is needed')}</strong><StatusLabel icon="clock" tone="warning">{say('等待你回复', 'Awaiting your reply')}</StatusLabel></header><p className="remote-pre">{data.mandalaRequest.text}</p><small>{say('在下方回复即可继续。', 'Reply below to continue.')}</small></section>);
       continue;

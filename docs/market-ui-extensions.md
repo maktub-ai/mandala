@@ -1,10 +1,10 @@
-# Data plugins: themes, language packs and pets
+# Data plugins: themes, language packs, pets and Library tabs
 
 Mandala 0.1.2 introduces unified data plugins through [mandala-plugins](https://github.com/maktub-ai/mandala-plugins). Language packages and their English reference dictionary now live in that repository. [mandala-themes](https://github.com/maktub-ai/mandala-themes) and [mandala-pets](https://github.com/maktub-ai/mandala-pets) remain compatible sources for single-contribution packages. They share Market search, source management, and installed-item views. Packages are data only, have no Agent or Project bindings, and cannot execute code. File preview and editing plugins are outside this interface. Catalogs and pinned packages must be public for Market's unauthenticated downloads.
 
 ## Unified plugin protocol (Mandala 0.1.2+)
 
-A plugin is an installation unit; each contribution is applied separately. One plugin may provide themes, languages and pets together. Skills and MCP keep their existing Agent/Project installation semantics. No JavaScript, workers, commands, HTML, arbitrary CSS, install hooks, network permissions or executable entry points are supported.
+Mandala installs each plugin as a unit. One plugin may provide themes, languages, pets and a Library tab together. Skills and MCP keep their existing Agent/Project installation semantics. No JavaScript, workers, commands, HTML, arbitrary CSS, install hooks, network permissions or executable entry points are supported.
 
 `mandala-plugin.json` uses an explicit schema version and a separate release version:
 
@@ -25,17 +25,66 @@ A plugin is an installation unit; each contribution is applied separately. One p
 }
 ```
 
-`contributes.pets` uses the same reference shape. Payloads retain the theme, language and [pet](#pets) formats below; do not invent another translation or pet schema. Unknown manifest fields, contribution types, duplicate IDs within a type, duplicate paths and non-JSON paths are rejected. There are at most 50 contributions per plugin. Paths are relative to the repository root, not the manifest's folder. Keep the manifest at the root when using the local validator:
+`contributes.pets` uses the same reference shape. Payloads retain the theme, language and [pet](#pets) formats below; do not invent another translation or pet schema. Unknown manifest fields, contribution types, duplicate IDs within a type, duplicate paths and non-JSON paths are rejected. There are at most 50 contributions per plugin. Paths are relative to the repository root, not the manifest's folder. The local validator accepts the repository root and an optional relative manifest path.
 
 ```sh
-node --import tsx scripts/validate-data-plugin.ts /path/to/package
+node --import tsx scripts/validate-data-plugin.ts /path/to/repository plugins/handbook/mandala-plugin.json
 ```
 
-The unified `catalog.json` is `{ "format": "mandala-plugin-catalog", "version": 1, "items": [] }`. Each entry has the same metadata and `package` reference as the legacy catalog below, plus `kinds`, a non-empty unique array drawn from `theme`, `language`, `pet`. `package.path` points to `mandala-plugin.json` (optionally in a folder). Its digest covers the manifest's exact bytes. Metadata (`id`, name, description, release version, minimum version) and kinds must match the manifest. Commit the manifest and payloads first; then publish the entry with that real 40-character commit and manifest checksum. Every payload is fetched from that same repository and commit and verified against its own checksum. The **entire download**, including the manifest, must fit within 4 MiB. Publication checks are local; no cloud CI/CD is enabled.
+### Library sections
 
-An install, update or uninstall affects the complete plugin. All checks finish before an atomic save; a failed download, version check, duplicate locale, checksum, size limit or stale revision leaves the prior installation unchanged. The 50-package / 20 MiB HOME limits include legacy packages. Installing never applies contributions automatically. Plugins have no access to task content; pet state remains controlled by Mandala.
+A plugin may declare one Library tab through `contributes.librarySections`. Its reference follows the same ID, JSON path and SHA-256 rules as other contributions.
 
-Identity is `plugin:<catalog-owner>/<catalog-repository>:<id>`, with contribution IDs ending in `/theme:<id>`, `/language:<id>` or `/pet:<id>`. This binds identity to the catalog origin, rather than trusting a display publisher name. Changing the package repository of an installed identity is rejected; removal and explicit installation are required. Different catalog origins cannot overwrite each other, and local pet imports retain their separate identity. Duplicate installed language locales are rejected even across origins and legacy packages.
+```json
+{
+  "contributes": {
+    "librarySections": [
+      { "id": "plan", "path": "section.json", "sha256": "<64 lowercase hexadecimal characters>" }
+    ]
+  }
+}
+```
+
+`section.json` declares a read-only collection of project HTML documents. For example, a handbook plugin can expose the same relative file from every local workspace.
+
+```json
+{
+  "format": "mandala-library-section",
+  "version": 1,
+  "type": "project-files",
+  "label": { "zh": "手册", "en": "Handbook" },
+  "icon": "book",
+  "source": { "kind": "workspace", "file": "docs/handbook.html" }
+}
+```
+
+Use Mandala 0.1.3 or newer. The global tab groups files by Mandala Project. A single file opens directly. The HTML runs in an opaque sandbox. The reader blocks network access by default. Setting `loopback: true` allows the document to connect to HTTP services on 127.0.0.1. Supported icons are `file`, `book`, `folder` and `target`. Optional bilingual `emptyText` and `updateText` supply messages for missing files and unsupported metadata.
+
+A `collection` source reads an external tool's local collection. For example, the following declaration reads reports from `~/.reports/projects/<id>/index.html`. An absolute `REPORTS_HOME` overrides `~/.reports`.
+
+```json
+{
+  "kind": "collection",
+  "namespace": "reports",
+  "file": "index.html",
+  "summary": {
+    "file": "summary.json", "format": "report-summary", "version": 1,
+    "title": "name", "badgeItems": "requests", "closedField": "state", "closedValue": "archived"
+  }
+}
+```
+
+For each workspace the reader checks `.<namespace>.json` for a `project` ID up to the Git root. At the Git root it next checks `<git-common-dir>/<namespace>-project`. Otherwise it matches the workspace against absolute path keys in each collection directory's `.paths.json`. Summary metadata is optional. With a declared summary, matching format and version enable the title field and optional array-length badge. A matching closed field suppresses the badge. Missing or outdated metadata still allows reading the original HTML.
+
+Workspace files must be relative HTML paths. Collection documents and summaries must use plain visible filenames. Section descriptors accept no code, absolute paths or arbitrary network destinations. Install or remove the owning plugin to show or hide its tab.
+
+### Catalog and installation
+
+The official catalog for 0.1.3+ lives at `catalogs/v2/catalog.json`. Earlier clients continue reading the compatible root catalog. Custom sources use `catalog.json`. The catalog format is `{ "format": "mandala-plugin-catalog", "version": 1, "items": [] }`. Each entry has the same metadata and `package` reference as the legacy catalog below, plus `kinds`, a non-empty unique array drawn from `theme`, `language`, `pet` and `library-section`. `package.path` points to `mandala-plugin.json` (optionally in a folder). Its digest covers the manifest's exact bytes. Metadata (`id`, name, description, release version, minimum version) and kinds must match the manifest. Commit the manifest and payloads first; then publish the entry with that real 40-character commit and manifest checksum. Every payload is fetched from that same repository and commit and verified against its own checksum. The **entire download**, including the manifest, must fit within 4 MiB. Publication checks are local; no cloud CI/CD is enabled.
+
+An install, update or uninstall affects the complete plugin. All checks finish before an atomic save; a failed download, version check, duplicate locale, checksum, size limit or stale revision leaves the prior installation unchanged. The 50-package / 20 MiB HOME limits include legacy packages. Installed Library tabs appear immediately. Applying a theme, language or pet takes a separate action. Plugins have no access to task content; pet state remains controlled by Mandala.
+
+Identity is `plugin:<catalog-owner>/<catalog-repository>:<id>`, with contribution IDs ending in `/theme:<id>`, `/language:<id>`, `/pet:<id>` or `/library-section:<id>`. This binds identity to the catalog origin, rather than trusting a display publisher name. Changing the package repository of an installed identity is rejected; removal and explicit installation are required. Different catalog origins cannot overwrite each other, and local pet imports retain their separate identity. Duplicate installed language locales are rejected even across origins and legacy packages.
 
 Manage sources accepts canonical GitHub plugin repositories; their `main/catalog.json` must use the unified format. Saved enabled/disabled selections are preserved. Removing or disabling a source does not remove installed plugins, and offline application/uninstallation remains available. Private catalogs are prepared for launch but anonymous Market downloads cannot read them. No credentials are stored in catalogs or added to package requests.
 
@@ -60,7 +109,7 @@ The catalog repositories include English README files, contribution guides, and 
 
 ## User behavior
 
-- Installation saves a package without changing appearance or language. Applying it is a separate action.
+- Installation adds declared Library tabs. Appearance and language change when the person applies the corresponding contribution.
 - Applying a theme imports its palette, font choices, density, and background while preserving other custom themes. Uninstalling retains the applied appearance copy; it can still be edited or removed in Settings.
 - Applying a language pack changes the device's UI language and `lang` / `dir`. Missing translations fall back to English, while code and terminals remain LTR. It does not change Agent response language, memory-processing language, or existing content.
 - Installed packages live in `market/ui-extensions.json` under the selected Mandala HOME and are discoverable through that service. Application preferences use the existing device preference storage. This does not provide account synchronization.

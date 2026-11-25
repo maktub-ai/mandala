@@ -29,17 +29,18 @@ export async function requestJson<T>(
   return data;
 }
 
-// Only simultaneous bulk-list readers share a request. No response survives its
-// completion, and leaving one view must not cancel another view's active read.
-const listReads=new Map<string,{controller:AbortController;read:Promise<unknown>;readers:number}>();
-function readList<T>(path:string,signal?:AbortSignal):Promise<T>{
+// Share in-flight reads within each cancellation mode. One caller leaving a panel
+// does not interrupt another panel that is still reading the same list.
+const pendingReads=new Map<string,{controller:AbortController;read:Promise<unknown>;readers:number}>();
+function shareRead<T>(path:string,signal?:AbortSignal):Promise<T>{
   if(signal?.aborted)return Promise.reject(signal.reason);
-  let shared=listReads.get(path);
+  const key=(signal?"cancellable:":"poll:")+path;
+  let shared=pendingReads.get(key);
   if(!shared){
     const controller=new AbortController();
     const entry={controller,read:requestJson('/api'+path,{method:'GET',signal:controller.signal}),readers:0};
-    shared=entry;listReads.set(path,entry);
-    const clear=()=>{if(listReads.get(path)===entry)listReads.delete(path);};
+    shared=entry;pendingReads.set(key,entry);
+    const clear=()=>{if(pendingReads.get(key)===entry)pendingReads.delete(key);};
     void entry.read.then(clear,clear);
   }
   const entry=shared;entry.readers++;
@@ -47,18 +48,22 @@ function readList<T>(path:string,signal?:AbortSignal):Promise<T>{
     let done=false;
     const release=()=>{
       if(done)return false;done=true;signal?.removeEventListener('abort',cancel);
-      if(--entry.readers===0){if(listReads.get(path)===entry)listReads.delete(path);entry.controller.abort();}
+      if(--entry.readers===0){if(pendingReads.get(key)===entry)pendingReads.delete(key);entry.controller.abort();}
       return true;
     };
     const cancel=()=>{if(release())reject(signal?.reason);};
     signal?.addEventListener('abort',cancel,{once:true});
-    void entry.read.then(value=>{if(release())resolve(value as T);},error=>{if(release())reject(error);});
+    void entry.read.then(value=>{if(release())resolve(structuredClone(value) as T);},error=>{if(release())reject(error);});
   });
 }
 
+export function clearPendingApiReads() { pendingReads.clear(); }
+
 export function api<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
-  if(method==='GET'&&body===undefined&&['/v2/tasks','/conversation-progress'].includes(path))return readList<T>(path,signal);
-  return requestJson('/api' + path, { method, signal, ...(body === undefined ? {} : {
+  if (method === 'GET' && body === undefined && (!signal || ['/v2/tasks','/conversation-progress'].includes(path))) return shareRead<T>(path,signal);
+  if (method !== 'GET') clearPendingApiReads();
+  const request = requestJson<T>('/api' + path, { method, signal, ...(body === undefined ? {} : {
     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   }) });
+  return method === 'GET' ? request : request.finally(clearPendingApiReads);
 }

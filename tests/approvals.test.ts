@@ -55,3 +55,9 @@ it('exposes only advertised native ACP always choices and returns their exact op
  expect(nativeApprovalResponse(a,'approve-always')).toEqual({outcome:{outcome:'selected',optionId:'remember-native'}});
  expect(()=>nativeApprovalResponse(request({options:[{kind:'allow_once',optionId:'once'}]},'acp/permission'),'approve-always')).toThrow();
 });
+
+it('keeps a child ACP request outside the parent conversation grant', () => {
+ const a = {...request({nativeSubagentId:'child', options:[{kind:'allow_once',optionId:'once'}]}, 'acp/permission'), conversationApproval:true};
+ expect(approvalChoices(a)).toEqual(['reject','approve']);
+ expect(() => nativeApprovalResponse(a,'approve-conversation')).toThrow();
+});

@@ -51,11 +51,58 @@ it.each([{input:'Return evidence',id:'criterion-1'},{input:['Return evidence'],i
  const run=await manager.callBoundTool(token,'mandala_delegate',args,'readable-delegate') as import('../shared/tasks').Run;
  expect(manager.taskService.getTask({userId:store.ownerUserId},run.taskId).criteria).toEqual(goal.criteria);
 });
+it('exposes a delegated run’s follow-up address only to its originating primary chat',async()=>{
+ const {manager,chat,entries,finish}=await setup();
+ await manager.send(chat.id,'Ask a specialist to track this investigation');const token=entries[0].token;
+ const goal=await manager.callBoundTool(token,'mandala_create',{goal:'Investigate',criteria,projectId:null},'goal') as {id:string};
+ const run=await manager.callBoundTool(token,'mandala_delegate',{taskId:goal.id,targetAgentId:'worker',projectId:null,request:'Investigate',criteria},'send') as import('../shared/tasks').Run;
+ const lookup=(caller:string)=>manager.callBoundTool(caller,'task_runs',{taskId:goal.id},'runs');
+ expect(await lookup(token)).toMatchObject([{id:run.id,followUp:{targetConversationId:run.routing!.executionConversationId,targetAgentId:'worker',targetProjectId:null}}]);
+ finish();
+ const other=await manager.create('',chat.agentId);await manager.send(other.id,'Observe runs');
+ const observed=await lookup(entries.at(-1)!.token) as Record<string,unknown>[];
+ expect(observed[0]).not.toHaveProperty('followUp');
+});
+it('continues a task created and started by the primary chat in its assigned worker chat',async()=>{
+ const {manager,chat,entries,store}=await setup();
+ await manager.send(chat.id,'Assign the report investigation');const token=entries[0].token;
+ const task=await manager.callBoundTool(token,'task_create',{goal:'Investigate report',criteria,projectId:null,assigneeAgentId:'worker'},'assigned') as import('../shared/tasks').Task;
+ const run=await manager.callBoundTool(token,'task_start',{taskId:task.id,expectedRevision:task.revision},'start-assigned') as import('../shared/tasks').Run;
+ const target=run.routing!.executionConversationId;
+ const address={targetConversationId:target,targetAgentId:'worker',targetProjectId:null};
+ expect(await manager.callBoundTool(token,'task_runs',{taskId:task.id},'find')).toMatchObject([{id:run.id,followUp:address}]);
+ await expect(manager.callBoundTool(token,'message_ask',{...address,text:'Check the first load'},'clarify')).resolves.toMatchObject({targetConversationId:target});
+ expect(store.listConversations()).toHaveLength(2);
+});
+it.each(['external','existing'] as const)('an %s start cannot make an assigned chat a primary follow-up destination',async mode=>{
+ const {manager,chat,entries}=await setup();
+ await manager.send(chat.id,'Assign this investigation');const token=entries[0].token;
+ const task=await manager.callBoundTool(token,'task_create',{goal:'Investigate report',criteria,projectId:null,assigneeAgentId:'worker'},'assigned') as import('../shared/tasks').Task;
+ const args={taskId:task.id,expectedRevision:task.revision};
+ const run=mode==='external'?await manager.startDurableTask(task.id,task.revision,'other-start'):
+  await manager.callBoundTool(token,'task_start',{...args,conversationId:(await manager.create('','worker')).id},'specific-start') as import('../shared/tasks').Run;
+ if(mode==='external')await manager.callBoundTool(token,'task_start',args,'other-start');
+ const observed=await manager.callBoundTool(token,'task_runs',{taskId:task.id},'find') as Record<string,unknown>[];
+ expect(observed[0]).not.toHaveProperty('followUp');
+ await expect(manager.callBoundTool(token,'message_ask',{targetConversationId:run.routing!.executionConversationId,targetAgentId:'worker',targetProjectId:null,text:'Clarify'},'clarify')).rejects.toMatchObject({status:403});
+});
 it('explains malformed criteria without creating a goal and points primary-chat delegation to supported routes',async()=>{
  const {manager,chat,entries,store}=await setup();await manager.send(chat.id,'Investigate');const token=entries[0].token;
  await expect(manager.callBoundTool(token,'mandala_create',{goal:'Goal',criteria:[{text:42}],projectId:null},'invalid-criteria')).rejects.toThrow(/criteria/);
  expect(manager.taskService.listTasks({userId:store.ownerUserId})).toHaveLength(0);
- await expect(manager.callBoundTool(token,'delegate',{targetAgentId:'worker',request:'Find evidence'},'wrong-route')).rejects.toThrow(/mandala delegate.*messages ask/);
+ await expect(manager.callBoundTool(token,'delegate',{targetAgentId:'worker',request:'Find evidence'},'wrong-route')).rejects.toMatchObject({
+  code:'coordinator_delegation_required',status:422,
+  message:expect.stringMatching(/mandala directory.*one-off.*messages ask.*targetProjectId.*tracking.*mandala delegate.*projectId/),
+ });
+ expect(manager.taskService.listTasks({userId:store.ownerUserId})).toHaveLength(0);
+});
+it('can find an existing tracking Task by its primary source chat without dispatching it',async()=>{
+ const {manager,chat,entries,store}=await setup();await manager.send(chat.id,'Track this here');const token=entries[0].token;
+ const goal=await manager.callBoundTool(token,'mandala_create',{goal:'Track the launch',criteria,projectId:null},'track') as import('../shared/tasks').Task;
+ expect(goal).toMatchObject({originConversationId:chat.id,conversationIds:[]});
+ expect(await manager.callBoundTool(token,'task_list',{conversationId:chat.id},'source-tasks')).toMatchObject([{id:goal.id}]);
+ expect(manager.taskService.listRuns({userId:store.ownerUserId},goal.id)).toEqual([]);
+ expect(store.listConversations()).toHaveLength(1);
 });
 it('records a bounded operation result once after real task creation without changing execution authority',async()=>{
  const {manager,chat,entries,store}=await setup();await manager.send(chat.id,'Save my task');const token=entries[0].token;
@@ -273,7 +320,6 @@ it('creates and delivers a primary-chat delegation while retaining legacy task c
  const {manager,chat,entries,finish,store}=await setup(),db=store.database,owner={userId:store.ownerUserId};
  await manager.send(chat.id,'Create and delegate an investigation');const token=entries[0].token;
  const legacy=await manager.callBoundTool(token,'mandala_create',{goal:'Existing task',criteria,projectId:null},'existing-task') as import('../shared/tasks').Task;
- db.exec('ALTER TABLE work_tasks ADD COLUMN project_ids_override TEXT; ALTER TABLE work_tasks ADD COLUMN module_ref TEXT');
  db.prepare('UPDATE work_tasks SET project_ids_override=?,module_ref=? WHERE id=?').run('["previous-project"]','retained-module',legacy.id);
 
  const goal=await manager.callBoundTool(token,'mandala_create',{goal:'Investigate and deliver',criteria,projectId:null},'new-task') as import('../shared/tasks').Task;
@@ -484,7 +530,12 @@ it('selects the scoped unnamed specialist and dispatches the same one-off inquir
  expect(different.id).not.toBe(next.id);
  const persisted=new DatabaseSync(join(home,'state.sqlite'),{readOnly:true});
  try{
-  expect(persisted.prepare('SELECT message_id FROM agent_inquiry_key_aliases WHERE source_conversation_id=? AND command_key=?').get(chat.id,'retry-new-key')).toMatchObject({message_id:first.id});
+  // Either concurrently submitted key can win the initial insert. Both remain resolvable after restart.
+  for(const key of ['dispatch','retry-new-key']){
+   const row=persisted.prepare(`SELECT id AS message_id FROM agent_messages WHERE source_conversation_id=? AND command_key=?
+    UNION SELECT message_id FROM agent_inquiry_key_aliases WHERE source_conversation_id=? AND command_key=?`).get(chat.id,key,chat.id,key);
+   expect(row).toMatchObject({message_id:first.id});
+  }
   expect(persisted.prepare('SELECT count(*) AS count FROM agent_messages').get()?.count).toBe(3);
  }finally{persisted.close();}
 

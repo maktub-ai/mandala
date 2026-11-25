@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createMarket } from "../server/market";
@@ -20,8 +20,7 @@ const skill = await market.detail("skill:anthropics/brand-guidelines");
 const install = async (catalogId: string, version: string, kind: "agent" | "project") => market.install({ catalogId, version, revision: (await readConfig(home)).revision,
   targets: [{ kind, id: kind === "agent" ? "reader" : "reading" }] });
 const installedSkill = await install(skill.catalogId, skill.version, "agent");
-const skillPath = (await readConfig(home)).config.skillLibrary![0].path;
-const source = await readFile(join(skillPath, "SKILL.md"), "utf8");
+const source = (await readConfig(home)).config.skillLibrary![0].content!;
 if (!source.includes("#d97757") || !source.includes("Poppins")) throw new Error("Brand guidelines changed; update the acceptance assertions after review.");
 const tools = await market.search("mcp", "io.github.upstash/context7");
 const mcp = tools.items.find(item => item.catalogId === "mcp:io.github.upstash/context7");
@@ -30,8 +29,8 @@ const installedMcp = await install(mcp.catalogId, mcp.version, "project");
 const clawSkill = await market.detail("skill:clawhub/steipete/github");
 const installedClaw = await install(clawSkill.catalogId, clawSkill.version, "agent");
 const config = (await readConfig(home)).config;
-const clawPath = config.skillLibrary!.find(entry => entry.id === installedClaw.id)!.path;
-if (!(await readFile(join(clawPath, "SKILL.md"), "utf8")).includes("gh CLI") && !(await readFile(join(clawPath, "SKILL.md"), "utf8")).includes("`gh`")) throw new Error("ClawHub sample changed; inspect the source.");
+const clawContent = config.skillLibrary!.find(entry => entry.id === installedClaw.id)!.content!;
+if (!clawContent.includes("gh CLI") && !clawContent.includes("`gh`")) throw new Error("ClawHub sample changed; inspect the source.");
 await writeFile(join(config.projects[0].cwd, "reading-sample.txt"), "Synthetic reading list: A Field Guide to CSS and Design.\n");
 console.log("PASS real catalog downloads: brand-guidelines @ " + skill.version + "; context7 @ " + mcp.version + "; ClawHub steipete/github @ " + clawSkill.version);
 const store = openStore(home), manager = createSessionManager(store, async () => (await readConfig(home)).config, undefined, undefined, home);

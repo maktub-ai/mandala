@@ -35,6 +35,17 @@ test('gateway locks anonymous access and separates two accounts across logout an
   expect((await fetch(origin+'/auth/avatar')).status).toBe(401);
   expect((await fetch(origin+'/auth/desktop/bootstrap')).status).toBe(403);
   const a=await signIn(),cookieA=`mandala_desktop=${a.token}`;
+  const filePath='/api/v2/library-sections/docs/files/todo-app/view.html?project=todo';
+  const fileRequest={method:'POST',headers:{Origin:origin,Cookie:cookieA,'X-Mandala-File-Link':'1'}};
+  expect((await fetch(origin+filePath)).status).toBe(401);
+  const share=await fetch(origin+filePath,fileRequest);
+  expect(share.status).toBe(200);
+  const {url:fileLink}=await share.json();expect(fileLink).toContain(origin+filePath+'&');
+  expect((await fetch(fileLink)).status).toBe(200);
+  expect((await fetch(fileLink.replace('project=todo','project=other'))).status).toBe(401);
+  expect((await fetch(fileLink.replace('/todo-app/','/other/'))).status).toBe(401);
+  expect((await fetch(fileLink,{method:'POST'})).status).toBe(401);
+  expect((await fetch(origin+'/api/tasks'+new URL(fileLink).search)).status).toBe(401);
   const avatar='data:image/jpeg;base64,/9j/4AAEAAH/2Q==';
   const getAvatar=(cookie:string)=>fetch(origin+'/auth/avatar',{headers:{Cookie:cookie}}).then(r=>r.json());
   expect((await post('/auth/avatar',{avatar},cookieA,'wrong')).status).toBe(403);
@@ -45,7 +56,7 @@ test('gateway locks anonymous access and separates two accounts across logout an
   expect((await post('/auth/logout',{},cookieA,'wrong')).status).toBe(403);
   expect((await post('/auth/logout',{},cookieA,'csrf-alice')).status).toBe(200);expect(closed).toBe(1);
   expect((await fetch(origin+'/api/tasks',{headers:{Cookie:cookieA}})).status).toBe(401);
-  identity='bob';const b=await signIn();expect(b.partition).not.toBe(a.partition);expect(b.home).not.toBe(a.home);
+  identity='bob';const b=await signIn();expect((await fetch(fileLink)).status).toBe(401);expect(b.partition).not.toBe(a.partition);expect(b.home).not.toBe(a.home);
   expect(await getAvatar(`mandala_desktop=${b.token}`)).toEqual({avatar:null});
   expect(existsSync(join(a.home,'account-avatar.jpg'))).toBe(true);
   expect((await fetch(origin+'/api/tasks',{headers:{Cookie:`mandala_desktop=${b.token}`}}).then(r=>r.json())).task).toBe('bob private task');

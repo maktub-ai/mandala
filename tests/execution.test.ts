@@ -14,6 +14,19 @@ const event = (id: number, method: string, params: unknown): DisplayEvent => ({
 const hook = (id: number, data: unknown): DisplayEvent => ({
   id, conversationId: "c", kind: "hook", createdAt: "2026-10-01", data,
 });
+it("shows historical memory capture failures alongside extraction jobs", () => {
+  const events = [
+    { ...hook(1, { systemTask: "memory", status: "running", jobId: "j" }), kind: "metadata" },
+    { ...hook(2, { memoryCapture: "failed", message: "storage_failure" }), kind: "metadata" },
+    { ...hook(3, { systemTask: "memory", status: "completed", jobId: "j" }), kind: "metadata" },
+  ] satisfies DisplayEvent[];
+  const operations = summarizeOperations(events);
+  expect(operations.map(op => [op.status, op.eventIds])).toEqual([["completed", [1, 3]], ["failed", [2]]]);
+  const html = renderChineseMarkup(React.createElement(ExecutionTrace, { events, label: "Hooks" }));
+  expect(html).toContain("记忆采集");
+  expect(html).toContain("storage_failure");
+  expect(html).toContain("1 次失败");
+});
 it("updates_each_native_hook_run_once_and_keeps_it_in_execution_order", () => {
   const operations = summarizeOperations([
     hook(1, { id: "h1", name: "personal-audit.sh", event: "postToolUse", status: "running", source: "codex" }),

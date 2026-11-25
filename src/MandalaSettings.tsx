@@ -20,12 +20,14 @@ export default function MandalaSettings({ onClose, onSaved }: {onClose:()=>void;
   const {text: localize}=useLanguage(), say=(zh:string,en:string)=>localize(zh, en);
   const [loaded,setLoaded]=useState<{config:Config;revision:string}>();
   const [name,setName]=useState(''),[soul,setSoul]=useState(''),[cli,setCli]=useState<Cli | ''>(''),[maxParallel,setMaxParallel]=useState('3');
+  const [showExecutionDetails,setShowExecutionDetails]=useState(false);
   const [models,setModels]=useState<Config['agents'][number]['models']>({});
   const [catalog,setCatalog]=useState<ModelCatalog>({choices:[],loading:true,error:''});
   const [catalogRefresh,refreshCatalog]=useState(0);
   const [error,setError]=useState(''),[saving,setSaving]=useState(false);
   const load=()=>{setError('');void api<{config:Config;revision:string}>('/config').then(result=>{
     const agent=result.config.agents.find(a=>a.id===result.config.mandala?.agentId)!;
+    setShowExecutionDetails(result.config.mandala?.showExecutionDetails === true);
     setLoaded(result);setName(agent.name);setSoul(result.config.mandala!.soul);setCli(agent.defaultCli);setModels(agent.models);setMaxParallel(String(result.config.mandala!.maxParallel));
   }).catch(reason=>setError(reason.message));};
   useEffect(load,[]);
@@ -40,7 +42,7 @@ export default function MandalaSettings({ onClose, onSaved }: {onClose:()=>void;
   },[loaded,cli,catalogRefresh]);
   const save=async()=>{
     if(!loaded || !cli)return;setSaving(true);setError('');
-    try{const result=await api<{config:Config;revision:string}>('/mandala','PUT',{revision:loaded.revision,settings:{name,soul,cli,models,maxParallel:Number(maxParallel)}});onSaved(result.config,result.revision);onClose();}
+    try{const result=await api<{config:Config;revision:string}>('/mandala','PUT',{revision:loaded.revision,settings:{name,soul,cli,models,showExecutionDetails,maxParallel:Number(maxParallel)}});onSaved(result.config,result.revision);onClose();}
     catch(reason){setError((reason as Error).message);}finally{setSaving(false);}
   };
   return <Dialog label={say('Mandala 设置','Mandala settings')} onClose={onClose} locked={saving} className="mandala-settings">
@@ -56,6 +58,7 @@ export default function MandalaSettings({ onClose, onSaved }: {onClose:()=>void;
       <Field label="Runtime" hint={say('Runtime 和模型从下一轮主对话生效；正在执行的工作保持当前设置。','Runtime and model apply to the next main-chat turn; active work keeps its current settings.')}><Select ariaLabel="Runtime" value={cli} disabled={saving} onChange={value=>setCli(value as Cli)} options={enabledRuntimes(loaded.config).map(value=>({value,label:runtimeLabel(value)}))}/></Field>
       <div className="system-model-field"><span>{say('模型','Model')}</span><ModelCatalogPicker ariaLabel={say('模型','Model')} catalog={catalog} value={cli?models[cli]??'':''} disabled={saving||!cli}
         onChange={value=>setModels(current=>({...current,[cli]:value}))} onRefresh={()=>refreshCatalog(value=>value+1)}/></div>
+      <label className="mandala-details-setting"><Input type="checkbox" checked={showExecutionDetails} disabled={saving} onChange={event=>setShowExecutionDetails(event.target.checked)}/>{say('显示执行详情','Show execution details')}</label>
       <Field label={say('后台总并行上限','Background concurrency limit')} hint={say('主聊天不占用后台名额。','The main chat does not use a background slot.')}><Input type="number" min={1} required value={maxParallel} disabled={saving} onChange={event=>setMaxParallel(event.target.value)}/></Field>
       <p className="field-hint">{say('工作区、工具与规则由系统维护。','Workspace, tools and rules are managed by the system.')}</p>
       <div className="mandala-settings-actions"><Button disabled={saving} onClick={onClose}>{say('取消','Cancel')}</Button><Button variant="primary" type="submit" busy={saving} disabled={!name.trim()}>{say('保存','Save')}</Button></div>

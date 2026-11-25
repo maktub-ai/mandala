@@ -48,8 +48,8 @@ test('real local and account services complete phone request, computer approval,
   await expect(computer.getByRole('button',{name:'批准',exact:true})).toBeVisible();await computer.getByRole('button',{name:'批准',exact:true}).click();await page.getByRole('button',{name:'刷新',exact:true}).click();await page.getByRole('button',{name:'连接',exact:true}).click();
   await expect(page.getByRole('heading',{name:'配对这台电脑',exact:true})).toBeVisible();await page.getByLabel('电脑配对码',{exact:true}).fill(pairingCode!);await page.getByRole('button',{name:'确认配对',exact:true}).click();
   await page.goto(url(control)+`/chat?conversation=${conversation.id}`);await expect(page.getByText('Local history remains on computer',{exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'配置概览',exact:true}).click();await expect(page.getByText('配置修改在电脑上完成；这里只展示获准读取的概览。')).toBeVisible();await expect(page.locator('input,textarea')).toHaveCount(0);
-  await computer.getByRole('button',{name:'撤销',exact:true}).click();await expect(page.getByText('已撤销',{exact:false})).toBeVisible({timeout:10000});
+  await page.getByRole('button',{name:'配置概览',exact:true}).click();await expect(page.getByText('配置修改在电脑上完成；这里只展示获准读取的概览。')).toBeVisible();await expect(page.getByRole('checkbox',{name:'缓存已读内容（7 天）'})).toBeVisible();await expect(page.locator('input:not([type=checkbox]),textarea')).toHaveCount(0);
+  await computer.locator('summary').filter({hasText:'授权历史'}).click();await computer.getByRole('button',{name:'撤销',exact:true}).click();await expect(page.getByText('已撤销',{exact:false})).toBeVisible({timeout:10000});
   expect((await page.request.get(url(control)+`/api/conversations/${conversation.id}/history`)).status()).toBe(403);
   await page.getByRole('button',{name:'请求授权',exact:true}).click();await computer.getByRole('button',{name:'批准',exact:true}).click();await page.goto(url(control)+`/chat?conversation=${conversation.id}`);await expect(page.getByText('Local history remains on computer',{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);

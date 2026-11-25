@@ -61,9 +61,27 @@ export function createTaskRecovery({store,tasks,scheduler,inspect,wake,onInputRe
    }else{tasks.markUnknown(row.id as string);report.unknown++;}
   }
   for(const input of db.prepare("SELECT i.*,n.invocation_id,n.host_id,n.native_session_id,n.native_turn_id FROM task_user_inputs i LEFT JOIN task_input_invocations n ON n.input_id=i.id WHERE i.state IN ('running','unknown') OR i.id IN (SELECT claim_id FROM task_native_uncertainty WHERE kind='input')").all()){
+   // Human inputs bind their native invocation before startTurn. A shutdown in preparation
+   // can leave an uncertainty marker even though this input never reached the executor.
+   const current=store.getConversation(input.conversation_id as string);
+   if(hostId==='local'&&current?.purpose==='mandala-main'&&!current.executionLocation&&!input.source&&input.state==='unknown'&&!input.invocation_id){
+    const stopped=db.prepare(`SELECT json_extract(u.data,'$.runId') AS runId FROM events u
+      WHERE u.conversationId=? AND u.kind='user' AND json_extract(u.data,'$.queuedInputId')=?
+      AND EXISTS (SELECT 1 FROM events e WHERE e.conversationId=u.conversationId AND e.id>u.id AND e.kind='error'
+        AND json_extract(e.data,'$.code')='service_closed' AND json_extract(e.data,'$.runId')=json_extract(u.data,'$.runId'))
+      AND NOT EXISTS (SELECT 1 FROM task_directory_claims WHERE kind='input' AND owner_id=? AND submitted=1) LIMIT 1`).get(current.id,input.id,input.id);
+    if(stopped){
+     store.transaction(()=>{
+      db.prepare("UPDATE task_user_inputs SET state='cancelled' WHERE id=?").run(input.id);
+      db.prepare("DELETE FROM task_native_uncertainty WHERE kind='input' AND claim_id=?").run(input.id);
+      store.appendEvent(current.id,'metadata',{queuedInputId:input.id,runId:stopped.runId,nativeTurnSubmitted:false,reason:'service_closed_before_dispatch'});
+     });
+     conversations.add(current.id);
+     continue;
+    }
+   }
    let status:Inspection='unknown';
    if(input.host_id===hostId&&input.native_session_id&&input.native_turn_id)try{status=await inspect({runId:input.invocation_id as string,hostId,nativeSessionId:input.native_session_id as string,nativeTurnId:input.native_turn_id as string},input.conversation_id as string);}catch{}
-   const current=store.getConversation(input.conversation_id as string);
    const terminal=status==='succeeded'||status==='failed';if(terminal&&current?.nativeId===input.native_session_id&&current?.turnId===input.native_turn_id)terminalInputs.set(input.conversation_id as string,{invocationId:input.invocation_id as string,nativeSessionId:input.native_session_id as string,nativeTurnId:input.native_turn_id as string});scheduler.reconcileInput(input.id as string,terminal);
    onInputReconciled?.(input.id as string,status,input.invocation_id as string);
    if(!terminal)report.inputsUnknown++;

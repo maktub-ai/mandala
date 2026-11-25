@@ -81,7 +81,7 @@ test('reference-inspired compact overview keeps three readable columns and expan
  expect((await card.boundingBox())!.width).toBeGreaterThanOrEqual(220);expect((await card.boundingBox())!.height).toBeLessThanOrEqual(210);
  await card.locator('.progress-expand').click();await expect(card.locator('.progress-expand')).toHaveAttribute('aria-expanded','true');await expect(title).toHaveText(data.longTitle);expect(await title.evaluate(el=>el.scrollHeight<=el.clientHeight+1)).toBe(true);
  await expect(page.getByRole('combobox',{name:'可见范围',exact:true})).toBeHidden();await page.getByRole('button',{name:'筛选',exact:true}).click();await expect(page.getByRole('combobox',{name:'可见范围',exact:true})).toBeVisible();
- await page.getByRole('button',{name:'列表',exact:true}).click();const row=page.getByRole('region',{name:'进度列表',exact:true}).locator('[data-conversation-id="'+data.long+'"]');expect((await row.boundingBox())!.width).toBeGreaterThan(800);expect(await page.locator('.progress-groups').evaluate(el=>el.getBoundingClientRect().bottom<=document.querySelector('.task-legacy-rules')!.getBoundingClientRect().top+1)).toBe(true);
+ await page.getByRole('button',{name:'列表',exact:true}).click();const row=page.getByRole('region',{name:'进度列表',exact:true}).locator('[data-conversation-id="'+data.long+'"]');expect((await row.boundingBox())!.width).toBeGreaterThan(800);
 });
 
 
@@ -91,7 +91,7 @@ test('Progress navigation matches the page name in both languages',async({page})
  await page.evaluate(()=>localStorage.setItem('mana-language','en'));await page.reload();
  await expect(page.locator('.sidebar a[href="/tasks"]')).toHaveText('Tasks');await expect(page.getByRole('heading',{name:'Tasks',exact:true})).toBeVisible();
 });
-test('Tasks defaults to list and remembers view selection across reload and navigation',async({page})=>{
+test('Tasks remembers view selection across reload and navigation',async({page})=>{
  await page.goto('/tasks');await expect(page.getByRole('button',{name:'列表',exact:true})).toHaveAttribute('aria-pressed','true');
  await page.getByRole('button',{name:'看板',exact:true}).click();await page.reload();await expect(page.getByRole('button',{name:'看板',exact:true})).toHaveAttribute('aria-pressed','true');
  await page.goto('/agents');await page.locator('.sidebar a[href="/tasks"]').click();await expect(page.getByRole('button',{name:'看板',exact:true})).toHaveAttribute('aria-pressed','true');

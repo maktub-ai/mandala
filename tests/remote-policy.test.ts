@@ -71,3 +71,12 @@ it('projects safe config with no paths, instructions, secrets or future fields',
   expect(JSON.stringify(summary)).not.toContain('SECRET');
   expect(policy.remoteConfigSummary({...config, mandala: {agentId: 'a', soul: 'SECRET', maxParallel: 3}}).mandala).toEqual({agentId: 'a'});
 });
+
+it('limits paired blueprint decisions to the primary-chat projection',()=>{
+ const path='/api/remote/mandala/route-reviews/review-1',choice={projectId:'atlas',lane:'绘图',assigneeAgentId:'artist'};
+ expect(allowed('GET',path)).toBe(true);
+ expect(allowed('POST',path,{selection:choice})).toBe(true);
+ expect(allowed('POST',path,{selection:null})).toBe(true);
+ for(const body of [{selection:choice,conversationId:'another'},{selection:{...choice,criteria:[]}},{selection:{projectId:'a'}}])expect(allowed('POST',path,body)).toBe(false);
+ for(const target of ['/api/v2/tasks/route-reviews/review-1',path+'?chat=another','/api/v2/tasks/route-preview'])for(const method of ['GET','POST'])expect(allowed(method,target,{selection:choice})).toBe(false);
+});

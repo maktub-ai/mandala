@@ -33,8 +33,14 @@ test('revoking real remote access clears protected content and polling avoids re
   let configs=0,reads=0;page.on('request',request=>{if(request.url().endsWith('/api/remote/transport')&&request.postDataBuffer()){try{const inner=fixture.inspectRequest(request.postDataBuffer()!.toString('utf8'));if(inner.path==='/api/remote/config')configs++;if(inner.method==='GET')reads++;}catch{}}});
   await expect.poll(()=>reads,{timeout:8000}).toBeGreaterThan(2);expect(configs).toBe(0);
   await page.goto(fixture.relayUrl+'/?conversation=missing-remote-chat');await expect(page.getByText('对话不可用',{exact:true})).toBeVisible();await expect(page.getByText('电脑在线',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'发送',exact:true})).toBeDisabled();await page.getByRole('button',{name:'对话列表',exact:true}).click();await page.getByRole('button',{name:/手机端合成对话/}).click();await expect(page.getByText('History remains on this computer.',{exact:true})).toBeVisible();
-  const message=page.getByLabel('消息',{exact:true});await message.fill('Local draft remains after revocation');await expect(page.locator('.composer-draft-feedback')).toHaveCount(0);await computer.getByRole('button',{name:'撤销',exact:true}).click();
-  await expect(page.getByText('访问已失效',{exact:true})).toBeVisible({timeout:15000});await expect(page.getByText('History remains on this computer.',{exact:true})).toHaveCount(0);await expect(message).toHaveValue('Local draft remains after revocation');await expect(page.getByRole('button',{name:'发送',exact:true})).toBeDisabled();await expect(message).toBeEnabled();
+  const message=page.getByLabel('消息',{exact:true});await message.fill('Local draft remains after revocation');await expect(page.locator('.composer-draft-feedback')).toHaveCount(0);await computer.locator('summary').filter({hasText:'授权历史'}).click();await computer.getByRole('button',{name:'撤销',exact:true}).click();
+  const requestAccess=page.getByRole('button',{name:'请求授权',exact:true});
+  await expect(requestAccess).toBeVisible({timeout:15000});
+  await expect(page.getByText('History remains on this computer.',{exact:true})).toHaveCount(0);
+  await expect(message).toHaveCount(0);
+  await requestAccess.click();await computer.getByRole('button',{name:'批准',exact:true}).click();
+  await page.goto(fixture.relayUrl+'/?conversation='+fixture.conversation.id);
+  await expect(message).toHaveValue('Local draft remains after revocation');
  }finally{await context.close();await fixture.close();}
 });
 
@@ -59,21 +65,47 @@ test('authorization loss invalidates a successful history response that arrives 
  try{
   await pairRemote(page,computer,fixture);await page.getByRole('button',{name:'对话列表',exact:true}).click();await page.getByRole('button',{name:/手机端合成对话/}).click();await expect(page.getByText('History remains on this computer.',{exact:true})).toBeVisible();
   const session=await(await page.request.get(fixture.relayUrl+'/auth/session')).json();await page.route('**/auth/session',route=>route.fulfill({json:session}));
-  await page.route('**/api/remote/transport',async route=>{if(!hold){await route.continue();return;}const inner=fixture.inspectRequest(route.request().postDataBuffer()!.toString('utf8'));if(hold&&inner.method==='GET'&&inner.path.startsWith(`/api/conversations/${fixture.conversation.id}/history?recent=5&since=`)){hold=false;const response=await route.fetch();entered();await released;try{await route.fulfill({response});}catch{}finally{finished();}}else await route.continue();});
-  await page.getByLabel('消息',{exact:true}).fill('Rejected after authorization loss');await page.getByRole('button',{name:'刷新远程工作区',exact:true}).click();await started;await computer.getByRole('button',{name:'撤销',exact:true}).click();await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByText('访问已失效',{exact:true})).toBeVisible({timeout:15000});
-  release();await delivered;await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>resolve())));await expect(page.getByText('History remains on this computer.',{exact:true})).toHaveCount(0);await expect(page.getByText('访问已失效',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'发送',exact:true})).toBeDisabled();expect(fixture.store.listEvents(fixture.conversation.id,0).some(event=>event.kind==='user'&&(event.data as {text?:string}).text==='Rejected after authorization loss')).toBe(false);
+  await page.route('**/api/remote/transport',async route=>{if(!hold){await route.continue();return;}const inner=fixture.inspectRequest(route.request().postDataBuffer()!.toString('utf8'));if(hold&&inner.method==='GET'&&inner.path.split('?')[0]===`/api/conversations/${fixture.conversation.id}/history`){hold=false;const response=await route.fetch();entered();await released;try{await route.fulfill({response});}catch{}finally{finished();}}else await route.continue();});
+  await page.getByLabel('消息',{exact:true}).fill('Rejected after authorization loss');await page.getByRole('button',{name:'刷新远程工作区',exact:true}).click();await started;await computer.locator('summary').filter({hasText:'授权历史'}).click();await computer.getByRole('button',{name:'撤销',exact:true}).click();await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByText('访问已失效',{exact:true})).toBeVisible({timeout:15000});
+  release();await delivered;await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>resolve())));await expect(page.getByText('History remains on this computer.',{exact:true})).toHaveCount(0);await expect(page.getByText('访问已失效',{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'发送',exact:true})).toHaveCount(0);expect(fixture.store.listEvents(fixture.conversation.id,0).some(event=>event.kind==='user'&&(event.data as {text?:string}).text==='Rejected after authorization loss')).toBe(false);
  }finally{release();await context.close();await fixture.close();}
 });
 
-async function removeCachedFileBytes(page:Page,text:string){await page.evaluate(async text=>{const database=await new Promise<IDBDatabase>((resolve,reject)=>{const request=indexedDB.open('mandala-composer-drafts',1);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});await new Promise<void>((resolve,reject)=>{const transaction=database.transaction('drafts','readwrite'),store=transaction.objectStore('drafts'),cursor=store.openCursor();cursor.onsuccess=()=>{const item=cursor.result;if(item){if(item.value.draft?.text===text)item.update({...item.value,files:[]});item.continue();}};transaction.oncomplete=()=>resolve();transaction.onerror=()=>reject(transaction.error);});database.close();},text);}
+async function removeCachedFileBytes(page:Page,conversationId:string){
+ const url=page.url();
+ async function files(remove:boolean){
+  return page.evaluate(async({conversationId,remove})=>{
+   const db=await new Promise<IDBDatabase>((resolve,reject)=>{const request=indexedDB.open('mandala-composer-drafts',1);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+   try {
+    return await new Promise<boolean>((resolve,reject)=>{
+     const tx=db.transaction('drafts',remove?'readwrite':'readonly'),cursor=tx.objectStore('drafts').openCursor();let found=false;
+     cursor.onsuccess=()=>{
+      const item=cursor.result;if(!item)return;
+      const [kind,,,scope]=JSON.parse(String(item.key));
+      if(kind==='remote'&&JSON.parse(scope).conversationId===conversationId&&item.value.format==='remote-composer-v1'&&item.value.files.length){
+       found=true;if(remove)item.update({...item.value,files:[]});
+      }
+      item.continue();
+     };
+     tx.oncomplete=()=>resolve(found);tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
+    });
+   }finally{db.close();}
+  },{conversationId,remove});
+ }
+ await expect.poll(()=>files(false)).toBe(true);
+ // Simulate attachment loss while the editor is closed. Keep its authenticated manifest and receipt.
+ await page.goto(new URL('/auth/session',url).href);
+ expect(await files(true)).toBe(true);
+ await page.goto(url);
+}
 
 test('missing remote files block new sends while pending recovery can check uploaded attachments without reselecting',async({page,browser})=>{
  test.setTimeout(90000);const fixture=await remoteMobileFixture(),context=await browser.newContext(),computer=await context.newPage();
  try{
   await pairRemote(page,computer,fixture);await page.getByRole('button',{name:'对话列表',exact:true}).click();await page.getByRole('button',{name:/手机端合成对话/}).click();await expect(page.getByText('History remains on this computer.',{exact:true})).toBeVisible();
-  const file={name:'recover-bytes.txt',mimeType:'text/plain',buffer:Buffer.from('Actual remote file bytes')},message=page.getByLabel('消息',{exact:true});await message.fill('Missing file recovery text');await page.locator('input[type=file]').setInputFiles(file);await expect(page.locator('.composer-draft-feedback')).toHaveCount(0);await removeCachedFileBytes(page,'Missing file recovery text');await page.reload();await expect(message).toHaveValue('Missing file recovery text');await expect(page.locator('.composer-missing-files')).toContainText(file.name);await expect(page.getByRole('button',{name:'发送',exact:true})).toBeDisabled();await page.locator('input[type=file]').setInputFiles(file);await expect(page.locator('.composer-missing-files')).toHaveCount(0);await expect(page.getByRole('button',{name:'发送',exact:true})).toBeEnabled();await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByText('Fixture reply: Missing file recovery text',{exact:true})).toBeVisible();
+  const file={name:'recover-bytes.txt',mimeType:'text/plain',buffer:Buffer.from('Actual remote file bytes')},message=page.getByLabel('消息',{exact:true});await message.fill('Missing file recovery text');await page.locator('input[type=file]').setInputFiles(file);await expect(page.locator('.composer-draft-feedback')).toHaveCount(0);await removeCachedFileBytes(page,fixture.conversation.id);await expect(message).toHaveValue('Missing file recovery text');await expect(page.locator('.composer-missing-files')).toContainText(file.name);await expect(page.getByRole('button',{name:'发送',exact:true})).toBeDisabled();await page.locator('input[type=file]').setInputFiles(file);await expect(page.locator('.composer-missing-files')).toHaveCount(0);await expect(page.getByRole('button',{name:'发送',exact:true})).toBeEnabled();await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByText('Fixture reply: Missing file recovery text',{exact:true})).toBeVisible();
   let posts=0,checks=0,first=true,allowCheck=false;await page.route('**/api/remote/transport',async route=>{const inner=fixture.inspectRequest(route.request().postDataBuffer()!.toString('utf8'));if(inner.method==='GET'&&inner.path.endsWith('/queue')){checks++;if(!allowCheck){await route.abort('failed');return;}}if(inner.method==='POST'&&inner.path.endsWith('/queue')&&JSON.parse(inner.body).text==='Unknown attachment recovery'){posts++;if(first){first=false;await route.fetch();await route.abort('failed');return;}}await route.continue();});
-  await message.fill('Unknown attachment recovery');await page.locator('input[type=file]').setInputFiles(file);await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByRole('button',{name:'核对上次发送',exact:true})).toBeVisible();await page.waitForTimeout(400);/* let the 180 ms draft autosave settle before simulating lost bytes */await removeCachedFileBytes(page,'Unknown attachment recovery');await page.reload();await expect(page.locator('.composer-missing-files')).toContainText(file.name);await expect(page.getByRole('button',{name:'核对上次发送',exact:true})).toBeEnabled();allowCheck=true;await page.getByRole('button',{name:'核对上次发送',exact:true}).click();await expect(page.locator('.composer-recovery-notice')).toHaveCount(0);await expect(page.locator('.composer-missing-files')).toHaveCount(0);expect(posts).toBe(1);expect(checks).toBeGreaterThan(0);
+  await message.fill('Unknown attachment recovery');await page.locator('input[type=file]').setInputFiles(file);await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByRole('button',{name:'核对上次发送',exact:true})).toBeVisible();await removeCachedFileBytes(page,fixture.conversation.id);await expect(page.locator('.composer-missing-files')).toContainText(file.name);await expect(page.getByRole('button',{name:'核对上次发送',exact:true})).toBeEnabled();allowCheck=true;await page.getByRole('button',{name:'核对上次发送',exact:true}).click();await expect(page.locator('.composer-recovery-notice')).toHaveCount(0);await expect(page.locator('.composer-missing-files')).toHaveCount(0);expect(posts).toBe(1);expect(checks).toBeGreaterThan(0);
  }finally{await context.close();await fixture.close();}
 });
 
@@ -84,4 +116,35 @@ test('a delayed interrupted Chat detail blocks new input until it can explicitly
   await page.route('**/api/remote/transport',async route=>{const inner=fixture.inspectRequest(route.request().postDataBuffer()!.toString('utf8'));if(inner.method==='POST'&&inner.path.endsWith('/continue'))continues++;if(inner.method==='POST'&&inner.path.endsWith('/queue'))queues++;if(hold&&inner.method==='GET'&&inner.path===`/api/conversations/${fixture.conversation.id}`){hold=false;const response=await route.fetch();entered();await gate;try{await route.fulfill({response});}catch{}}else await route.continue();});
   await page.reload();await started;await message.fill('Continue only after interrupted detail');await expect(page.getByRole('button',{name:'发送',exact:true})).toBeDisabled();expect(continues+queues).toBe(0);release();await expect(page.getByRole('button',{name:'发送',exact:true})).toBeEnabled();await page.getByRole('button',{name:'发送',exact:true}).click();await expect(page.getByText('Fixture reply: Continue only after interrupted detail',{exact:true})).toBeVisible();expect(continues).toBe(1);expect(queues).toBe(0);
  }finally{release();await context.close();await fixture.close();}
+});
+
+test('a missing Chat drops its cached messages even if it still appears in the remote list',async({page,browser})=>{
+ const fixture=await remoteMobileFixture(),context=await browser.newContext(),computer=await context.newPage();
+ const id=fixture.conversation.id,historyText=page.getByText('History remains on this computer.',{exact:true});
+ try{
+  await pairRemote(page,computer,fixture);
+  await page.getByRole('button',{name:'配置概览',exact:true}).click();
+  await page.getByLabel('缓存已读内容（7 天）').check();
+  await page.getByRole('button',{name:'对话列表',exact:true}).click();
+  await page.getByRole('button',{name:/手机端合成对话/}).click();
+  await expect(historyText).toBeVisible();
+  const cachePresent=()=>page.evaluate(id=>Object.keys(localStorage).some(key=>key.endsWith(':cache:chat:'+id)),id);
+  await expect.poll(cachePresent).toBe(true);
+  const get=fixture.store.getConversation;
+  await page.route('**/api/remote/transport',async route=>{
+   const inner=fixture.inspectRequest(route.request().postData()!);
+   if(inner.method!=='GET'||inner.path!=='/api/conversations/'+id)return route.continue();
+   // The list request already succeeded. Make only this detail lookup return the host's authenticated 404.
+   fixture.store.getConversation=key=>key===id?undefined:get(key);
+   try{await route.fulfill({response:await route.fetch()});}finally{fixture.store.getConversation=get;}
+  });
+  expect(fixture.store.listConversations().some(row=>row.id===id)).toBe(true);
+  await page.getByRole('button',{name:'刷新远程工作区',exact:true}).click();
+  await expect(page.getByText('对话不可用',{exact:true})).toBeVisible();
+  await expect.poll(cachePresent).toBe(false);
+  await page.route('**/api/remote/transport',route=>route.abort('internetdisconnected'));
+  await page.reload();
+  await expect(page.locator('.remote-connection')).toHaveAttribute('data-state','offline');
+  await expect(historyText).toHaveCount(0);
+ }finally{await context.close();await fixture.close();}
 });

@@ -38,7 +38,7 @@
 .workspace-brand { display: flex; align-items: center; gap: var(--space-3); color: var(--heading); padding: 6px 4px; }
 .workspace-brand .brand-logo { width:28px; height:28px; }
 .brand-wordmark { font-size:20px; line-height:28px; font-weight:var(--weight-medium); letter-spacing:-.5px; }
-.brand-logo { display:inline-block; flex:none; width:24px; height:24px; background:var(--heading); mask:url("./assets/logo-small.svg") center / contain no-repeat; }
+.brand-logo { display:inline-block; flex:none; width:24px; height:24px; background:var(--heading); mask:url("./assets/logo-petals.svg") center / contain no-repeat; }
 .workspace-navigation { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .sidebar-primary-navigation { flex:0 1 auto; min-height:36px; overflow-y:auto; scrollbar-width:thin; }
 .sidebar-bottom-navigation { flex:none; }

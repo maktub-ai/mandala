@@ -11,7 +11,7 @@ afterEach(async () => { await rm(home, { recursive: true, force: true }); });
 const repository = "https://github.com/example/reading-skills";
 const source = () => githubSkillSource("Reading skills", repository);
 const sha = "a".repeat(40);
-const manifest = "---\nname: sample\ndescription: Custom source workflow\n---\nUse references/guide.md";
+const manifest = "---\nname: sample\ndescription: Custom source workflow\nmetadata:\n  openclaw:\n    emoji: 📚\n---\nUse references/guide.md";
 const fetcher = async (url: string) => url.includes("git/trees") ? Response.json({ sha, tree: ["skills/sample/SKILL.md", "skills/sample/references/guide.md"].map(path => ({ path, type: "blob", mode: "100644", size: 100 })) }) : new Response(url.endsWith("SKILL.md") ? manifest : "Pinned guide");
 it("persists custom sources and enabled preferences with conflict detection, then browses and installs pinned resources after reopening", async () => {
   const market = createMarket(home, fetcher), first = await market.sources();
@@ -24,16 +24,17 @@ it("persists custom sources and enabled preferences with conflict detection, the
   expect(await reopened.sources()).toEqual(saved);
   const result = await reopened.search("skill", "workflow", "", added.id);
   expect(result.items).toHaveLength(1);
+  expect(result.items[0].skillIcon).toBe("📚");
   expect(marketSourceOf(result.items[0].catalogId)).toBe(added.id);
   const detail = await reopened.detail(result.items[0].catalogId);
-  expect(detail).toMatchObject({ description: "Custom source workflow", version: sha, fileCount: 2 });
+  expect(detail).toMatchObject({ description: "Custom source workflow", version: sha, fileCount: 2, skillIcon: "📚" });
   const current = await readConfig(home);
   current.config.agents.push({ id: "a", name: "Reader", instructions: "", defaultCli: "codex", models: {}, skills: [], mcp: [] });
   await writeConfig(home, current.config, current.revision);
   const installation = await reopened.install({ catalogId: detail.catalogId, version: detail.version, revision: (await readConfig(home)).revision, targets: [{kind: "agent", id: "a"}] });
-  const path = (await readConfig(home)).config.skillLibrary![0].path;
+  const path = join(home, "market", "packages", installation.packageId!);
   expect(await readFile(join(path, "references/guide.md"), "utf8")).toBe("Pinned guide");
-  expect((await createMarket(home, fetcher).installed())[0].id).toBe(installation.id);
+  expect((await createMarket(home, fetcher).installed())[0]).toMatchObject({ id: installation.id, skillIcon: "📚" });
 });
 it.each([
   "http://github.com/example/repo", "https://user:secret@github.com/example/repo", "https://github.com.evil.test/example/repo", "https://127.0.0.1/example/repo", "https://github.com:8443/example/repo", "https://github.com/example/repo?token=private", "https://github.com/example/repo#main", "https://github.com/example/repo/tree/main", "https://github.com/example/..", "https://github.com/example/%2e%2e", "https://github.com/example/repo.git",

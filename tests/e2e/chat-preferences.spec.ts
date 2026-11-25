@@ -68,8 +68,6 @@ test("Agent defaults are configured from Agent management rather than the compos
   await openArea(page, "Agent");
   await page.locator('.workspace-directory-row[href="/agents/reviewer"]').click();
   await page.getByRole("tab", { name: /^(设置|Settings)$/, exact: true }).click();
-  await page.locator(".object-row").filter({hasText:/执行配置|Execution configuration/}).getByRole("button",{name:/配置|Configure/}).click();
-  await expect(page).toHaveURL(/\/agents\/reviewer\?tab=execution$/);
   await expect(page.getByRole("tab", { name: "设置", exact: true })).toHaveAttribute("aria-selected", "true");
   await enterModelId(page,page.getByLabel("Codex 默认模型", { exact: true }),"model-second");
   await waitForAutosave(page);
@@ -98,7 +96,6 @@ test("Agent default model settings are visible in narrow English", async ({ page
   await openArea(page, "Agent");
   await page.locator('.workspace-directory-row[href="/agents/reviewer"]').click();
   await page.getByRole("tab", { name: /^(设置|Settings)$/, exact: true }).click();
-  await page.locator(".object-row").filter({hasText:/执行配置|Execution configuration/}).getByRole("button",{name:/配置|Configure/}).click();
   await expect(page.getByLabel("Codex default model", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
@@ -110,7 +107,6 @@ test("an untouched draft follows the Agent default after refresh and saving sett
   await openArea(page, "Agent");
   await page.locator('.workspace-directory-row[href="/agents/reviewer"]').click();
   await page.getByRole("tab", { name: /^(设置|Settings)$/, exact: true }).click();
-  await page.locator(".object-row").filter({hasText:/执行配置|Execution configuration/}).getByRole("button",{name:/配置|Configure/}).click();
   await enterModelId(page,page.getByLabel("Codex 默认模型", { exact: true }),"model-second");
   await waitForAutosave(page);
   await expect.poll(async () => (await (await request.get("/api/config")).json()).config.agents.find((a: any) => a.id === "reviewer").models.codex).toBe("model-second");

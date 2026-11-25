@@ -10,14 +10,26 @@ const fixtureCwd=tmpdir();
 const agentFixtures: Awaited<ReturnType<typeof createAcpAgentFixture>>[] = [];
 afterEach(async()=>{await Promise.all(agentFixtures.splice(0).map(agent=>agent.close()));});
 
-async function fixture(loadSession = true,safeSystem=false,shutdownDelayMs?:number,permissionTool?:{kind?:'read'|'edit';rawInput?:unknown;locations?:{path:string}[]},resumeSession=false,legacyModels=false,codebuddySandbox=false,runtimeCli?:'dsh'|'hermes'|'openclaw',newSessionFailure=false) {
+async function fixture(loadSession = true,safeSystem=false,shutdownDelayMs?:number,permissionTool?:{kind?:'read'|'edit';rawInput?:unknown;locations?:{path:string}[]},resumeSession=false,legacyModels=false,codebuddySandbox=false,runtimeCli?:'dsh'|'hermes'|'openclaw',newSessionFailure=false,dshModelOptions=false) {
  const events: any[] = [], approvals: any[] = [], exits:string[]=[];
  let release: (()=>void)|undefined;
  const sessions:any[]=[],decisions:any[]=[],prompts:any[]=[];
+ const defaultModel='["native","deepseek-v4-flash"]', r1Model='["custom","deepseek-r1"]';
+ let model=defaultModel, effort='high';
+ const configOptions=()=>[
+  {type:'select' as const,id:'model',name:'Model',category:'model' as const,currentValue:model,options:[{value:defaultModel,name:'DeepSeek V4 Flash'},{value:r1Model,name:'DeepSeek R1'}]},
+  {type:'select' as const,id:'reasoning_effort',name:'Reasoning effort',category:'thought_level' as const,currentValue:effort,options:(model===defaultModel?['off','low','high','max']:['high','max']).map(value=>({value,name:value}))},
+ ];
  const agent = await createAcpAgentFixture(client=>({
   authenticate: async()=>({}),
   initialize: async()=>({protocolVersion:1,agentInfo:{name:codebuddySandbox?'codebuddy':runtimeCli==='openclaw'?'openclaw-acp':'fixture',version:'1.0'},agentCapabilities:{loadSession,...(resumeSession?{sessionCapabilities:{resume:{}}}:{})}}),
-  newSession: async request=>{if(newSessionFailure)throw new Error('native Gateway unavailable');sessions.push(request);return {sessionId:'session-1',...(legacyModels?{models:{currentModelId:'native-default',availableModels:[{modelId:'native-default',name:'Default'},{modelId:'flash',name:'Flash'}]}}:{})};},
+  newSession: async request=>{if(newSessionFailure)throw new Error('native Gateway unavailable');sessions.push(request);return {sessionId:'session-1',...(dshModelOptions?{configOptions:configOptions()}:{}),...(legacyModels?{models:{currentModelId:'native-default',availableModels:[{modelId:'native-default',name:'Default'},{modelId:'flash',name:'Flash'}]}}:{})};},
+  async setSessionConfigOption(request){
+   sessions.push(request);
+   if(typeof request.value!=='string')throw new Error('fixture expects a select option');
+   if(request.configId==='model'){model=request.value;effort='high';}else effort=request.value;
+   return {configOptions:configOptions()};
+  },
   extMethod:async(method,request)=>{sessions.push({method,request});return {};},
   loadSession: async()=>({}),
   resumeSession: async request=>{sessions.push({resumed:request});return {};},
@@ -48,6 +60,46 @@ it('preserves legacy ACP model catalogs and selects models using their native me
   expect(await client.listModels()).toEqual([{id:'native-default',label:'Default',isDefault:true},{id:'flash',label:'Flash',isDefault:false}]);
   await client.prepareTurn!('session-1',{model:'flash'});
   expect(sessions.at(-1)).toEqual({method:'session/set_model',request:{sessionId:'session-1',modelId:'flash'}});
+ }finally{await client.close();}
+});
+it('tracks live root model and reasoning options without adopting a child session catalog',async()=>{
+ const {client,agent,events}=await fixture(false,false,undefined,undefined,true,false,false,'dsh',false,true);
+ try{
+  const sessionId=await client.startThread({cwd:fixtureCwd,instructions:''});
+  const turn=await client.startTurn(sessionId,'wait','auto');
+  await expect.poll(()=>events.some(e=>e.params?.delta==='Answer'),{timeout:5000}).toBe(true);
+  const peer=agent.agents.at(-1)!;
+  const catalog=(id:string)=>[
+   {id:'model',name:'Model',category:'model',type:'select' as const,currentValue:id,options:[{group:'local',name:'Local',options:[{value:id,name:id}]}]},
+   {id:'reasoning_effort',name:'Reasoning',type:'select' as const,currentValue:'max',options:[{value:'off',name:'Off'},{value:'max',name:'Max'}]},
+  ];
+  await peer.sessionUpdate({sessionId,update:{sessionUpdate:'config_option_update',configOptions:catalog('live-root')}});
+  await peer.sessionUpdate({sessionId,update:{sessionUpdate:'subagent_update',sessionId:'child',title:'Review'}});
+  await peer.sessionUpdate({sessionId:'child',update:{sessionUpdate:'config_option_update',configOptions:catalog('child-only').slice(0,1)}});
+  await peer.sessionUpdate({sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'updates received'}}});
+  await expect.poll(()=>events.some(e=>e.params?.delta==='updates received'),{timeout:5000}).toBe(true);
+  const expected=[{id:'live-root',label:'live-root',isDefault:true,supportedReasoningEfforts:['none','max'],defaultReasoningEffort:'max'}];
+  expect(await client.listModels()).toEqual(expected);
+  await client.interrupt(sessionId,turn);
+  await expect.poll(()=>events.some(e=>e.method==='turn/completed'),{timeout:5000}).toBe(true);
+  expect(await client.listModels()).toEqual(expected);
+  await client.prepareTurn!(sessionId,{effort:'none'});
+ }finally{await client.close();}
+});
+it('uses DSH model-specific native reasoning controls before sending',async()=>{
+ const {client,sessions,prompts}=await fixture(false,false,undefined,undefined,true,false,false,'dsh',false,true);
+ const r1='["custom","deepseek-r1"]';
+ try{
+  expect(await client.listModels()).toEqual([
+   {id:'["native","deepseek-v4-flash"]',label:'DeepSeek V4 Flash',isDefault:true,defaultReasoningEffort:'high',supportedReasoningEfforts:['none','low','high','max']},
+   {id:r1,label:'DeepSeek R1',isDefault:false},
+  ]);
+  await client.prepareTurn!('session-1',{effort:'none'});
+  expect(sessions.at(-1)).toMatchObject({configId:'reasoning_effort',value:'off'});
+  await expect(client.prepareTurn!('session-1',{model:r1,effort:'none'})).rejects.toThrow(/effort/);
+  expect(prompts).toEqual([]);
+  await client.prepareTurn!('session-1',{model:r1,effort:'max'});
+  expect(sessions.slice(-2)).toMatchObject([{configId:'model',value:r1},{configId:'reasoning_effort',value:'max'}]);
  }finally{await client.close();}
 });
 it('uses session/resume for agents such as DSH without the legacy loadSession capability',async()=>{

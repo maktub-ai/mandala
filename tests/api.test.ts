@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { api, requestJson } from '../src/api';
+import { api, requestJson, clearPendingApiReads } from '../src/api';
 afterEach(() => vi.unstubAllGlobals());
 
 test('API errors retain status for JSON, non-JSON and null error bodies', async () => {
@@ -65,4 +65,40 @@ test('abandoning all list readers aborts their fetch and the next reader starts 
  expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
  const b=new AbortController(),next=api('/conversation-progress','GET',undefined,b.signal);
  expect(fetcher).toHaveBeenCalledTimes(2);const again=expect(next).rejects.toMatchObject({name:'AbortError'});b.abort();await again;
+});
+
+test('simultaneous polling shares only the pending read and returns independent values', async () => {
+ let resolve!: (response:Response)=>void;
+ const fetcher=vi.fn(()=>new Promise<Response>(done=>{resolve=done;}));vi.stubGlobal('fetch',fetcher);
+ const a=api<{items:string[]}>('/v2/tasks'),b=api<{items:string[]}>('/v2/tasks');
+ expect(fetcher).toHaveBeenCalledTimes(1);
+ resolve(new Response('{"items":["first"]}'));
+ const [first,second]=await Promise.all([a,b]);first.items.push('local');expect(second.items).toEqual(['first']);
+ const next=api('/v2/tasks');expect(fetcher).toHaveBeenCalledTimes(2);resolve(new Response('{}'));await next;
+});
+
+test('mutations and individually cancelled reads do not reuse an earlier pending poll', async () => {
+ const pending:((response:Response)=>void)[]=[];
+ const fetcher=vi.fn(()=>new Promise<Response>(done=>pending.push(done)));vi.stubGlobal('fetch',fetcher);
+ const reads=[api('/v2/tasks'),api('/v2/tasks','GET',undefined,new AbortController().signal)];
+ const mutation=api('/v2/tasks','POST',{});reads.push(api('/v2/tasks'));
+ expect(fetcher).toHaveBeenCalledTimes(4);
+ pending[2](new Response('{}'));await mutation;
+ reads.push(api('/v2/tasks'));expect(fetcher).toHaveBeenCalledTimes(5);
+ pending.forEach(done=>done(new Response('{}')));await Promise.all(reads);
+});
+
+test('a failed shared read is retried by the next request', async()=>{
+ let reject!: (reason:Error)=>void;const fetcher=vi.fn(()=>new Promise<Response>((_done,fail)=>{reject=fail;}));vi.stubGlobal('fetch',fetcher);
+ const a=api('/v2/tasks'),b=api('/v2/tasks');const results=Promise.allSettled([a,b]);reject(new Error('offline'));
+ expect((await results).every(result=>result.status==='rejected')).toBe(true);
+ fetcher.mockResolvedValueOnce(new Response('{}'));await api('/v2/tasks');expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+
+test('switching account identity never shares a pending response from the previous account', async()=>{
+ const pending:((response:Response)=>void)[]=[];const fetcher=vi.fn(()=>new Promise<Response>(done=>pending.push(done)));vi.stubGlobal('fetch',fetcher);
+ const previous=api('/v2/tasks');clearPendingApiReads();const current=api('/v2/tasks');expect(fetcher).toHaveBeenCalledTimes(2);
+ pending[0](new Response('{"account":"previous"}'));pending[1](new Response('{"account":"current"}'));
+ await expect(previous).resolves.toEqual({account:'previous'});await expect(current).resolves.toEqual({account:'current'});
 });

@@ -95,7 +95,7 @@ export default function SkillLibrary({ config, onChange, onReload, busy=false }:
           </div>)}
           <Disclosure title={say('版本记录','Version history')}>
             {history.versions.length===0&&<p className="field-hint">{say('尚无托管版本。','No managed versions.')}</p>}
-            {history.versions.map(version=><div key={version.id}><p>v{version.ordinal}{' · '}{new Date(version.createdAt).toLocaleString()}{version.id===selected.versionRef?.versionId?' · '+say('当前版本','Current version'):''}</p><a href={'/api/v2/assets/'+version.assetId+'/versions/'+version.id+'/files/0'}>{say('下载完整内容','Download full content')}</a><p className="field-hint">{version.provenance.sourceVersions.length}{' '+say('项资料来源','source versions')}</p></div>)}
+            {history.versions.map(version=><div key={version.id}><p>v{version.ordinal}{' · '}{new Date(version.createdAt).toLocaleString()}{version.id===selected.versionRef?.versionId?' · '+say('当前版本','Current version'):''}</p><a href={'/api/skills/'+selected.id+'/versions/'+version.id+'/export'}>{say('下载技能包','Download Skill package')}</a><p className="field-hint">{version.provenance.sourceVersions.length}{' '+say('项资料来源','source versions')}</p></div>)}
           </Disclosure>
         </>}
       </section>

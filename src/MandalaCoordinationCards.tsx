@@ -1,3 +1,4 @@
+import {BlueprintRouteReview} from './BlueprintRouteReview';
 import {useState} from 'react';
 import IdentityAvatar from './IdentityAvatar';
 import type {Config} from '../shared/types';
@@ -43,6 +44,8 @@ export default function MandalaCoordinationCards({events,allEvents,onOpen,config
   return <div className="operation-row" key={p.id}>{identity?<IdentityAvatar identity={identity} kind={p.change.kind} size={28}/>:<Icon name={p.change.kind==='agent'?'agent':'project'} size={24}/>}<div className="operation-row-main"><OperationLink path={path} onOpen={onOpen} iconOnly={false}>{name}</OperationLink>{detail(p)}{(p.failure||errors[p.id])&&<p role="alert" className="operation-card-error">{errors[p.id]||p.failure?.code} {t('请先核对当前配置；若配置已变化，请让 Mandala 重新提出变更。','Check current configuration first; ask Mandala for an updated proposal if it changed.')}</p>}{p.status==='pending'&&!p.failure&&<div className="operation-card-actions">{!errors[p.id]&&<Button variant="primary" busy={pending===p.id} disabled={!!pending} onClick={()=>void decide(p,'approve')}>{t('确认此变更','Confirm this change')}</Button>}<Button disabled={!!pending} onClick={()=>void decide(p,'reject')}>{t('拒绝','Reject')}</Button></div>}</div>{p.status!=='applied'&&<StatusLabel filled icon="clock" tone={p.failure||errors[p.id]?'warning':'neutral'}>{state(p)}</StatusLabel>}</div>;
  };
  return <>{events.filter(event=>event.kind==='metadata').map(event=>{
+  const reviewId=(event.data as {blueprintRouteReview?:string}).blueprintRouteReview;
+  if(reviewId)return <BlueprintRouteReview key={reviewId} reviewId={reviewId} onOpen={onOpen}/>;
   const request=(event.data as {mandalaRequest?:{taskId:string;text:string;blocked:boolean}}).mandalaRequest;
   return request?<OperationCard key={event.id} flat icon="approval" title={request.blocked?t('目标受阻','Goal blocked'):t('需要你的决定','Your decision is needed')} status={t('等待你回复','Awaiting your reply')} tone="warning" footer={t('在当前对话回复即可继续。','Reply in this conversation to continue.')} actions={<OperationLink path={'/tasks/'+encodeURIComponent(request.taskId)} onOpen={onOpen}>{t('查看任务','View task')}</OperationLink>}><p>{request.text}</p></OperationCard>:null;
  })}{[...groups.entries()].map(([key,items])=>{

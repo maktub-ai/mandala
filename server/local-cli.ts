@@ -8,6 +8,7 @@ import type { ApprovalMode, McpServer, ModelChoice } from '../shared/types';
 import type { ExecutionClient, RuntimeOptions } from './execution-client';
 import { spawn } from './native-spawn';
 import { bindLocalCatalogLauncher, runtimeError } from './runtime';
+import { nativeTaskUpdates } from '../shared/native-subagents';
 
 type LocalCli = 'cursor' | 'antigravity';
 type Turn = { id:string; cancelled:boolean; started:boolean; child?:ChildProcessWithoutNullStreams; stop?:Promise<void>; permission?:string; text:string; input:TurnOptions; finishItems?:()=>void; settle:(status:string,error?:string)=>void };
@@ -95,6 +96,7 @@ export async function startLocalCli(cli:LocalCli, options:RuntimeOptions):Promis
   let child:ChildProcessWithoutNullStreams;
   try{child=spawn(command,args,{catalogRuntime:options[bindLocalCatalogLauncher]?cli:undefined,cwd,env,stdio:'pipe',shell:false,detached:process.platform!=='win32'});turn.child=child;}catch(error){turn.settle('failed',String(error));return;}
   let buffer='',stderr='',chain=Promise.resolve(),resultSeen=false,resultError='',textSeen=false;
+  let lastAnonymousText:string|undefined;
   const messageIds=new Set<string>(),calls=new Map<string,Record<string,unknown>>(),messages=new Map<string,string>();
   turn.finishItems=()=>{for(const [id,text] of messages)emit('item/completed',{item:{id,type:'agentMessage',text}});messages.clear();};
   const textDelta=(text:string,id=turn.id+':message')=>{if(!text)return;textSeen=true;if(!messages.has(id))emit('item/started',{item:{id,type:'agentMessage',text:''}});messages.set(id,(messages.get(id)??'')+text);emit('item/agentMessage/delta',{itemId:id,delta:text});};
@@ -114,13 +116,27 @@ export async function startLocalCli(cli:LocalCli, options:RuntimeOptions):Promis
    if(kind==='init'||kind==='system'&&data.subtype==='init')await remember(data.conversation_id??data.session_id);
    else if(kind==='assistant'){
     const id=data.message?.id;if(id&&messageIds.has(id))return;if(id)messageIds.add(id);
-    for(const content of data.message?.content??[])if(content.type==='text')textDelta(content.text,id);
+    const content=data.message?.content??[];
+    if(cli==='cursor'&&!id){
+     // Cursor's non-partial stream can replay a whole anonymous message around thinking events.
+     const text=content.filter((block:any)=>block.type==='text').map((block:any)=>block.text).join('');
+     if(!text||text===lastAnonymousText)return;
+     lastAnonymousText=text;
+     textDelta(text,randomUUID());
+    }else{
+     lastAnonymousText=undefined;
+     for(const block of content)if(block.type==='text')textDelta(block.text,id);
+    }
    }else if(kind==='thinking'&&data.subtype==='delta')emit('item/reasoning/textDelta',{itemId:turn.id+':thought',delta:data.text??''});
    else if(kind==='tool_call'){
+    lastAnonymousText=undefined;
     const id=data.call_id;if(typeof id!=='string')return;
     const name=Object.keys(data.tool_call??{})[0]??'Tool',value=data.tool_call?.[name];
     const item={...calls.get(id),id,type:'mcpToolCall',server:cli,tool:name,...(value?.args!==undefined?{arguments:value.args}:{}),...(value?.result!==undefined?{result:value.result}:{}),status:data.subtype==='completed'?'completed':'inProgress'};
-    calls.set(id,item);emit(data.subtype==='completed'?'item/completed':'item/started',{item});
+    calls.set(id,item);
+    const [task]=nativeTaskUpdates(cli,item);
+    const display=task?{type:'nativeSubagent',id:'cursor:task:'+id,...task}:item;
+    emit(data.subtype==='completed'?'item/completed':'item/started',{item:display});
    }else if(kind==='step_update'){
     const step=data.step_update??{},index=data.step_index??step.step_index??0,id=turn.id+':step:'+index;
     if(typeof step.text_delta==='string'&&step.step_type==='agent_response')textDelta(step.text_delta,id);

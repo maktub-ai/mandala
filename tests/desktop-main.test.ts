@@ -42,7 +42,13 @@ async function fixture(pending = false, platform = 'darwin', dark = false, initi
   const headersFor=(url:string,headers:Record<string,string[]>)=>{let result:any;headersHandler({url,responseHeaders:headers},(value:any)=>{result=value.responseHeaders;});return result;};
   const handlers=new Map<string,Function>();
   const ipcMain=Object.assign(new EventEmitter(),{handle:(channel:string,handler:Function)=>handlers.set(channel,handler)});
-  const electron = { app, BrowserWindow, nativeTheme, Menu: { setApplicationMenu: (m: any) => menu = m, buildFromTemplate: (m: any) => m }, Tray, nativeImage: { createFromPath: () => ({ setTemplateImage() {} }) }, dialog, shell: {}, session: { defaultSession: { cookies: { set: () => Promise.resolve() }, setPermissionRequestHandler(handler:Function) {permissionRequest=handler;}, setPermissionCheckHandler(handler:Function) {permissionCheck=handler;}, webRequest: { onHeadersReceived(_filter:unknown,handler:Function) {headersHandler=handler;} } } }, ipcMain };
+  const browserLinks = { issuedUrl: '', requests: [] as {url: string; options: RequestInit}[], opened: [] as string[] };
+  const gatewayFetch = async (url: string, options: RequestInit) => {
+    if (url.endsWith('/auth/desktop/bootstrap')) return {ok:true, json:async()=>({partition:'test', home:'/private/tmp/synthetic', token:'synthetic-desktop'})};
+    browserLinks.requests.push({url, options});
+    return {ok:!!browserLinks.issuedUrl, json:async()=>({url:browserLinks.issuedUrl})};
+  };
+  const electron = { app, BrowserWindow, nativeTheme, Menu: { setApplicationMenu: (m: any) => menu = m, buildFromTemplate: (m: any) => m }, Tray, nativeImage: { createFromPath: () => ({ setTemplateImage() {} }) }, dialog, shell: {openExternal: (url: string) => browserLinks.opened.push(url)}, session: { defaultSession: { cookies: { set: () => Promise.resolve() }, setPermissionRequestHandler(handler:Function) {permissionRequest=handler;}, setPermissionCheckHandler(handler:Function) {permissionCheck=handler;}, webRequest: { onHeadersReceived(_filter:unknown,handler:Function) {headersHandler=handler;} } } }, ipcMain };
   (electron.session as any).fromPartition=()=>electron.session.defaultSession;
   const service = { home: '/private/tmp/synthetic-mandala-runtime', child, origin: 'http://127.0.0.1:54321' };
   const commandCalls:string[]=[];
@@ -50,14 +56,15 @@ async function fixture(pending = false, platform = 'darwin', dark = false, initi
     loginStartupPaused: () => loginStartupPaused, setLoginStartupPaused: (_home: string, paused: boolean) => { loginStartupPaused = paused; },
     claimServiceHome: () => ({release(){}}), RuntimeShutdownTimeout: Error, readRuntimeBuild: () => packaged ? { version: '1.0.0', commit: 'a'.repeat(40) } : undefined, desktopCliStatus:()=>{commandCalls.push('status');return {installed:false};},installDesktopCli:()=>{commandCalls.push('install');return {installed:true};},resolveDesktopHome: () => '/private/tmp/synthetic', desktopEnvironment: () => ({}), loginShellPath: () => '', assertHomeAvailable() {}, prepareDesktopHome() {}, connectOrStartService: (_options: any) => { runtimeStarts++; return pending ? new Promise(r => resolveStart = r) : Promise.resolve(service); }, stopBackgroundServiceIfIdle: async () => { events.idleStop++; return startup.idleStop ?? 'accepted'; }, stopBackgroundService: async () => { events.stop++; child.exitCode = 0; child.emit('exit', 0); }, forceStopService: async () => {}, allowedNavigation: (url: string, origin: string) => url.startsWith(origin + '/'), readDesktopPreferences:()=>({...preferences}),writeDesktopPreference:(_home:string,key:string,value:string)=>{if(key==='unknown')throw Error('Invalid key');preferences[key]=value;},readDesktopAppearance: () => appearance, writeDesktopAppearance: (_home: string, value: string) => { if (value === 'invalid') throw Error('Invalid appearance'); appearance = value; } };
   vm.runInNewContext(source, { require: (p: string) => p === 'electron' ? electron : p === './runtime.cjs' ? runtime : p === './updates.cjs' ? require('../desktop/updates.cjs') : p === './local-update.cjs' ? { createLocalUpdate: () => localUpdate } : p === './public-mac-update.cjs' ? { createPublicMacUpdate: () => startup.publicUpdate ?? null } :
-    p === 'node:fs' && startup.publicUpdate ? {...require(p),readFileSync:(path:string,...args:any[])=>path.endsWith('/public-update.json')?'{}':require(p).readFileSync(path,...args)} : require(p), __dirname: '/private/tmp/synthetic', fetch:async()=>({ok:true,json:async()=>({partition:'signin',home:'/private/tmp/synthetic'})}), process: { platform, env: {}, argv: startup.background ? ['--mandala-background'] : [], execPath: 'C:\\Program Files\\Mandala\\Mandala.exe', arch: 'arm64', resourcesPath: '/private/tmp/synthetic' }, console, setImmediate, URL, setTimeout: (_fn: Function, delay: number) => { const timer = { delay, unref() {}, cleared: false }; timers.push(timer); return timer; }, setInterval: (_fn: Function, delay: number) => { const timer = { delay, unref() {}, cleared: false }; timers.push(timer); return timer; }, clearTimeout: (timer: any) => { timer.cleared = true; }, clearInterval: (timer: any) => { timer.cleared = true; } });
+    p === 'node:fs' && startup.publicUpdate ? {...require(p),readFileSync:(path:string,...args:any[])=>path.endsWith('/public-update.json')?'{}':require(p).readFileSync(path,...args)} : require(p), __dirname: '/private/tmp/synthetic', fetch:gatewayFetch, AbortSignal, process: { platform, env: {}, argv: startup.background ? ['--mandala-background'] : [], execPath: 'C:\\Program Files\\Mandala\\Mandala.exe', arch: 'arm64', resourcesPath: '/private/tmp/synthetic' }, console, setImmediate, URL, setTimeout: (_fn: Function, delay: number) => { const timer = { delay, unref() {}, cleared: false }; timers.push(timer); return timer; }, setInterval: (_fn: Function, delay: number) => { const timer = { delay, unref() {}, cleared: false }; timers.push(timer); return timer; }, clearTimeout: (timer: any) => { timer.cleared = true; }, clearInterval: (timer: any) => { timer.cleared = true; } });
   await tick(); await tick();
   const appearanceRequest = (request: unknown, override = {}) => { const event = { sender: browserWindow.webContents, senderFrame: browserWindow.webContents.mainFrame, returnValue: undefined, ...override }; electron.ipcMain.emit('mandala:appearance', event, request); return event.returnValue; };
   const preferenceRequest=(request:unknown,override={})=>{const event={sender:browserWindow.webContents,senderFrame:browserWindow.webContents.mainFrame,returnValue:undefined,...override};electron.ipcMain.emit('mandala:preferences',event,request);return event.returnValue;};
   const cliRequest=(request:unknown,override={})=>handlers.get('mandala:cli')!({sender:browserWindow.webContents,senderFrame:browserWindow.webContents.mainFrame,...override},request);
   const updateRequest=(request:unknown,override={})=>handlers.get('mandala:updates')!({sender:browserWindow.webContents,senderFrame:browserWindow.webContents.mainFrame,...override},request);
   const directoryRequest=(path:unknown,override={})=>{const event={sender:browserWindow.webContents,senderFrame:browserWindow.webContents.mainFrame,returnValue:undefined,...override};electron.ipcMain.emit('mandala:directory-path',event,path);return event.returnValue;};
-  return { timers, loginRegistrations, runtimeStarts: () => runtimeStarts, startupPaused: () => loginStartupPaused, menu: () => menu, permission: (types:string[],main=true,url=browserWindow.webContents.mainFrame.url) => {let allowed=false;permissionRequest(browserWindow.webContents,'media',(value:boolean)=>allowed=value,{mediaTypes:types,isMainFrame:main,requestingUrl:url});return allowed;}, permissionCheck: (type:string,main=true,url=browserWindow.webContents.mainFrame.url) => permissionCheck(browserWindow.webContents,'media',url,{mediaType:type,isMainFrame:main,requestingUrl:url}), headersFor, crash: (reason='crashed',exitCode=139) => browserWindow.webContents.emit('render-process-gone', {}, {reason,exitCode}), directoryRequest, app, child, events, appearanceRequest, preferenceRequest, cliRequest, updateRequest, commandCalls, mainFrame: browserWindow?.webContents.mainFrame, unload: (preventDefault: () => void) => browserWindow.webContents.emit('will-prevent-unload', { preventDefault }), quit: () => menu[0].submenu.find((x: any) => x.label === 'Quit Mandala').click(), stop: () => menu[0].submenu.find((x: any) => x.label === 'Stop runtime and quit…').click(), confirm: (response: number) => resolveConfirm({ response }), ready: () => resolveStart(service) };
+  const externalLink = (value: string, override = {}) => ipcMain.emit('mandala:open-external', {sender:browserWindow.webContents,senderFrame:browserWindow.webContents.mainFrame,...override},value);
+  return { browserLinks, externalLink, timers, loginRegistrations, runtimeStarts: () => runtimeStarts, startupPaused: () => loginStartupPaused, menu: () => menu, permission: (types:string[],main=true,url=browserWindow.webContents.mainFrame.url) => {let allowed=false;permissionRequest(browserWindow.webContents,'media',(value:boolean)=>allowed=value,{mediaTypes:types,isMainFrame:main,requestingUrl:url});return allowed;}, permissionCheck: (type:string,main=true,url=browserWindow.webContents.mainFrame.url) => permissionCheck(browserWindow.webContents,'media',url,{mediaType:type,isMainFrame:main,requestingUrl:url}), headersFor, crash: (reason='crashed',exitCode=139) => browserWindow.webContents.emit('render-process-gone', {}, {reason,exitCode}), directoryRequest, app, child, events, appearanceRequest, preferenceRequest, cliRequest, updateRequest, commandCalls, mainFrame: browserWindow?.webContents.mainFrame, unload: (preventDefault: () => void) => browserWindow.webContents.emit('will-prevent-unload', { preventDefault }), quit: () => menu[0].submenu.find((x: any) => x.label === 'Quit Mandala').click(), stop: () => menu[0].submenu.find((x: any) => x.label === 'Stop runtime and quit…').click(), confirm: (response: number) => resolveConfirm({ response }), ready: () => resolveStart(service) };
 }
 test.each([['darwin', false], ['darwin', true], ['win32', false], ['win32', true]])('app icon follows system appearance on %s (initial dark: %s)', async (platform, dark) => {
   const f = await fixture(false, platform as string, dark as boolean);
@@ -172,9 +179,44 @@ test('renderer termination offers explicit reload without resending work or stop
 
 test('keeps the HTML sandbox response policy only for the explicit preview routes',async()=>{
  const f=await fixture(),sandbox="sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'";
- for(const path of ['/api/conversations/chat/local-file/preview?href=report.html','/api/conversations/chat/workspace-file/preview?path=report.htm'])expect(f.headersFor('http://127.0.0.1:54321'+path,{'content-security-policy':[sandbox]})).toEqual({'content-security-policy':[sandbox]});
- for(const path of ['/','/api/conversations/chat/local-file','/api/conversations/chat/attachments/preview'])expect(f.headersFor('http://127.0.0.1:54321'+path,{'content-security-policy':[sandbox]})['Content-Security-Policy']).toEqual([expect.stringContaining("script-src 'self'")]);
+ for(const path of ['/api/conversations/chat/local-file/preview?href=report.html','/api/conversations/chat/workspace-file/preview?path=report.htm','/api/v2/library-sections/docs/files/todo-app/view.html?project=todo'])expect(f.headersFor('http://127.0.0.1:54321'+path,{'content-security-policy':[sandbox]})).toEqual({'content-security-policy':[sandbox]});
+ for(const path of ['/','/api/conversations/chat/local-file','/api/conversations/chat/attachments/preview','/api/v2/library-sections/docs/files/todo-app/summary.json'])expect(f.headersFor('http://127.0.0.1:54321'+path,{'content-security-policy':[sandbox]})['Content-Security-Policy']).toEqual([expect.stringContaining("script-src 'self'")]);
  expect(f.headersFor('http://127.0.0.1:54321/api/conversations/chat/local-file/preview',{})['Content-Security-Policy']).toEqual([expect.stringContaining("script-src 'self'")]);
+});
+
+test('opens a library file with a scoped browser link from the signed-in gateway', async () => {
+  const f = await fixture(), origin = 'http://127.0.0.1:54321', view = origin + '/api/v2/library-sections/docs/files/todo-app/view.html?project=todo';
+  f.browserLinks.issuedUrl = view + '&grant=synthetic';
+  f.externalLink(view); await tick();
+  expect(f.browserLinks.requests).toEqual([{url:view, options:expect.objectContaining({
+    method:'POST', redirect:'error', headers:{Origin:origin, Cookie:'mandala_desktop=synthetic-desktop', 'X-Mandala-File-Link':'1'},
+  })}]);
+  expect(f.browserLinks.opened).toEqual([f.browserLinks.issuedUrl]);
+  f.externalLink(view, {senderFrame:{url:origin + '/'}}); f.externalLink(origin + '/library'); await tick();
+  expect(f.browserLinks.requests).toHaveLength(1);
+  for (const bad of ['', 'https://example.com/', origin + '/api/config']) {
+    f.browserLinks.issuedUrl = bad; f.externalLink(view); await tick();
+  }
+  expect(f.browserLinks.opened).toEqual([view + '&grant=synthetic']);
+});
+
+test('only trusted same-origin library file links open in the system browser', () => {
+  const origin = 'http://127.0.0.1:54321', opened: string[] = [];
+  let click!: (event: unknown) => void;
+  class Link {
+    target = '_blank';
+    constructor(readonly href: string) {}
+    closest() { return this; }
+  }
+  vm.runInNewContext(readFileSync('desktop/preload.cjs', 'utf8'), {
+    require: () => ({contextBridge: {exposeInMainWorld() {}}, ipcRenderer: {send: (_channel: string, url: string) => opened.push(url)}}),
+    window: {location: {origin}, addEventListener: (_type: string, callback: typeof click) => { click = callback; }},
+    process: {argv: []}, URL, Element: Link,
+  });
+  const open = (path: string, isTrusted = true) => click({target: new Link(origin + path), button: 0, isTrusted, preventDefault() {}, stopImmediatePropagation() {}});
+  const view = '/api/v2/library-sections/docs/files/todo-app/view.html?project=todo';
+  open(view); open(view, false); open('/library'); open('/api/v2/library-sections/docs/files/todo-app/summary.json');
+  expect(opened).toEqual([origin + view]);
 });
 
 test('microphone permissions allow only audio in the trusted main frame',async()=>{

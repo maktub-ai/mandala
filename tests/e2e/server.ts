@@ -1,3 +1,4 @@
+import {projectTaskGroupsFixture} from './project-task-groups-fixture';
 import {executionResultsFixture} from './execution-results-fixture';
 import {notificationInboxFixture} from './notification-inbox-fixture';
 import {operationCardsFixture} from './operation-cards-fixture';
@@ -35,6 +36,7 @@ import { createSessionManager } from "../../server/sessions";
 import { createSystemTasks } from "../../server/system-tasks";
 import { createHttpServer } from "../../server/http";
 const home = mkdtempSync(join(tmpdir(), "mana-e2e-"));
+process.env.OMINO_HOME = join(home, 'omino');
 const initialConfig=await readConfig(home);
 await writeConfig(home,{...initialConfig.config,runtimes:["codex","omp"]},initialConfig.revision);
 await migrateWorkspace(home, "apply");
@@ -73,7 +75,14 @@ const manager = createSessionManager(
       async startThread(params) { token=params.instructions ? businessCliContext(params.instructions).token : '';const id=await client.startThread(params);native.set(id,options);responseInstructions.set(id,params.instructions);return id; },
       async resumeThread(id,mcp,instructions,model) { token=instructions ? businessCliContext(instructions).token : '';await client.resumeThread(id,mcp,instructions,model);native.set(id,options);responseInstructions.set(id,instructions ?? ""); },
       async startTurn(id,text,approvalMode,roots,turnOptions) {
-        const turnId=await client.startTurn(id,text,approvalMode,roots,turnOptions);
+        const routingGoal='验证星图的导出图层',routeFixture=text==='请创建任务：'+routingGoal;
+        const turnId=await client.startTurn(id,routeFixture?'hold':text,approvalMode,roots,turnOptions);
+        if(routeFixture)setImmediate(async()=>{
+          try{
+            await manager.callBoundTool(token,'mandala_create',{goal:routingGoal,projectId:null,criteria:[{id:'verify-export',text:'导出的图层可读',checkRef:null}]},'fixture-blueprint-route:'+turnId);
+            options.onEvent({method:'turn/completed',params:{threadId:id,turn:{id:turnId,status:'completed'}}});
+          }catch(reason){options.onEvent({method:'turn/completed',params:{threadId:id,turn:{id:turnId,status:'failed',error:{message:String(reason)}}}});}
+        });
         if(text.startsWith('fixture-delegate:'))setImmediate(async()=>{
           try {
             const accepted=await manager.callBoundTool(token,'delegate',{targetAgentId:text.slice('fixture-delegate:'.length),request:'hold',policy:'notify'},'fixture-delegate:'+turnId) as {status:string};
@@ -92,7 +101,7 @@ const manager = createSessionManager(
   (id, round) => { void systemTasks.onSettled(id, round).catch(() => {}); },
   id => { void systemTasks.onMessage(id).catch(() => {}); },
   memoryRuntime,
-  {wikiGenerate:wikiFixtureGenerate,generate:async(_config,prompt)=>prompt.includes('skill-learning-fixture')?JSON.stringify({action:'new',name:'dialogue-inspect',content:'---\nname: dialogue-inspect\ndescription: Inspect a persisted fixture result\n---\nRead back stored state and verify related states.'}):JSON.stringify({action:'skip'})},
+  {routeGenerate:async(_config,prompt)=>{const {projects}=JSON.parse(prompt.split('SOURCE_JSON:\n')[1]);const p=projects[0];return JSON.stringify({projectId:p.id,lane:p.modules[0]??null,assigneeAgentId:p.observers[0]?.id??null});}, wikiGenerate:wikiFixtureGenerate,generate:async(_config,prompt)=>prompt.includes('skill-learning-fixture')?JSON.stringify({action:'new',name:'dialogue-inspect',content:'---\nname: dialogue-inspect\ndescription: Inspect a persisted fixture result\n---\nRead back stored state and verify related states.'}):JSON.stringify({action:'skip'})},
 );
  const systemTasks = createSystemTasks({ home, store, memoryRuntime, tasks:manager.taskService, loadConfig: async () => (await readConfig(home)).config,
   generate: async (_config, prompt) => {
@@ -105,11 +114,7 @@ memoryRuntime.start();
 manager.knowledgeBase.start();
 const automations = createAutomations({ home, store, manager, loadConfig: async () => (await readConfig(home)).config });
 automations.start();
-const apiServer = createHttpServer({taskDraftGenerate:async(description)=>({goal:description,criteria:[]}),requireIdentity:false, home, store, manager, systemTasks, automations, memoryRuntime, market: createMarket(home, marketSource) });
-const vite = productEnv('E2E_SOURCE') === "1" ? await (await import("vite")).createServer({
-  resolve: { alias: { "@": join(process.cwd(), "src") } },
-  configFile: false, root: process.cwd(), appType: "spa", server: { middlewareMode: true, hmr: false, ws: { host: "127.0.0.1", port: Number(productEnv('E2E_PORT') ?? 4318) + 10000 } },
-}) : undefined;
+const apiServer = createHttpServer({blueprintDraftGenerate:async()=>['编辑器','同步服务'],taskDraftGenerate:async(description)=>({goal:description,criteria:[]}),requireIdentity:false, home, store, manager, systemTasks, automations, memoryRuntime, market: createMarket(home, marketSource) });
 const server = createServer(async(req,res)=>{
   if (req.method === 'GET' && req.url?.startsWith('/__test__/response-instructions?')) {
     const id = new URL(req.url, 'http://127.0.0.1').searchParams.get('conversationId') ?? '';
@@ -122,6 +127,7 @@ const server = createServer(async(req,res)=>{
   if(await executionResultsFixture(req,res,home,store,manager,automations))return;
   if(await operationCardsFixture(req,res,home,store,manager))return;
   if(await mandalaPanelsFixture(req,res,home,store,manager,automations))return;
+  if(await projectTaskGroupsFixture(req,res,home,store,manager))return;
   if(await conversationActivityFixture(req,res,store,manager,native))return;
   if(await liveOutputFixture(req,res,store,manager,native))return;
   if (req.method === 'POST' && (req.url === '/__test__/chat-history'||req.url === '/__test__/chat-history-dense'||req.url === '/__test__/chat-history-search')) {
@@ -147,6 +153,23 @@ const server = createServer(async(req,res)=>{
     res.end(JSON.stringify({ ordinary: chats[0].id, mandala: chats[1].id }));
     return;
   }
+  if (req.method === 'POST' && req.url === '/__test__/main-chat-timeout') {
+    const { ensureMandalaConfig } = await import('../../server/config');
+    const { ensureMandalaConversation } = await import('../../server/mandala');
+    const { config } = await ensureMandalaConfig(home);
+    const { id } = ensureMandalaConversation(store, config);
+    const calendarRun = crypto.randomUUID(), runId = crypto.randomUUID();
+    store.appendEvent(id, 'user', { runId: calendarRun, text: '这周的设计评审安排在哪一天？' });
+    store.appendEvent(id, 'text', { runId: calendarRun, text: '评审安排在周三下午三点。', phase: 'final_answer' });
+    store.appendEvent(id, 'status', { runId: calendarRun, status: 'idle' });
+    store.appendEvent(id, 'user', { runId, text: '请帮我核对参会名单。' });
+    store.appendEvent(id, 'error', { runId, message: 'CLI request timed out: thread/resume', nativeTurnSubmitted: false });
+    store.appendEvent(id, 'status', { runId, status: 'error' });
+    store.updateConversation(id, {status: 'error'});
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ runId }));
+    return;
+  }
   if(req.method==='POST'&&req.url==='/__test__/mandala-proposal'){
     const {ensureMandalaConfig}=await import('../../server/config'),{ensureMandalaConversation}=await import('../../server/mandala');
     const {config}=await ensureMandalaConfig(home),chat=ensureMandalaConversation(store,config);
@@ -159,7 +182,7 @@ const server = createServer(async(req,res)=>{
   if (req.method === 'POST' && req.url === '/__test__/execution-directory') {
     const directory = mkdtempSync(join(home, 'execution-'));
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ directory }));
+    res.end(JSON.stringify({ directory, ominoHome: process.env.OMINO_HOME }));
     return;
   }
   if(await wikiFixture(req,res,home,store,manager.knowledgeBase))return;
@@ -202,15 +225,19 @@ const server = createServer(async(req,res)=>{
   if(await taskFixture(req,res,home,store,manager,native))return;
   if(vite&&!req.url?.startsWith('/api/')&&!req.url?.startsWith('/auth/'))vite.middlewares(req,res);else apiServer.emit('request',req,res);
 });
+const vite = productEnv('E2E_SOURCE') === "1" ? await (await import("vite")).createServer({
+  resolve: { alias: { "@": join(process.cwd(), "src") } },
+  configFile: false, root: process.cwd(), appType: "spa", server: { middlewareMode: true, hmr: false, ws: { host: "127.0.0.1", server } },
+}) : undefined;
 server.listen(Number(productEnv('E2E_PORT') ?? 4318), "127.0.0.1");
 process.on("SIGTERM", async () => {
   automations.close();
   systemTasks.close();
   await manager.close();
   await memoryRuntime.close();
+  await vite?.close();
   server.closeAllConnections();
-  server.close(async () => {
-    await vite?.close();
+  server.close(() => {
     store.close();
     rmSync(home, { recursive: true, force: true });
   });

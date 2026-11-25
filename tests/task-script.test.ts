@@ -69,3 +69,17 @@ it("warns about unpushed main commits and refuses to start from them", () => {
   expect(start.status).toBe(1);
   expect(start.stderr).toContain("先推送 origin main");
 });
+
+it.each([
+  ["url", "https://github.com/maktub-ai/mandala-archive.git"],
+  ["pushurl", "git@github.com:maktub-ai/mandala-archive.git"],
+  ["pushurl", "ssh://git@github.com/MaktubCN/open-mana.git"],
+])("rejects the retired origin %s before starting or checking work", (field, url) => {
+  git(["config", "remote.origin." + field, url]);
+  for (const args of [["check", "--no-fetch"], ["start", "archived", "--no-fetch"]]) {
+    const result = run(args);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("maktub-ai/mandala");
+  }
+  expect(existsSync(join(repo, ".development", "archived"))).toBe(false);
+});

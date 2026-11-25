@@ -5,7 +5,9 @@ import type { ManifestFile } from './assets';
 import type { VersionRef } from './workspace-contracts';
 import type { ComposerReferenceSelection } from './composer-references';
 export type Criterion = { id: string; text: string; checkRef: string | null };
+export type TaskModuleRef = {projectId:string;lane:string};
 export type TaskInput = {
+ projectIds?: string[] | null; moduleRef?: TaskModuleRef | null;
  goal: string; criteria?: Criterion[]; acceptance?: 'delivery' | 'checks' | 'human';
  projectId?: string | null; assigneeAgentId?: string | null; originConversationId?: string | null;
  participantAgentIds?: string[]; automaticProgress?: boolean;
@@ -13,7 +15,8 @@ export type TaskInput = {
 export type TaskState = 'todo' | 'running' | 'waiting' | 'review' | 'completed' | 'cancelled';
 export type WaitingReason = 'host_offline' | 'approval' | 'input' | 'run_failed' | 'interrupted' | 'delivery_missing' | 'check_failed';
 export type CompletionEvidence = { completedBy: 'delivery' | 'checks' | 'user' | 'agent'; completedByAgentId?: string; sourceRunId: string | null; artifactVersions: VersionRef[]; acceptedAt: string; checks?: {checkRef:'artifact:integrity';identity:RunIdentity;artifactVersions:VersionRef[]}[] };
-export type Task = Required<TaskInput> & {
+export type Task = Omit<Required<TaskInput>,'projectIds'> & {
+ projectIds: string[]; projectIdsMode: 'auto'|'manual';
  activityAt?: string; live?: boolean;
  executionTitle?: string|null;
  conversationIds: string[];
@@ -23,8 +26,30 @@ export type Task = Required<TaskInput> & {
  revision: number; continuationEpoch: number; futureAutoResume: boolean; completion: CompletionEvidence | null;
  legacyId: string | null; createdAt: string;
 };
+// Apply the same projection after every conversation authority boundary.
+export function projectTaskExecutions<T extends Task>(task:T,executions:TaskExecution[],canReadProject?:(projectId:string)=>boolean):T {
+ const current=executions.filter(execution=>!execution.supersededByExecutionId);
+ const inferred=new Set<string>();
+ const executionProjects=new Set<string>();
+ // A removed dispatch project may have a different, positively identified repository today.
+ const replacedRoute=current.some(execution=>execution.projectId===task.projectId&&execution.attributedProjectId&&execution.attributedProjectId!==task.projectId);
+ if(task.projectId&&!replacedRoute)inferred.add(task.projectId);
+ for(const execution of current){
+  const id=execution.attributedProjectId??execution.projectId;
+  if(id){inferred.add(id);executionProjects.add(id);}
+ }
+ const projectIds=task.projectIdsMode==='manual'
+  ? task.projectIds.filter(id=>!canReadProject||inferred.has(id)) : [...inferred];
+ const ref=task.moduleRef;
+ const moduleRef=ref&&projectIds.includes(ref.projectId)&&(!canReadProject||executionProjects.has(ref.projectId)&&canReadProject(ref.projectId))?ref:null;
+ return {...task,executions,conversationIds:current.map(execution=>execution.conversationId),projectIds,moduleRef};
+}
+export function sourceExecutionConversation(task:Task):string|undefined {
+ return task.executions.find(execution=>execution.conversationId===task.originConversationId&&!execution.supersededByExecutionId&&
+  execution.agentId===task.assigneeAgentId&&execution.projectId===task.projectId)?.conversationId;
+}
 export type TaskProgressState = Exclude<TaskState, 'completed' | 'cancelled'>;
-export type TaskPatch = Partial<Pick<Task, 'goal' | 'criteria' | 'projectId' | 'assigneeAgentId' | 'originConversationId' | 'participantAgentIds' | 'automaticProgress'>> & { state?: TaskProgressState };
+export type TaskPatch = Partial<Pick<Task, 'goal' | 'criteria' | 'projectId' | 'assigneeAgentId' | 'originConversationId' | 'participantAgentIds' | 'automaticProgress'>> & Pick<TaskInput,'projectIds'|'moduleRef'> & { state?: TaskProgressState };
 export type TaskProgressSnapshot = { task: Pick<Task, 'id' | 'goal' | 'criteria' | 'state' | 'revision' | 'conversationIds'>; executions: Pick<TaskExecution, 'id' | 'conversationId' | 'request' | 'latestRun'>[] };
 export type RunIdentity = { runId: string; hostId: string; nativeSessionId: string; nativeTurnId: string };
 export type TerminalRunEvent = RunIdentity & { eventKey: string; outcome: 'succeeded' | 'failed' | 'interrupted'; summary: string; artifactVersions: VersionRef[] };
@@ -36,7 +61,7 @@ export type QueuedInputSource = {kind:'coordination';receiptIds:string[]} | {kin
 export const isHumanInput = (input:{source?:unknown;agentMessage?:unknown;task?:unknown}) =>
  (input.source===undefined || (input.source as QueuedInputSource|null)?.kind==='telegram') && input.agentMessage===undefined && input.task===undefined;
 export type QueueAdmission = 'starting' | 'connecting' | 'waiting' | 'remote_unavailable';
-export type QueuedInput = { admission?:QueueAdmission; source?:QueuedInputSource; waitingReason?:'directory'|'background'; agentMessage?:AgentMessageOrigin; commandKey?: string; unrecorded?: boolean; prestartFailure?: {code:CodexMailboxErrorCode|'native_thread_busy'}; id: string; conversationId: string; text: string; attachments?: string[]; references?: ComposerReferenceSelection[]; state: 'queued' | 'running' | 'completed' | 'cancelled' | 'unknown'; createdAt: string };
+export type QueuedInput = { admission?:QueueAdmission; source?:QueuedInputSource; waitingReason?:'directory'|'background'|'context-window'; agentMessage?:AgentMessageOrigin; commandKey?: string; unrecorded?: boolean; prestartFailure?: {code:CodexMailboxErrorCode|'native_thread_busy'}; id: string; conversationId: string; text: string; attachments?: string[]; references?: ComposerReferenceSelection[]; state: 'queued' | 'running' | 'completed' | 'cancelled' | 'unknown'; createdAt: string };
 export type ExecutionMonitor = { lastCheckedAt?: string; nativeState?: 'running'|'succeeded'|'failed'|'unknown'|'unreachable'; lastProgressAt: string | null; reason: 'queued'|'directory'|'approval'|'unknown'|'run_failed'|'interrupted'|'host_offline'|null; attention: boolean };
 export type Run = {
  monitor?: ExecutionMonitor;
@@ -67,7 +92,7 @@ export type RunContextTrace = { contextSnapshotId: string; actualUse: 'prepared'
 
 export type PlanStepInput = { key: string; taskId: string | null; goal: string };
 export type TaskExecutionInput = { conversationId: string; agentId: string; projectId: string | null; request: string; criteria?: Criterion[]; createdByAgentId?: string | null };
-export type TaskExecution = Required<TaskExecutionInput> & { id: string; taskId: string; supersededByExecutionId?: string | null; commandKey: string | null; createdAt: string; title: string | null; latestRun: RunControl | null };
+export type TaskExecution = Required<TaskExecutionInput> & { attributedProjectId?:string; id: string; taskId: string; supersededByExecutionId?: string | null; commandKey: string | null; createdAt: string; title: string | null; latestRun: RunControl | null };
 export type ReadableAssociatedChat = Pick<Conversation, 'id'|'title'|'agentId'|'projectId'|'cli'|'status'|'updatedAt'> & {executionId?:string|null};
 export type TaskDetail = { readableAssociatedChats: ReadableAssociatedChat[]; task: Task; runs: Run[]; receipts: Receipt[]; contexts: ContextSnapshot[]; executions: TaskExecution[]; planVersions: VersionRef[] };
 

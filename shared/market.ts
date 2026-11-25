@@ -16,14 +16,17 @@ export const clawHubCatalogIdPattern = /^skill:clawhub\/(?!\.{1,2}\/)([A-Za-z0-9
 export const marketSorts = ["default", "downloads", "stars", "updated"] as const;
 export type MarketSort = typeof marketSorts[number];
 export type MarketKind = "skill" | "mcp" | "theme" | "language" | "pet" | "plugin";
+export const marketSkillImage = (value: unknown): value is string =>
+  typeof value === "string" && /^https:\/\/clawhub\.ai\/api\/v1\/skill-icons\/[a-f0-9]{64}$/.test(value);
+
 export type MarketTarget = { kind: "agent" | "project"; id: string };
 export type MarketInstallation = {
   id: string; catalogId: string; kind: MarketKind; name: string; description: string;
-  version: string; sourceUrl: string; installedAt: string; packageId?: string;
+  version: string; sourceUrl: string; installedAt: string; packageId?: string; skillIcon?: string;
 };
 export type MarketItem = {
   catalogId: string; kind: MarketKind; name: string; description: string; version: string; sourceUrl: string; publisher?: string;
-  kinds?: import("./ui-extensions").UiExtensionKind[];
+  kinds?: PluginEntry["kinds"]; skillIcon?: string;
   stats?: Partial<Record<"downloads" | "stars" | "installs" | "comments", number>>; updatedAt?: number;
 };
 /** The saved language source remains an alias for official language plugins. */

@@ -1,11 +1,10 @@
 import { storedUiState } from './helpers/preferences';
 import { openProjectOverview } from './helpers/navigation';
-import {pickDirectoryProject, openProjectBackground} from "./helpers/navigation";
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { openSidebar, openArea, openProject } from './helpers/navigation';
+import { openSidebar, openArea, openProject, openModuleMenu } from './helpers/navigation';
 import { expectSelection } from './helpers/select';
 
 for (const locale of ['zh-CN', 'en-US']) for (const width of [1280, 390]) {
@@ -14,8 +13,8 @@ for (const locale of ['zh-CN', 'en-US']) for (const width of [1280, 390]) {
   test('project tree preserves running chat and scopes tasks, materials and memory after reload', async ({page,request}) => {
    const zh=locale==='zh-CN', key=`tree-${locale}-${width}`, a=key+'-a', b=key+'-b', worker=key+'-worker';
    const root=mkdtempSync(join(tmpdir(),'openmana-navigation-'));for(const id of [a,b])mkdirSync(join(root,id));
-   const {revision}=await(await request.get('/api/config')).json();
-   expect((await request.put('/api/config',{data:{revision,config:{version:2,projects:[a,b].map((id,i)=>({id,name:`Tree ${i?'B':'A'}`,cwd:join(root,id),agentIds:[worker,id+'-only'],resources:[],mcp:[],skills:[]})),agents:[{id:worker,name:'Tree worker',instructions:'',defaultCli:'codex',models:{},mcp:[],skills:[]},...[a,b].map(id=>({id:id+'-only',name:'Agent '+id,instructions:'Synthetic navigation identity',defaultCli:'codex',models:{},mcp:[],skills:[]}))]}}})).ok()).toBe(true);
+   const {config,revision}=await(await request.get('/api/config')).json();
+   expect((await request.put('/api/config',{data:{revision,config:{...config,projects:[a,b].map((id,i)=>({id,name:`Tree ${i?'B':'A'}`,cwd:join(root,id),agentIds:[worker,id+'-only'],resources:[],mcp:[],skills:[]})),agents:[...config.agents.filter((agent:any)=>agent.systemRole),{id:worker,name:'Tree worker',instructions:'',defaultCli:'codex',models:{},mcp:[],skills:[]},...[a,b].map(id=>({id:id+'-only',name:'Agent '+id,instructions:'Synthetic navigation identity',defaultCli:'codex',models:{},mcp:[],skills:[]}))]}}})).ok()).toBe(true);
    for(const projectId of [a,b]) {
     expect((await request.post('/api/v2/tasks',{headers:{'Idempotency-Key':projectId},data:{goal:'Task '+projectId,criteria:[],acceptance:'delivery',projectId,assigneeAgentId:null}})).ok()).toBe(true);
     const stage=await(await request.post('/api/v2/assets/uploads?name=note.md',{data:'Synthetic '+projectId})).json();
@@ -32,29 +31,31 @@ for (const locale of ['zh-CN', 'en-US']) for (const width of [1280, 390]) {
     await expect(page.getByTestId('chat-status')).toHaveText(zh?'执行中':'Running');
     await expect(page.getByText('Fixture reply: hold',{exact:true})).toBeVisible();
     const before=await(await request.get('/api/conversations/'+source.id)).json();
-    await openProject(page,b);await openProjectOverview(page);
-    await expect(page.locator('main .project-content-navigation a')).toHaveText(zh?['概览','任务','资料库','智能体','设置']:['Overview','Tasks','Library','Agents','Settings']);
-    await page.locator('main').getByRole('navigation',{name:zh?'项目导航':'Project navigation',exact:true}).getByRole('link',{name:zh?'概览':'Overview',exact:true}).click();
-    await expect(page).toHaveURL(new RegExp('/projects/'+b+'/overview$'));
-    for(const [name,path,content,hidden] of [
-     [zh?'任务':'Tasks','/projects/'+b+'/tasks','Task '+b,'Task '+a],
-     [zh?'资料库':'Library','/projects/'+b+'/library','Material '+b,'Material '+a],
-     [zh?'智能体':'Agents','/projects/'+b+'/agents','Agent '+b,'Agent '+a],
-    ]) {
-     await page.locator('main').getByRole('navigation',{name:zh?'项目导航':'Project navigation',exact:true}).getByRole('link',{name,exact:true}).click();
-     expect(new URL(page.url()).pathname+new URL(page.url()).search).toBe(path);
-     await expect(page.locator('main').getByText(content,{exact:true})).toBeVisible();
-     await expect(page.locator('main').getByText(hidden,{exact:true})).toHaveCount(0);
-     await page.reload();await expect(page.locator('main').getByText(content,{exact:true})).toBeVisible();
-     await expect(page.locator('main .project-content-navigation a')).toHaveText(zh?['概览','任务','资料库','智能体','设置']:['Overview','Tasks','Library','Agents','Settings']);
-     await openProject(page,a);await openProjectOverview(page);
-     await page.locator('main').getByRole('navigation',{name:zh?'项目导航':'Project navigation',exact:true}).getByRole('link',{name,exact:true}).click();
-     await expect(page.locator('main').getByText(hidden,{exact:true})).toBeVisible();await expect(page.locator('main').getByText(content,{exact:true})).toHaveCount(0);
-     await openProject(page,b);await openProjectOverview(page);await page.locator('main').getByRole('navigation',{name:zh?'项目导航':'Project navigation',exact:true}).getByRole('link',{name,exact:true}).click();
-     await expect(page.locator('main').getByText(content,{exact:true})).toBeVisible();
+    for (const [projectId, other] of [[b,a],[a,b],[b,a]]) {
+     await openProject(page,projectId);
+     const main=page.locator('main'), nav=main.getByRole('navigation',{name:zh?'项目导航':'Project navigation'});
+     await expect(nav.getByRole('link')).toHaveText(zh?['概览','资料库','设置']:['Overview','Library','Settings']);
+     const agent=main.getByRole('link',{name:'Agent '+projectId,exact:true});
+     await expect(agent).toBeVisible();
+     await expect(main.getByRole('link',{name:'Agent '+other,exact:true})).toHaveCount(0);
+     await page.reload();await expect(agent).toBeVisible();
+     await main.getByRole('link',{name:zh?/关联任务/:/Associated tasks/}).click();
+     await expect(page).toHaveURL(url=>url.pathname==='/tasks'&&url.searchParams.get('project')===projectId);
+     const task=main.getByText('Task '+projectId,{exact:true});
+     await expect(task).toBeVisible();await page.reload();await expect(task).toBeVisible();
+     await expect(main.getByText('Task '+other,{exact:true})).toHaveCount(0);
+     await openProject(page,projectId);
+     await nav.getByRole('link',{name:zh?'资料库':'Library',exact:true}).click();
+     await expect(page).toHaveURL('/projects/'+projectId+'/library');
+     const material=main.getByText('Material '+projectId,{exact:true});
+     await expect(material).toBeVisible();await page.reload();await expect(material).toBeVisible();
+     await expect(main.getByText('Material '+other,{exact:true})).toHaveCount(0);
      expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+     await page.goto('/mana?tab=memory&project='+projectId);
+     const memory=main.getByRole('article',{name:'Memory '+projectId,exact:true});
+     await expect(memory).toBeVisible();await page.reload();await expect(memory).toBeVisible();
+     await expect(main.getByRole('article',{name:'Memory '+other,exact:true})).toHaveCount(0);
     }
-    for(const [projectId,other] of [[b,a],[a,b]]){await page.goto('/mana?tab=memory&project='+projectId);await expect(page.locator('main').getByRole('article',{name:'Memory '+projectId,exact:true})).toBeVisible();await expect(page.locator('main').getByRole('article',{name:'Memory '+other,exact:true})).toHaveCount(0);await page.reload();await expect(page.locator('main').getByRole('article',{name:'Memory '+projectId,exact:true})).toBeVisible();await expect(page.locator('main .project-content-navigation a')).toHaveText(zh?['概览','任务','资料库','智能体','设置']:['Overview','Tasks','Library','Agents','Settings']);}
     expect(await(await request.get('/api/conversations/'+source.id,{maxRetries:2})).json()).toEqual(before);
     expect((await(await request.get('/api/conversations')).json()).map((c:any)=>c.id)).toEqual(ids);
    } finally {await request.post('/api/conversations/'+source.id+'/stop');rmSync(root,{recursive:true,force:true});}
@@ -94,8 +95,8 @@ test('shared project navigation preserves memory edits but allows abandoning tas
 });
 
 test('late project materials response cannot overwrite the current project',async({page,request})=>{
- const {revision}=await(await request.get('/api/config')).json();
- expect((await request.put('/api/config',{data:{revision,config:{version:2,projects:['race-a','race-b'].map(id=>({id,name:id,cwd:'/tmp',agentIds:[],resources:[],mcp:[],skills:[]})),agents:[]}}})).ok()).toBe(true);
+ const {config,revision}=await(await request.get('/api/config')).json();
+ expect((await request.put('/api/config',{data:{revision,config:{...config,projects:['race-a','race-b'].map(id=>({id,name:id,cwd:'/tmp',agentIds:[],resources:[],mcp:[],skills:[]})),agents:config.agents.filter((agent:any)=>agent.systemRole)}}})).ok()).toBe(true);
  for(const projectId of ['race-a','race-b']) {
   const stage=await(await request.post('/api/v2/assets/uploads?name=note.md',{data:'Synthetic '+projectId})).json();
   const saved=await(await request.post('/api/v2/assets/imports',{headers:{'Idempotency-Key':'race-'+projectId},data:{kind:'document',title:'Material '+projectId,submissionId:stage.submissionId}})).json();
@@ -114,15 +115,16 @@ test('late project materials response cannot overwrite the current project',asyn
 });
 
 test('global start and project links preserve automatically saved configuration without a leave dialog',async({page,request})=>{
- const {revision}=await(await request.get('/api/config')).json();
- expect((await request.put('/api/config',{data:{revision,config:{version:2,projects:['guard-a','guard-b'].map(id=>({id,name:id,cwd:'/tmp',agentIds:[],resources:[],mcp:[],skills:[]})),agents:[]}}})).ok()).toBe(true);
- await page.goto('/projects/manage');await pickDirectoryProject(page);await openProjectBackground(page);
+ const {config,revision}=await(await request.get('/api/config')).json();
+ expect((await request.put('/api/config',{data:{revision,config:{...config,projects:['guard-a','guard-b'].map(id=>({id,name:id,cwd:'/tmp',agentIds:[],resources:[],mcp:[],skills:[]})),agents:config.agents.filter((agent:any)=>agent.systemRole)}}})).ok()).toBe(true);
+ await page.goto('/projects');await openProject(page,'guard-a');
+ await page.locator('main .project-content-navigation').getByRole('link',{name:'设置',exact:true}).click();
  await page.getByRole('textbox',{name:'项目名称',exact:true}).fill('Automatically saved project');
  let dialogs=0;page.on('dialog',async dialog=>{dialogs++;await dialog.dismiss();});
- await page.getByRole('button',{name:'开始对话',exact:true}).click();await expect(page).toHaveURL(/\/\?project=/);
+ await page.locator('aside.sidebar').getByRole('button',{name:'开始对话',exact:true}).click();await expect(page).toHaveURL(/\/\?project=/);
  await expect.poll(async()=>(await(await request.get('/api/config')).json()).config.projects[0].name).toBe('Automatically saved project');
  await openProject(page,'guard-b');await openProject(page,'guard-a');
- await page.getByRole('button',{name:'项目设置',exact:true}).click();await openProjectBackground(page);await expect(page.getByRole('textbox',{name:'项目名称',exact:true})).toHaveValue('Automatically saved project');expect(dialogs).toBe(0);
+ await page.locator('main .project-content-navigation').getByRole('link',{name:'设置',exact:true}).click();await expect(page.getByRole('textbox',{name:'项目名称',exact:true})).toHaveValue('Automatically saved project');expect(dialogs).toBe(0);
 });
 
 test('fix1 returning to the selected chat from tasks assets and rules restores its URL and draft',async({page,request})=>{
@@ -144,11 +146,14 @@ test('fix1 returning to the selected chat from tasks assets and rules restores i
   const detail=await(await request.get('/api/conversations/'+source)).json(),conversations=await(await request.get('/api/conversations')).json(),rules=await state(),tasks=await(await request.get('/api/v2/tasks')).json();
   for(const area of ['tasks','assets','rules']) {
    await page.getByRole('textbox',{name:'消息',exact:true}).fill('Keep same-chat draft '+area);
-   await openArea(page,area==='assets'?'资产库':'任务');
    if(area==='rules') {
-    await page.locator('.task-legacy-rules > summary').click();
-    await page.getByRole('region',{name:'最近运行',exact:true}).locator('.automation-run').filter({hasText:'Return rule'}).getByRole('button',{name:'查看对话',exact:true}).click();
+    const pinned=page.locator('.sidebar-primary-navigation [data-area="schedules"]');
+    if(await pinned.isVisible())await pinned.click();else await (await openModuleMenu(page)).locator('[data-area="schedules"]').click();
+    await expect(page).toHaveURL(/\/schedules$/);
+    await page.getByRole('button',{name:'运行记录',exact:true}).click();
+    await page.locator('.automation-run').filter({hasText:'Return rule'}).getByRole('button',{name:'查看对话',exact:true}).click();
    } else {
+    await openArea(page,area==='assets'?'资产库':'任务');
     await page.locator('#navigation-chat').getByRole('button',{name:detail.conversation.title,exact:true}).click();
    }
    await expect(page).toHaveURL(new RegExp('/\\?project=return-project&conversation='+source+'$'));

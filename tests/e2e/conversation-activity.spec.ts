@@ -14,6 +14,47 @@ test.afterEach(async({request})=>{
  }
 });
 
+test('shows zero-hit pre-reply searches in Hooks and omits skipped searches on replay',async({page,request})=>{
+ const {revision,config}=await(await request.get('/api/config')).json();
+ const projectId='search-trace-empty';
+ const original=config.projects.find((project:{id:string})=>project.id==='activity');
+ expect((await request.put('/api/config',{data:{revision,config:{...config,projects:[...config.projects,{...original,id:projectId,name:'Empty search fixture'}]}}})).ok()).toBe(true);
+ const chat=await(await request.post('/api/conversations',{data:{projectId,agentId:'inspector',cli:'codex'}})).json();
+ for(const text of ['Review the release status','谢谢']){
+  expect((await request.post('/api/conversations/'+chat.id+'/messages',{data:{text}})).ok()).toBe(true);
+  await expect.poll(async()=>(await(await request.get('/api/conversations/'+chat.id)).json()).conversation.status).toBe('idle');
+ }
+ await page.goto('/?conversation='+chat.id);
+ for(const [theme,width] of [['light',1280],['dark',390]] as const){
+  await page.evaluate(theme=>localStorage.setItem('mana-theme',theme),theme);
+  await page.setViewportSize({width,height:850});await page.reload();
+  const turns=page.locator('.chat-turn');
+  await turns.first().getByRole('button',{name:'Hooks',exact:true}).click();
+  const summary=turns.first().locator('.operation-card summary').filter({hasText:'记忆检索'});
+  await expect(summary).toHaveCount(1);
+  await expect(summary).toContainText('命中 0 条');
+  await expect(summary).toContainText('回复前');
+  const skipped=turns.last().getByRole('button',{name:'Hooks',exact:true});
+  if(await skipped.count())await skipped.click();
+  await expect(turns.last().locator('.operation-card summary').filter({hasText:'记忆检索'})).toHaveCount(0);
+ }
+});
+
+test('opens a historical capture failure from the reply Hooks button',async({page,request})=>{
+ const fixture=await(await request.post('/__test__/conversation-activity-fixture',{data:{state:'capture-failed'}})).json();
+ await page.goto('/?conversation='+fixture.id);
+ for(const [theme,width] of [['light',1280],['dark',390]] as const){
+  await page.evaluate(theme=>localStorage.setItem('mana-theme',theme),theme);
+  await page.setViewportSize({width,height:850});
+  await page.reload();
+  await page.getByRole('button',{name:'Hooks',exact:true}).click();
+  const card=page.getByRole('region',{name:'Hooks',exact:true}).locator('.operation-card').filter({hasText:'记忆采集'});
+  await expect(card.locator('summary')).toContainText('失败');
+  await card.locator('summary').click();
+  await expect(card.locator('.operation-output')).toContainText('storage_failure');
+ }
+});
+
 test('defaults to folded activity, opens tool bodies only on inspection, and folds again on reload',async({page,request},testInfo)=>{
  const fixture=await(await request.post('/__test__/conversation-activity-fixture',{data:{state:'running'}})).json();
  await page.goto('/?conversation='+fixture.id);

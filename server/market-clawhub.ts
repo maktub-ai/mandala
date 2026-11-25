@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { fromBuffer, type Entry } from "yauzl";
-import { clawHubCatalogIdPattern, sortMarketItems, type MarketSort, type MarketDetail, type MarketItem } from "../shared/market";
+import { clawHubCatalogIdPattern, marketSkillImage, sortMarketItems, type MarketSort, type MarketDetail, type MarketItem } from "../shared/market";
 import { marketBytes, safeMarketPath, skillHeader, type MarketFetcher } from "./market-source";
 
 const base = "https://clawhub.ai/api/v1";
@@ -18,9 +18,10 @@ export function createClawHub(fetcher: MarketFetcher, json: (url: string, signal
     const stats = Object.fromEntries((["downloads", "stars", "installs", "comments"] as const).map(key => [key, rawStats[key] ?? (key === "downloads" ? entry.downloads : undefined)])
       .filter(([, value]) => Number.isSafeInteger(value) && value >= 0));
     const updatedAt = entry.updatedAt ?? entry.native?.skill?.updatedAt;
+    const icon = typeof entry.icon === "string" && entry.icon.startsWith("/") ? "https://clawhub.ai" + entry.icon : entry.icon;
     return { catalogId, name: slug, kind: "skill", description: typeof entry.summary === "string" ? entry.summary.slice(0, 5000) : "",
       version: typeof version === "string" ? version : "", publisher: owner,
-      sourceUrl: `https://clawhub.ai/${owner}/skills/${slug}`, ...(Object.keys(stats).length ? { stats } : {}),
+      sourceUrl: `https://clawhub.ai/${owner}/skills/${slug}`, ...(marketSkillImage(icon) ? { skillIcon: icon } : {}), ...(Object.keys(stats).length ? { stats } : {}),
       ...(Number.isSafeInteger(updatedAt) && updatedAt > 0 && updatedAt <= 8640000000000000 ? { updatedAt } : {}) };
   };
   const search = async (query: string, cursor: string, sort: MarketSort, signal?: AbortSignal) => {
@@ -72,7 +73,8 @@ export function createClawHub(fetcher: MarketFetcher, json: (url: string, signal
     try { header = skillHeader(readme); } catch { /* Invalid metadata must not hide the verified source contents. */ }
     const unsupported = ["malicious", "suspicious", "blocked"].includes(security) || result.moderation?.isSuspicious || result.moderation?.isMalwareBlocked
       ? "unsupported ClawHub security status" : !header ? "unsupported ClawHub Skill metadata" : undefined;
-    return { ...item({ ...result.skill, latestVersion: result.latestVersion }, owner, slug), ...header, readme, fileCount: files.length,
+    const listing = item({ ...result.skill, latestVersion: result.latestVersion }, owner, slug);
+    return { ...listing, ...header, ...(listing.skillIcon ? { skillIcon: listing.skillIcon } : {}), readme, fileCount: files.length,
       ...(unsupported ? { unsupported } : {}) };
   };
   const download = async (info: MarketDetail) => {

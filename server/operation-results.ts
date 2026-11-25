@@ -7,6 +7,7 @@ export function hasOperationOutcome(command:string){return commands.has(command)
 export function projectOperationOutcome(command:string,args:Record<string,unknown>,value:unknown):OperationOutcome|undefined{
  if(!hasOperationOutcome(command))return;
  const result=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:{};
+ if(result.reviewId&&['awaiting_confirmation','dismissed','confirmed'].includes(String(result.status)))return;
  const text=(value:unknown)=>typeof value==='string'?value.split('\n')[0].slice(0,160):'';
  const facts:Record<string,string>={};
  if(result.unchanged===true)facts.unchanged='true';

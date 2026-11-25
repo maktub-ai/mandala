@@ -11,3 +11,14 @@ it.each([false,true])('shows direct execution chats without progress data in sel
  const html=renderChineseMarkup(createElement(TaskWorkCard,{task,tasks:[task],config:{version:2,agents:[],projects:[]},href:'/tasks/task',selectionOnly}));
  expect(html).toContain('Billing collection check');expect(html).toContain('href="/?conversation=chat"');expect(html).toContain('已回报');expect(html).toContain('href="/tasks/task"');expect(html).not.toContain('子任务');
 });
+
+it.each([false,true])('navigates to every attributed project, including in selection mode %s',selectionOnly=>{
+ vi.stubGlobal('location',{pathname:'/'});
+ const projects=['route','p','q'].map(id=>({id,name:id+' project',cwd:'',agentIds:[],skills:[],resources:[],mcp:[]}));
+ const config={version:2 as const,agents:[],projects};
+ const base={id:'t',goal:'Delivery',state:'running',assigneeAgentId:null,executions:[],projectId:'route'} as unknown as Task;
+ for(const [ids,expected] of [[['p','q'],['p','q']],[[],[]],[undefined,['route']]] as const){
+  const task={...base,...(ids?{projectIds:[...ids]}:{})},html=renderChineseMarkup(createElement(TaskWorkCard,{task,tasks:[task],config,href:'/tasks/t',selectionOnly}));
+  for(const p of projects)expect(html.includes('href="/projects/'+p.id+'/overview"')).toBe(expected.some(id=>id===p.id));
+ }
+});

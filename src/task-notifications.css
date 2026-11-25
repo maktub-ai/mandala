@@ -26,7 +26,7 @@
 .notification-inbox-empty strong { color:var(--text); font-size:var(--type-ui); font-weight:500; }
 .notification-inbox-empty p { margin:0; font-size:var(--type-meta); }
 .notification-save-failure .notification-row-state { display:block; margin-top:6px; font-size:var(--type-meta); }
-.notification-save-failure p { font-size:var(--type-meta); line-height:1.5; color:var(--muted); overflow-wrap:anywhere; margin:6px 0 0; }
+.notification-save-failure p,.notification-detail { display:block; font-size:var(--type-meta); line-height:1.5; color:var(--muted); overflow-wrap:anywhere; margin:6px 0 0; }
 .notification-recovery-actions { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-top:10px; font-size:var(--type-meta); }
 .notification-recovery-actions a { color:var(--text); }
 .notification-load-error { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; color:var(--muted); font-size:var(--type-meta); }

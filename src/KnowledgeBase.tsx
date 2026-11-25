@@ -26,7 +26,7 @@ export function WikiCreate({config,onCancel,initialProjectId='',onCreated,onNavi
  const [name,setName]=useState(''),[purpose,setPurpose]=useState(''),[agent,setAgent]=useState(''),[project,setProject]=useState(initialProjectId),[automatic,setAutomatic]=useState(false),[receive,setReceive]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const dirty=!!name.trim()||!!purpose.trim()||!!agent||project!==initialProjectId||automatic||receive;useReaderNavigationLock(busy||dirty,onNavigationLockChange);
  const supported=(id:string)=>{const selected=config.agents.find(item=>item.id===id);return !!selected&&['codex','omp'].includes(selected.defaultCli)&&enabledRuntimes(config).includes(selected.defaultCli);};
- const create=async()=>{setBusy(true);setError('');try{const saved=await wikiRequest<WikiState>('','POST',{name,purpose,maintainerAgentId:agent||null,projectId:project,automatic,reception:{enabled:receive,projectId:project,...receive?{agentId:agent}:{}}});setName('');setPurpose('');setAgent('');setProject(initialProjectId);setAutomatic(false);setReceive(false);setBusy(false);onNavigationLockChange?.(false);onCreated?.();requestAnimationFrame(()=>navigateAssetPage('/library/'+saved.id+'?project='+encodeURIComponent(saved.projectId!)));}catch(error){setError((error as Error).message);}finally{setBusy(false);}};
+ const create=async()=>{setBusy(true);setError('');try{const saved=await wikiRequest<WikiState>('','POST',{name,purpose,maintainerAgentId:agent||null,projectId:project,automatic,reception:{enabled:receive,projectId:project,...receive?{agentId:agent}:{}}});setName('');setPurpose('');setAgent('');setProject(initialProjectId);setAutomatic(false);setReceive(false);setBusy(false);onNavigationLockChange?.(false);onCreated?.();requestAnimationFrame(()=>navigateAssetPage('/library/'+saved.id+'?project='+encodeURIComponent(saved.projectId!)+(new URLSearchParams(location.search).get('tab')==='wiki'?'&tab=wiki':'')));}catch(error){setError((error as Error).message);}finally{setBusy(false);}};
  return <section className="asset-import wiki-create"><h2>{say('新建知识库','New knowledge base')}</h2><fieldset disabled={busy}>
   <label>{say('所属项目','Owning Project')}<Select ariaLabel={say('所属项目','Owning Project')} value={project} onChange={value=>{setProject(value);setAgent('');setAutomatic(false);setReceive(false);}} options={[{value:'',label:say('选择项目','Choose a Project')},...config.projects.map(project=>({value:project.id,label:project.name}))]}/></label>
   {!project&&<p className="field-hint">{say('选择知识库的所属项目。','Choose the Project that owns this knowledge base.')}</p>}
@@ -43,10 +43,16 @@ export function WikiCreate({config,onCancel,initialProjectId='',onCreated,onNavi
  </fieldset>{error&&<p role="alert">{error}</p>}</section>;
 }
 
+function wikiListPath() {
+ const source=new URLSearchParams(location.search),query=new URLSearchParams();
+ for(const key of ['project','agent'])if(source.get(key))query.set(key,source.get(key)!);
+ if(source.get('tab')==='wiki')query.set('tab','wiki');
+ return '/library'+(query.size?'?'+query:'');
+}
 export function WikiOrAssetDetail({id,config,assetKind,onNavigationLockChange,onOpenPath,onAssetChange}:{id:string;config:Config;assetKind?:Asset['kind']} & ReaderProps){
  const {text: localize}=useLanguage();const [wiki,setWiki]=useState<WikiState|null|undefined>(),[error,setError]=useState('');
  useEffect(()=>{let active=true;setWiki(undefined);setError('');void (async()=>{const kind=assetKind??(await assetRequest<Asset>('/'+id)).kind;const value=kind==='wiki'?await wikiRequest<WikiState>('/'+id):null;if(active)setWiki(value);})().catch(error=>{if(active)setError(error.message);});return()=>{active=false;};},[id]);
- const back='/library'+(new URLSearchParams(location.search).has('project')?'?project='+encodeURIComponent(new URLSearchParams(location.search).get('project')!):'');
+ const back=wikiListPath();
  if(error||wiki===undefined)return <section className="asset-detail asset-reader"><nav className="asset-breadcrumb"><a className="ui-navigation-link" href={back} onClick={event=>{if(onOpenPath){event.preventDefault();onOpenPath(back);}else followAssetPage(event);}}><Icon name="arrowLeft" size={16}/>{localize('返回资料库', 'Back to Library')}</a></nav>{error?<p role="alert">{error}</p>:<LoadingState label={localize('正在读取文档…', 'Loading document…')}/>}</section>;
  if(wiki===null)return <AssetDetail id={id} config={config} onNavigationLockChange={onNavigationLockChange} onOpenPath={onOpenPath}/>;
  return <WikiDetail key={id} initial={wiki} config={config} onAssetChange={onAssetChange} onNavigationLockChange={onNavigationLockChange} onOpenPath={onOpenPath}/>;
@@ -65,8 +71,7 @@ function WikiDetail({initial,config,onNavigationLockChange,onOpenPath,onAssetCha
  const editBase=useRef(''),knownHead=useRef(initial.headVersionId);
  const maintenanceReady=base.maintenance==='ready'||base.maintenance===undefined,projectOwned=base.ownership==='project';
  const locked=busy||editing||accessLocked;useReaderNavigationLock(locked,onNavigationLockChange);
- const projectContext=new URLSearchParams(location.search).get('project');
- const backHref='/library'+(projectContext?'?project='+encodeURIComponent(projectContext):'');
+ const backHref=wikiListPath();
  const pageHref=(nextPage:string,nextVersion=versionId)=>{const query=new URLSearchParams(location.search);query.set('page',nextPage);nextVersion?query.set('version',nextVersion):query.delete('version');return '/library/'+encodeURIComponent(base.id)+(query.size?'?'+query:'');};
  const follow:typeof followAssetPage=event=>{if(locked){event.preventDefault();return;}if(onOpenPath&&!event.metaKey&&!event.ctrlKey&&!event.shiftKey&&!event.altKey){event.preventDefault();onOpenPath(event.currentTarget.pathname+event.currentTarget.search);}else followAssetPage(event);};
  const seq=useRef(0),alive=useRef(true),id=base.id;

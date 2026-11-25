@@ -91,6 +91,7 @@ it('creates explicit goals with criteria, records blocked request, preserves exp
  expect(progressed).toMatchObject({state:'todo',originConversationId:source.conversationId,completion:null});
  await service.request(source,{taskId:goal.id,expectedRevision:progressed.revision,text:'Need a decision',blocked:true},'blocked');
  expect(service.list()[0]).toMatchObject({taskId:goal.id,blockedReason:'Need a decision'});
+ expect(store.listOutbox(0).filter(event=>event.type==='task.input_requested')).toMatchObject([{payload:{taskId:goal.id,conversationId:source.conversationId,eventId:expect.any(Number)}}]);
  expect(tasks.getTask({userId:store.ownerUserId},goal.id).state).toBe('waiting');
 });
 it('direct configuration requires bound human provenance; proactive and promotion require exact confirmed proposal',async()=>{
@@ -148,8 +149,9 @@ it('bootstraps a minimal temporary executor without any user Agent or coordinato
 it('project goals and takeover keep executor context while archived projects retain records',async()=>{
  const cfg=await readConfig(home);await writeConfig(home,{...cfg.config,projects:[{id:'p',name:'Project',cwd:home,agentIds:[],resources:[],mcp:[],skills:[]}]},cfg.revision);
  const goal=await service.create(source,{goal:'Project goal',criteria,projectId:'p'},'project-goal');expect(goal).toMatchObject({projectId:'p',assigneeAgentId:null});
- const existing=tasks.createTask({userId:store.ownerUserId},{goal:'Other task',projectId:'p',assigneeAgentId:'executor'},'other');
- const adopted=await service.takeover(source,{taskId:existing.id,expectedRevision:existing.revision,criteria},'adopt-project');expect(adopted).toMatchObject({projectId:'p',assigneeAgentId:'executor'});
+ const existing=tasks.createTask({userId:store.ownerUserId},{goal:'Other task',projectId:'p',assigneeAgentId:'executor',projectIds:['p','private'],moduleRef:{projectId:'private',lane:'Private module'}},'other');
+ const adopted=await service.takeover(source,{taskId:existing.id,expectedRevision:existing.revision,criteria},'adopt-project');expect(adopted).toMatchObject({projectId:'p',assigneeAgentId:'executor',projectIds:['p'],moduleRef:null});
+ expect(tasks.getTask({userId:store.ownerUserId},existing.id).projectIds).toEqual(['p','private']);
  await service.configure(source,{kind:'project',action:'archive',id:'p'},'direct','archive-project',()=>{});
  const {assertExecutionAvailable}=await import('../server/conversation-context');
  const archived=(await readConfig(home)).config;expect(archived.projects[0].archivedAt).toBeDefined();expect(()=>assertExecutionAvailable(archived,{projectId:'p'})).toThrow('Archived');

@@ -118,7 +118,7 @@ npm ci && npm run build && npm start
 
 1. **启用执行端。** 设置 → 执行端接入，Mandala 会检测本机哪些 CLI 可以启动。
 2. **创建 Agent。** 给它一份职责、一个默认执行端和模型。
-3. **交出工作。** 直接和这位 Agent 开始对话，或者告诉 Mandala，让它来创建任务。
+3. **交出工作。** 直接告诉 Mandala 或这位 Agent 要做什么。小事在对话里拿结果；需要持续跟进时，可以在原对话里说“把这件事建成任务”。
 
 <details>
 <summary>数据目录、端口与备份</summary>
@@ -155,6 +155,8 @@ npm run restore -- --input "$HOME/mandala-snapshot" --home "$HOME/.mandala-resto
 | OpenClaw | 原生 Gateway · 原生默认模型 · 整轮授权 · 不支持会话级 MCP |
 
 每个执行端都可以启用、停用，并设为 Agent 的默认执行端。凭据不会写入 Mandala 的配置。实际能力取决于本机安装的 CLI 版本和登录状态。
+
+DeepSeek Harness 通过 `dsh acp` 接入。旧版连接停用时，在 DSH 设置中选择**使用 CLI 原生设置**。使用 DeepSeek R1 需要在 DSH 中配置提供 R1 的服务。原生默认模型的思考强度按 DSH 返回的选项显示。
 
 Gateway 配置、能力限制与真实验收步骤见 [Hermes Agent / OpenClaw](docs/hermes-openclaw.md)。
 

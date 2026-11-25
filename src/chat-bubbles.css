@@ -40,3 +40,20 @@
  .product-frame .mandala-messages .agent-reply > .chat-reply-bubble { max-width:100%; }
 }
 .chat-earlier-history { display:flex; justify-content:center; margin:0 0 16px; overflow-anchor:none; }
+
+.product-frame .mandala-messages .chat-turn:has(.mandala-typing) > .message.user { margin-bottom:32px; }
+.product-frame .mandala-messages .agent-reply > .chat-reply-bubble:has(.bubble-copy) { position:relative; }
+.product-frame .mandala-messages .bubble-copy { position:absolute; left:100%; bottom:0; padding-left:2px; }
+.product-frame .mandala-messages .agent-reply:has(.bubble-copy) { max-width:min(92%,calc(100% - 32px)); }
+.mandala-typing { width:fit-content; display:flex; align-items:center; gap:9px; min-height:38px; padding:0 15px; border-radius:20px; color:var(--muted); background:var(--chat-reply-background); font-size:var(--type-meta); }
+.typing-dots { display:flex; align-items:center; gap:4px; }
+.typing-dots i { width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.65; }
+@media (prefers-reduced-motion:no-preference) {
+ .typing-dots i { animation:mandala-typing 1.2s ease-in-out infinite; }
+ .typing-dots i:nth-child(2) { animation-delay:.15s; }
+ .typing-dots i:nth-child(3) { animation-delay:.3s; }
+}
+@keyframes mandala-typing { 0%,65%,100% { opacity:.35; } 30% { opacity:1; } }
+.product-frame .mandala-messages .unsent-recovery { color:var(--text); font-size:var(--type-meta); }
+
+.product-frame .mandala-messages .chat-reply-bubble:is(:hover,:focus-within) > .bubble-copy { opacity:1; pointer-events:auto; }

@@ -38,6 +38,25 @@ it('provides a bounded, current coordinator introduction without granting direct
  expect(mandalaInstructions(config,{agentId:'main'} as Conversation)).toContain('Renamed researcher');
 });
 
+it('routes primary-chat investigations to a suitable specialist before doing the work',()=>{
+ const instructions=mandalaInstructions(config,{agentId:'main',purpose:'mandala-main'} as Conversation);
+ expect(instructions).not.toContain('Complete one-off work in this chat, including hands-on investigation');
+ expect(instructions).toMatch(/Before starting hands-on work[^.]*mandala directory[^.]*available Agent[^.]*Project/);
+ expect(instructions).toMatch(/use messages ask[^.]*one-off[^.]*without creating a Task/i);
+ expect(instructions).toMatch(/mandala delegate[^.]*separate execution needs tracking/);
+ expect(instructions).toMatch(/no suitable Agent[^.]*do the work yourself/i);
+ expect(instructions).toContain('recipient is authorized to receive');
+ expect(instructions).toContain('Return the result in this chat');
+});
+
+it('limits specialist routing to primary-chat hands-on work and honors explicit self-execution',()=>{
+ const primary=mandalaInstructions(config,{agentId:'main',purpose:'mandala-main'} as Conversation);
+ const execution=mandalaInstructions(config,{agentId:'main'} as Conversation);
+ expect(primary).toContain('Answer simple conversational questions directly');
+ expect(primary).toMatch(/explicitly asks you to do the work yourself[^.]*honor that choice/);
+ expect(execution).not.toContain('Before starting hands-on work');
+});
+
 it('exposes configuration completeness and valid icons without exposing private content',()=>{
  const incomplete=mandalaDirectory({...config,projects:[{...config.projects[0],background:'  ',skills:[{name:'project-skill',path:'/PRIVATE_PACKAGE'}]}],agents:config.agents.map(a=>a.systemRole?a:{...a,instructions:'\n',skills:[{name:'module-skill',path:'/PRIVATE_PACKAGE'}]})});
  expect(incomplete.projects[0]).toMatchObject({icon:null,backgroundConfigured:false,directBindings:{skills:['project-skill'],mcp:[]}});

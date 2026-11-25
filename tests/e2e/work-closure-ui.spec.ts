@@ -36,11 +36,11 @@ test('task list and board share filters, reasons and detail links while URL rest
   const { config } = await (await request.get('/api/config')).json();
   const projectId = config.projects[0].id, agentId = config.agents[0].id;
   const tasks: Task[] = ['todo', 'running', 'waiting', 'review', 'completed', 'cancelled'].map((state, i) => ({
-    automaticProgress: true, id: 'closure-board-' + state, goal: 'Board ' + state, state, criteria: [], acceptance: 'delivery', projectId, assigneeAgentId: agentId,
+    projectIds: [projectId], projectIdsMode: 'auto', moduleRef: null, automaticProgress: true, id: 'closure-board-' + state, goal: 'Board ' + state, state, criteria: [], acceptance: 'delivery', projectId, assigneeAgentId: agentId,
     originConversationId: null, executions: [], participantAgentIds:[],conversationIds:[],ownerUserId: 'local', creatorAgentId: null, waitingReason: state === 'waiting' ? 'input' : null,
     revision: 1, continuationEpoch: 0, futureAutoResume: false, completion: null, legacyId: null, createdAt: new Date(i).toISOString(),
   } as Task));
-  tasks.push({ ...tasks[0], id: 'closure-board-other', goal: 'Other task', projectId: null, assigneeAgentId: null });
+  tasks.push({ ...tasks[0], id: 'closure-board-other', goal: 'Other task', projectId: null, projectIds: [], assigneeAgentId: null });
   await page.route('**/api/v2/tasks', route => route.fulfill({ json: tasks }));
   await page.route('**/api/v2/tasks/closure-board-todo/control', route => route.fulfill({ json: { taskId: tasks[0].id, state: 'todo', waitingReason: null, revision: 1, runs: [] } }));
   await page.route('**/api/v2/tasks/closure-board-todo', route => route.fulfill({ json: { task: tasks[0], runs: [], receipts: [], contexts: [], executions: [],planVersions: [] } }));

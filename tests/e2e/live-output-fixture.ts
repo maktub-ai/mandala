@@ -17,7 +17,12 @@ export async function liveOutputFixture(req:IncomingMessage,res:ServerResponse,s
   emit('item/started',{item:{id:'live-comment',type:'agentMessage',text:'',...(input.tagged?{phase:'commentary'}:{})}});
   emit('item/agentMessage/delta',{itemId:'live-comment',delta:'正在核对明细'});
  }else if(input.stage==='chunk')emit('item/agentMessage/delta',{itemId:'live-comment',delta:'，并检查汇总差异'});
- else if(input.stage==='answer'){
+ else if(input.stage==='spawn-child'||input.stage==='child-result'){
+  const done=input.stage==='child-result';
+  emit('item/completed',{item:{id:input.stage,type:'collabAgentToolCall',tool:done?'wait':'spawnAgent',status:'completed',senderThreadId:current.nativeId,receiverThreadIds:['child-docs'],prompt:'核对发布说明',agentsStates:{'child-docs':{status:done?'completed':'running',message:done?'升级步骤已经核对。':'正在核对升级步骤。'}}}});
+ } else if(input.stage==='another-child'){
+  emit('item/completed',{item:{id:'second-spawn',type:'collabAgentToolCall',tool:'spawnAgent',status:'completed',senderThreadId:current.nativeId,receiverThreadIds:['child-links'],prompt:'检查文档链接',agentsStates:{'child-links':{status:'running',message:'正在核对新增链接。'}}}});
+ } else if(input.stage==='answer'){
   emit('item/completed',{item:{id:'live-comment',type:'agentMessage',text:'正在核对明细，并检查汇总差异',...(input.tagged?{phase:'commentary'}:{})}});
   emit('item/completed',{item:{id:'read',type:'mcpToolCall',server:'OMP',tool:'read',status:'completed',arguments:{path:'fixture.json'},result:'Synthetic fixture'}});
   emit('item/started',{item:{id:'live-answer',type:'agentMessage',text:'',...(input.tagged?{phase:'final_answer'}:{})}});

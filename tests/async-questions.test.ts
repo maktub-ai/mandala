@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { openStore } from '../server/store';
-import { asyncQuestions, initializeAsyncQuestions } from '../server/async-questions';
+import { asyncQuestions, initializeAsyncQuestions, displayedAsyncReply } from '../server/async-questions';
 
 let home:string,store:ReturnType<typeof openStore>,id:string;
 beforeEach(()=>{
@@ -51,4 +51,16 @@ it('rejects interrupted runs and archived conversations',()=>{
   emit('turn-2');expect(asyncQuestions(store,id)).toHaveLength(1);
   store.archiveConversation(id,true);
   expect(asyncQuestions(store,id)).toEqual([]);
+});
+
+it('uses the original submission receipt to present public answers and conceal private fields on later pages',()=>{
+ const wire='<send_user_message_question_reply>'+JSON.stringify([
+  {questionItemId:'visible',question:'Choice?',answer:'Tea'},
+  {questionItemId:'secret',question:'Private?',answer:'SECRET_FIXTURE'},
+ ])+'</send_user_message_question_reply>';
+ store.appendEvent(id,'metadata',{answeredQuestionId:'async:receipt',queuedInputId:'confirmed',publicQuestionItems:['visible']});
+ store.appendEvent(id,'metadata',{answeredQuestionId:'async:older',queuedInputId:'historical'});
+ expect(displayedAsyncReply(store,id,'confirmed',wire)?.text).toBe('Choice?\nTea\n\nPrivate?\n••••••');
+ expect(displayedAsyncReply(store,id,'historical',wire)?.text).toBe('Choice?\n••••••\n\nPrivate?\n••••••');
+ expect(displayedAsyncReply(store,id,'pasted',wire)).toBeUndefined();
 });

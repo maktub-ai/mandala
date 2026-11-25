@@ -39,3 +39,13 @@
 /* An expanded navigation rail must not squeeze the Task reading column. */
 .connected-workspace.inspector-overlay { gap:0; }
 .workspace-inspector.is-overlay { position:fixed; top:0; right:0; bottom:0; width:min(360px,100vw); height:100dvh; max-height:100dvh; z-index:71; border-radius:0; box-shadow:var(--overlay-shadow); }
+
+.product-frame .app-shell > .mandala-file-preview {
+ display:flex; flex-direction:column; flex:0 1 48%; min-width:0; padding:0; overflow:hidden;
+}
+.mandala-file-preview > .inspector-heading { flex:none; padding:10px 14px 10px 20px; margin:0; border-bottom:1px solid var(--border); }
+.mandala-file-preview > .inspector-heading h2 { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mandala-file-preview > .inspector-content { display:flex; flex-direction:column; min-height:0; flex:1; }
+.mandala-file-body { flex:1; min-height:0; overflow:auto; padding:16px 20px; }
+.product-frame .app-shell > .mandala-file-preview:not(.is-overlay) { position:relative; inset:auto; width:auto; height:100%; box-shadow:none; z-index:auto; }
+.product-frame .app-shell > .mandala-file-preview.is-overlay { width:min(680px,100vw); }

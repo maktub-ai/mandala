@@ -26,12 +26,13 @@ export default function MarketExtensionDialog({ item, detail, loading, error, on
   const install = () => action(async () => {
     if (!snapshot || !detail || !metadata) return;
     update(await api<ExtensionSnapshot>('/market/extensions/install', 'POST', { catalogId: item.catalogId, version: detail.version, digest: metadata.package.sha256, revision: snapshot.revision }));
-    setNotice(text('已安装，应用后生效。', 'Installed. Apply it to use it.'));
+    if (detail.kinds?.includes('library-section')) setNotice(text('资料库标签页已启用。', 'Library tab enabled.'));
+    else setNotice(text('已安装，应用后生效。', 'Installed. Apply it to use it.'));
   });
   const apply = (entry: UiExtension) => action(async () => {
     if (entry.data.format === 'mandala-language') setLanguage(entry.data.locale);
     else if (entry.data.format === 'mandala-pet') savePetPreference({ ...petPreference, figure: entry.catalogId });
-    else {
+    else if (entry.data.format === 'mandala-theme') {
       const data: ThemePack = entry.data;
       if (data.background.image) {
         const bitmap = await createImageBitmap(await (await fetch(data.background.image)).blob());
@@ -58,9 +59,9 @@ export default function MarketExtensionDialog({ item, detail, loading, error, on
         <p dir="auto">{detail.description}</p>
         <dl className="market-extension-meta"><dt>{t('版本')}</dt><dd>{detail.version}</dd><dt>{text('作者', 'Author')}</dt><dd>{detail.publisher}</dd><dt>{text('需要 Mandala', 'Requires Mandala')}</dt><dd>{metadata?.minAppVersion}</dd></dl>
         {item.kind === 'plugin' && <>
-          <p className="field-hint">{text('仅提供外观与翻译数据，不运行代码。安装、更新和卸载会处理整个插件。', 'Provides appearance and translation data without running code. Install, update and uninstall affect the whole plugin.')}</p>
-          <p>{text('内容：', 'Includes: ')}{(detail.kinds ?? plugin?.kinds ?? []).map(kind => kind === 'theme' ? text('主题', 'Themes') : kind === 'pet' ? text('桌宠', 'Pets') : text('语言包', 'Languages')).join(' / ')}</p>
-          {plugin && <div className="market-plugin-contributions">{plugin.items.map(entry => <div key={entry.catalogId}><span>{entry.name}</span><Button disabled={busy} onClick={() => void apply(entry)}>{entry.kind === 'theme' ? text('应用主题', 'Apply theme') : entry.kind === 'pet' ? text('使用此桌宠', 'Use this pet') : text('使用此语言', 'Use this language')}</Button></div>)}</div>}
+          <p className="field-hint">{text('安装、更新和卸载会处理整个数据插件。', 'Install, update and uninstall affect the whole data plugin.')}</p>
+          <p>{text('内容：', 'Includes: ')}{(detail.kinds ?? plugin?.kinds ?? []).map(kind => kind === 'library-section' ? text('资料库标签页', 'Library tabs') : kind === 'theme' ? text('主题', 'Themes') : kind === 'pet' ? text('桌宠', 'Pets') : text('语言包', 'Languages')).join(' / ')}</p>
+          {plugin && <div className="market-plugin-contributions">{plugin.items.map(entry => <div key={entry.catalogId}><span>{entry.data.format === 'mandala-library-section' ? text(entry.data.label.zh, entry.data.label.en) : entry.name}</span>{entry.data.format === 'mandala-library-section' ? <span>{entry.data.type === 'unavailable' ? text('需要更新插件', 'Plugin update required') : text('已启用', 'Enabled')}</span> : <Button disabled={busy} onClick={() => void apply(entry)}>{entry.kind === 'theme' ? text('应用主题', 'Apply theme') : entry.kind === 'pet' ? text('使用此桌宠', 'Use this pet') : text('使用此语言', 'Use this language')}</Button>}</div>)}</div>}
           <p className="field-hint">{text('卸载会保留已应用的主题副本；正在使用的语言和桌宠分别恢复为英文和官方形象。', 'Uninstalling keeps applied theme copies; an active language or pet falls back to English or the official figure.')}</p>
         </>}
         {detail.unsupported && <p role="alert">{text('此扩展需要更新版本的 Mandala。', 'This extension requires a newer version of Mandala.')}</p>}

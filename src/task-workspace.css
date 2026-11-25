@@ -7,7 +7,6 @@
 .task-quick-capture input { flex:1; min-width:0; }
 .task-quick-capture button { flex:none; }
 .task-create-surface { padding:20px; max-width:860px; }
-.task-legacy-rules { margin-top:24px; }
 .task-workspace:has(.task-detail) { padding:0; }
 .task-detail { max-width:none; min-width:0; }
 .task-detail > .task-title h1 { font-size:20px; line-height:1.35; letter-spacing:-.02em; }
@@ -120,11 +119,12 @@
 .task-reply-attention { color:var(--warning); margin:0 0 12px; }
 .task-detail-panel { min-width:0; }
 .task-workspace[data-task-view=board] .workspace-list { display:flex; flex-direction:column; overflow:hidden; }
+.task-workspace:has(.workspace-first-use) .workspace-page-actions > .primary { display:none; }
+.task-workspace[data-task-view=board] .workspace-list:has(.workspace-first-use) { overflow:auto; }
 .task-workspace[data-task-view=board] .conversation-progress:has(.progress-overview-board) { display:flex; flex-direction:column; flex:1; min-height:0; }
 .task-workspace[data-task-view=board] .conversation-progress .task-board.progress-overview-board { grid-template-rows:minmax(0,1fr); align-items:stretch; min-height:0; overflow-y:hidden; }
 .task-workspace[data-task-view=board] .conversation-progress .progress-overview-board .task-group { display:flex; flex-direction:column; min-height:0; max-height:100%; overflow:hidden; }
 .task-workspace[data-task-view=board] .progress-overview-board .task-board-cards { flex:1; min-height:0; overflow-y:auto; }
-.task-workspace[data-task-view=board] .task-legacy-rules { flex:none; }
 
 /* Result and acceptance lead; execution remains inspectable below them. */
 .task-detail > .task-title { display:flex; align-items:flex-start; gap:16px; margin:0 0 8px; }

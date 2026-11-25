@@ -5,6 +5,8 @@ const id = '[a-zA-Z0-9_-]{1,100}';
 const itemId = '[a-zA-Z0-9_:-]{1,100}';
 const conversation = new RegExp(`^/api/conversations/(${id})(?:/([^/]+)(?:/(${itemId}))?)?$`);
 const task = new RegExp(`^/api/v2/tasks/${id}/(control|stop)$`);
+const blueprintReview = new RegExp(`^/api/remote/mandala/route-reviews/${id}$`);
+const taskReceipt = new RegExp(`^/api/remote/tasks/${id}$`);
 const mandalaProposal = new RegExp(`^/api/mandala/proposals/(${id})$`);
 const assetFile = new RegExp(`^/api/v2/assets/${id}/versions/${id}/files/${id}$`);
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -21,7 +23,23 @@ export function remoteRequestAllowed(method: string, target: string, body?: unkn
   try { url = new URL(target, 'http://local.invalid'); } catch { return false; }
   const path = url.pathname;
   if (path !== pathname) return false;
+  if (taskReceipt.test(path)) return method==='GET' && queryOnly(url,[]);
+  if (path==='/api/remote/tasks') {
+    if (method!=='POST'||!queryOnly(url,[])||!only(body,['goal','projectId','assigneeAgentId','commandKey']))return false;
+    const input=body as Record<string,unknown>;
+    return identifier(input.commandKey)&&typeof input.goal==='string'&&!!input.goal.trim()&&input.goal.length<=65536&&
+      ['projectId','assigneeAgentId'].every(key=>input[key]==null||identifier(input[key]));
+  }
   if (path === '/api/remote/config' || path === '/api/remote/mandala' || path === '/api/mandala/goals') return method === 'GET' && queryOnly(url, []);
+  if (blueprintReview.test(path) && queryOnly(url, [])) {
+    if (method === 'GET') return body === undefined;
+    if (method !== 'POST' || !record(body) || !only(body, ['selection'])) return false;
+    const choice = body.selection;
+    if (choice === null) return true;
+    return record(choice) && only(choice, ['projectId','lane','assigneeAgentId']) &&
+      (choice.projectId === null || identifier(choice.projectId)) && (choice.assigneeAgentId === null || identifier(choice.assigneeAgentId)) &&
+      (choice.lane === null || typeof choice.lane === 'string' && choice.lane.length > 0 && choice.lane.length <= 120 && !/[\x00-\x1f]/.test(choice.lane));
+  }
   const proposal = mandalaProposal.exec(path);
   if (proposal) return method === 'POST' && queryOnly(url, []) && only(body, ['version', 'decision']) &&
     typeof (body as Record<string, unknown>).version === 'string' && String((body as Record<string, unknown>).version).length > 0 && String((body as Record<string, unknown>).version).length <= 200 &&

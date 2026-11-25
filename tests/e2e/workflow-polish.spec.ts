@@ -3,8 +3,9 @@ import {test,expect} from '@playwright/test';
 import {chooseOption} from './helpers/select';
 
 test.beforeEach(async({request})=>{
- const {revision}=await(await request.get('/api/config')).json();
- expect((await request.put('/api/config',{data:{revision,config:{version:2,projects:[],agents:[]}}})).ok()).toBe(true);
+ const {config,revision}=await(await request.get('/api/config')).json();
+ const agents=config.agents.filter((agent:{systemRole?:string})=>agent.systemRole);
+ expect((await request.put('/api/config',{data:{revision,config:{...config,projects:[],agents}}})).ok()).toBe(true);
 });
 
 test('tasks show creation time, default newest first and persist sorting in the URL',async({page})=>{

@@ -24,7 +24,7 @@ for(const mode of ['light','dark'])for(const width of [1440,1024,768,390])test(`
  await request.post('/__test__/notification-inbox/completed');await request.post('/__test__/notification-inbox/failed');
  await expect(page.getByRole('button',{name:'通知',exact:true})).toContainText('3');panel=await openNotifications(page);
  await expect(panel.getByRole('link',{name:'查看审批',exact:true})).toHaveAttribute('href','/?conversation='+notice.executionId);await expect(panel.getByRole('link',{name:'查看审批',exact:true}).locator('strong')).toHaveText(longTitle);
- await expect(panel).toContainText('执行失败');await expect(panel).toContainText('任务已完成');
+ await expect(panel).toContainText('允许读取账单目录以核对采集结果？');await expect(panel).toContainText('执行失败');await expect(panel).toContainText('任务已完成');
  const bounds=await panel.boundingBox();expect(bounds!.x).toBeGreaterThanOrEqual(0);expect(bounds!.x+bounds!.width).toBeLessThanOrEqual(width);expect(bounds!.y).toBeGreaterThanOrEqual(0);expect(bounds!.y+bounds!.height).toBeLessThanOrEqual(850);
  await page.screenshot({path:info.outputPath(`inbox-${mode}-${width}.png`),fullPage:true,animations:'disabled'});
  await panel.getByRole('link',{name:'查看审批',exact:true}).click();await expect(page).toHaveURL(new RegExp('conversation='+notice.executionId));await expect(panel).not.toBeVisible();
@@ -50,4 +50,30 @@ test('short windows keep multiple updates and polling recovery reachable',async(
  await page.keyboard.press('Escape');let offline=true;await page.route('**/api/v2/task-notifications?*',route=>offline?route.fulfill({status:503,json:{error:'Temporary interruption'}}):route.continue());
  const failed=page.waitForResponse(r=>r.url().includes('/api/v2/task-notifications?')&&r.status()===503);await failed;await expect(panel).not.toBeVisible();await openNotifications(page);await expect(panel).toContainText('通知暂时无法刷新');
  offline=false;await panel.getByRole('button',{name:'重试',exact:true}).click();await expect(panel).not.toContainText('通知暂时无法刷新');await expect(panel.locator('.notification-inbox-row')).toHaveCount(6);
+});
+
+test('one delivery keeps its read state across repeat events and acceptance retires the action',async({page,request})=>{
+ await request.post('/__test__/execution-results');
+ const initial=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/v2/task-notifications');
+ await page.goto('/mandala');await initial;
+ await expect(page.getByRole('textbox',{name:'消息',exact:true})).toBeVisible({timeout:15000});
+ await page.waitForResponse(r=>r.url().includes('/api/v2/task-notifications?after='));
+ const notice=await(await request.post('/__test__/notification-inbox/review')).json(),trigger=page.getByRole('button',{name:'通知',exact:true});
+ await expect(trigger).toContainText('1');const panel=await openNotifications(page);
+ const link=panel.getByRole('link',{name:notice.title,exact:true});
+ await expect(link).toContainText('已核对三张账单，请确认金额。');
+ await expect(link).toContainText('核对交付并确认完成或要求修改');
+ await expect(link).toHaveAttribute('href','/tasks/'+notice.taskId+'?action=review');
+ await page.keyboard.press('Escape');
+ const refresh=async()=>{
+  const polled=page.waitForResponse(r=>r.url().includes('/api/v2/task-notifications?after='));
+  await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));await polled;
+ };
+ await request.post('/__test__/notification-inbox/repeat/'+notice.runId);await refresh();await expect(trigger).not.toContainText('1');
+ await openNotifications(page);await expect(panel.locator('.notification-inbox-row')).toHaveCount(1);
+ await link.click();await expect(page.getByRole('button',{name:'确认完成',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'确认完成',exact:true}).click();
+ await expect.poll(async()=>(await(await request.get('/api/v2/tasks/'+notice.taskId)).json()).task.state).toBe('completed');
+ await page.locator('.task-dialog').getByRole('button',{name:'关闭',exact:true}).click();
+ await refresh();await openNotifications(page);await expect(panel).toContainText('暂无通知');
 });

@@ -1,7 +1,8 @@
 import {expect,test} from '@playwright/test';
 import {defaultPreferences,themeStorageKey} from '../../shared/themes';
 
-test('late Agent replies show their sender and body directly after the intervening request, including after reload',async({page,request},info)=>{
+test('late Agent replies show their sender and body directly after the intervening request, including after reload',async({page,request,context},info)=>{
+ await context.grantPermissions(['clipboard-read','clipboard-write']);
  const fixture=await(await request.post('/__test__/operation-cards')).json();
  expect((await request.post('/__test__/operation-card-reply',{data:fixture})).ok()).toBe(true);
  await page.goto('/mandala');
@@ -19,6 +20,9 @@ test('late Agent replies show their sender and body directly after the interveni
   await expect(reply.locator('.chat-reply-bubble .ui-disclosure,.chat-reply-bubble a')).toHaveCount(0);
   await page.reload();
  }
+ await reply.locator('.chat-reply-bubble').hover();
+ await reply.getByRole('button',{name:'复制消息',exact:true}).click();
+ expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe('覆盖清单已返回。');
  await reply.scrollIntoViewIfNeeded();await page.screenshot({path:info.outputPath('agent-reply-desktop.png'),animations:'disabled'});
  await page.setViewportSize({width:390,height:1000});
  await page.getByRole('dialog',{name:'右侧栏',exact:true}).getByRole('button',{name:'收起右侧栏',exact:true}).click();
@@ -41,13 +45,17 @@ for(const {mode,width} of [{mode:'light',width:390},{mode:'dark',width:1440}])te
  await page.screenshot({path:info.outputPath('structured-reply.png'),animations:'disabled'});
 });
 
-test('task receipts show the actual executor and final result directly rather than a report notification',async({page,request})=>{
+test('task receipts show the actual executor and final result directly rather than a report notification',async({page,request,context})=>{
+ await context.grantPermissions(['clipboard-read','clipboard-write']);
  const fixture=await(await request.post('/__test__/execution-results')).json();
  await page.goto('/mandala');
  const reply=page.getByRole('article',{name:fixture.title+' · 执行结果',exact:true}).last();
  await expect(reply.locator('.execution-result-sender')).toHaveText('Mandala');
  await expect(reply.locator('.chat-reply-bubble .execution-result-footer')).toHaveCount(0);
  await expect(reply.getByText('复查完成，两项配置差异仍然存在。未修改配置，等待你的确认。',{exact:true})).toBeVisible();
+ await reply.locator('.chat-reply-bubble').hover();
+ await reply.getByRole('button',{name:'复制消息',exact:true}).click();
+ expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe('复查完成，两项配置差异仍然存在。未修改配置，等待你的确认。');
  await expect(reply.getByRole('link',{name:'查看执行详情',exact:true})).toHaveAttribute('href',new RegExp('conversation='+fixture.executionId));
  await page.reload();
  await expect(reply.getByText('复查完成，两项配置差异仍然存在。未修改配置，等待你的确认。',{exact:true})).toBeVisible();
@@ -79,6 +87,15 @@ for(const mode of ['light','dark'] as const)for(const width of [2560,1440,1024,7
  expect(layout.replyBg).not.toBe('rgba(0, 0, 0, 0)');
  await expect(user).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ const position = await bubble.evaluate(node=>{
+   const body=node.getBoundingClientRect(),copy=node.querySelector('.bubble-copy button')!.getBoundingClientRect();
+   return {gap:copy.left-body.right,bottom:body.bottom-copy.bottom,margin:getComputedStyle(node).marginBottom,within:copy.right<=innerWidth};
+ });
+ expect(position.gap).toBeGreaterThanOrEqual(0);
+ expect(position.gap).toBeLessThanOrEqual(6);
+ expect(Math.abs(position.bottom)).toBeLessThanOrEqual(1);
+ expect(position.margin).toBe('8px');
+ expect(position.within).toBe(true);
  await turn.scrollIntoViewIfNeeded();await page.screenshot({path:info.outputPath(`bubbles-${mode}-${width}.png`),animations:'disabled'});
 });
 

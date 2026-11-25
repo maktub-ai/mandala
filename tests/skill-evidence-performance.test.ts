@@ -45,7 +45,7 @@ test('live host Skill hydration reads receipt history without decoding unrelated
  const sql=prepare.mock.calls.find(([sql])=>sql.includes('SELECT kind,data FROM events')&&sql.includes('receiptContext'))![0];prepare.mockRestore();
  expect(store.database.prepare('EXPLAIN QUERY PLAN '+sql).all(chat.id,0).map(row=>row.detail).join(' ')).toContain('events_receipt_history');
 });
-test('one config hydration shares inherited memory reads and renews collection access on the next read',async()=>{
+test('config hydration reuses decoded inherited memory and renews collection access on the next read',async()=>{
  const root={userId:store.ownerUserId};
  memory=createMemoryRuntime({home,store,schedule:false,loadConfig:async()=>(await readConfig(home)).config,authorizeConversationRead:(_p,id)=>host!.authorizeConversationRead(id)});
  host=createSessionManager(store,async()=>(await readConfig(home)).config,async()=>{throw new Error('No native execution expected');},undefined,home,undefined,undefined,memory);

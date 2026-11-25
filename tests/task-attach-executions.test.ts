@@ -66,3 +66,32 @@ test('attach and removal failures roll back revision, dedup and registry togethe
  expect(()=>tasks.attachExecution(p,task.id,1,c.id,'attach')).toThrow();expect(tasks.getTask(p,task.id)).toEqual(task);expect(store.database.prepare('SELECT command_key FROM task_command_dedup WHERE command_key=\'attach\'').get()).toBeUndefined();store.database.exec('DROP TRIGGER reject_execution_add');const attached=tasks.attachExecution(p,task.id,1,c.id,'attach');
  store.database.exec("CREATE TRIGGER reject_execution_remove BEFORE INSERT ON outbox WHEN NEW.type='task.execution_removed' BEGIN SELECT RAISE(ABORT,'injected'); END");expect(()=>tasks.removeExecution(p,task.id,2,attached.executions[0].id,'remove')).toThrow();expect(tasks.getTask(p,task.id)).toEqual(attached);expect(store.database.prepare('SELECT command_key FROM task_command_dedup WHERE command_key=\'remove\'').get()).toBeUndefined();
 });
+
+test('tracking work from a chat keeps its Agent, project and execution without starting a run',()=>{
+ const {store,p,tasks}=setup(),c=store.createConversation({agentId:'a',projectId:'project-a',cli:'codex',model:null});
+ const input={goal:'Follow the rollout'},task=tasks.createTaskFromChat(p,input,c.id,'track');
+ expect(task).toMatchObject({originConversationId:c.id,assigneeAgentId:'a',projectId:'project-a',state:'todo',conversationIds:[c.id],executions:[{request:input.goal,latestRun:null}]});
+ expect(tasks.createTaskFromChat(p,input,c.id,'track')).toEqual(task);
+ expect(tasks.listTasks(p)).toHaveLength(1);
+});
+
+test('a primary, already attached or differently assigned source stays linked without becoming a new execution',()=>{
+ const {store,p,tasks,chat}=setup(),c=chat(),other=chat();
+ const primary=store.createConversation({purpose:'mandala-main',agentId:'a',projectId:'',cli:'codex',model:null});
+ const task=tasks.createTask(p,{goal:'Existing'},'existing');
+ tasks.attachExecution(p,task.id,task.revision,c.id,'attach');
+ for(const [source,input] of [[primary,{goal:'Coordinate'}],[c,{goal:'Track another objective'}],[other,{goal:'Delegate',assigneeAgentId:'b'}]] as const){
+  expect(tasks.createTaskFromChat(p,input,source.id,'track-'+source.id)).toMatchObject({originConversationId:source.id,conversationIds:[]});
+ }
+ expect(()=>tasks.createTaskFromChat({...p,agentId:'b'},{goal:'Not mine'},other.id,'denied')).toThrow(expect.objectContaining({code:'forbidden'}));
+ expect(tasks.listTasks(p)).toHaveLength(4);
+});
+
+test('retries an older chat create command without duplicating or retroactively attaching the task',()=>{
+ const {p,tasks,chat}=setup(),source=chat(),input={goal:'Already captured'};
+ const original=tasks.createTask(p,input,'old-key');
+ expect(tasks.createTaskFromChat(p,input,source.id,'old-key')).toEqual(original);
+ expect(tasks.listTasks(p)).toHaveLength(1);
+ tasks.createTaskFromChat(p,input,source.id,'new-key');
+ expect(()=>tasks.createTaskFromChat(p,input,chat().id,'new-key')).toThrow(expect.objectContaining({code:'idempotency_conflict'}));
+});

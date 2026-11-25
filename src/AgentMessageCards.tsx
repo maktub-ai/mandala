@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useState, type ReactNode} from 'react';
 import type {ChatMessage} from '../shared/chat-turns';
 import type {Config} from '../shared/types';
 import {api} from './api';
@@ -10,6 +10,9 @@ import Disclosure from './ui/Disclosure';
 import MarkdownMessage from './MarkdownMessage';
 import {useLanguage} from './i18n';
 import Icon from './ui/Icon';
+import {collabFocusEvent} from './mandala-collab';
+
+type BubbleActions = { renderCopy?: (key: string, text: string) => ReactNode };
 
 function RetryInquiry({id,attemptId}:{id:string;attemptId:string}){
  const {text:t}=useLanguage();
@@ -26,7 +29,7 @@ function RetryInquiry({id,attemptId}:{id:string;attemptId:string}){
  </>;
 }
 
-function AgentReply({message,config,onOpen}:{message:NonNullable<ChatMessage['agentMessage']>;config:Config;onOpen:(path:string)=>void}){
+function AgentReply({message,config,onOpen,renderCopy}:BubbleActions & {message:NonNullable<ChatMessage['agentMessage']>;config:Config;onOpen:(path:string)=>void}){
  const {text:t}=useLanguage(),owner=config.agents.find(agent=>agent.id===message.targetAgentId);
  const name=owner?.name??t('智能体','Agent');
  const notSubmitted=message.state==='failed'&&message.submissionState==='not_submitted';
@@ -34,6 +37,7 @@ function AgentReply({message,config,onOpen}:{message:NonNullable<ChatMessage['ag
  return <article className="agent-reply agent-message-reply" aria-label={name+' · '+title}>
   <div className="chat-reply-bubble"><header className="agent-reply-header"><div className="message-avatar">{owner?<IdentityAvatar identity={owner} kind="agent" size={24}/>:<Icon name="agent" size={18}/>}</div><span className="message-name">{name}</span><span className="chat-reply-source">{title}</span></header>
   {notSubmitted?<p className="agent-message-body">{t('无法启动接收智能体。','Could not start the receiving Agent.')}</p>:message.reply&&<div className="agent-message-body"><MarkdownMessage text={message.reply}/></div>}
+  {!notSubmitted && renderCopy && message.reply && <span className="message-actions bubble-copy">{renderCopy(message.id, message.reply)}</span>}
   </div>
   {!notSubmitted&&<p className="chat-reply-source">{message.replyState==='consumed'?t('已接续处理','Followed up'):message.replyState==='parked'?t('回复已保存，未自动接续','Reply saved without automatic continuation'):t('回复等待处理','Reply awaiting processing')}</p>}
   {message.state==='failed'&&<StatusLabel icon="error" tone="danger">{notSubmitted?t('未提交','Not submitted'):t('执行未完成','Execution incomplete')}</StatusLabel>}
@@ -46,7 +50,7 @@ function AgentReply({message,config,onOpen}:{message:NonNullable<ChatMessage['ag
  </article>;
 }
 
-export default function AgentMessageCards({messages,config,onOpen}:{messages:ChatMessage[];config:Config;onOpen:(path:string)=>void}){
+export default function AgentMessageCards({messages,config,onOpen,renderCopy}:BubbleActions & {messages:ChatMessage[];config:Config;onOpen:(path:string)=>void}){
  const {text:t}=useLanguage();
  const groups=new Map<string,NonNullable<ChatMessage['agentMessage']>[]>();
  for(const item of messages){const m=item.agentMessage;if(item.kind!=='agent_message'||!m||m.direction==='reply')continue;const key=m.direction==='request'?'incoming:'+m.id:m.sourceRequestEventId?'request:'+m.sourceRequestEventId:'message:'+m.id;groups.set(key,[...groups.get(key)??[],m]);}
@@ -60,9 +64,9 @@ export default function AgentMessageCards({messages,config,onOpen}:{messages:Cha
     const name=owner?.name??t(incoming?'来源智能体':'接收智能体',incoming?'Source Agent':'Receiving Agent');
     const label=m.state==='queued'?m.submissionState==='unknown'?t('提交待确认','Submission unconfirmed'):t('排队中','Queued'):m.state==='running'?t('执行中','Running'):m.state==='succeeded'?t('已回复','Replied'):m.state==='failed'?m.submissionState==='not_submitted'?t('未提交','Not submitted'):t('执行未完成','Execution incomplete'):t('状态待确认','Status unconfirmed');
     const processing=m.state==='failed'&&m.submissionState==='not_submitted'?t('无法启动接收智能体。','Could not start the receiving Agent.'):m.replyState==='consumed'?t('Mandala 已接续处理','Mandala has processed the reply'):m.replyState==='parked'?t(m.reply?'回复已保存，未自动接续':'已停止自动接续，等待回复',m.reply?'Reply saved without automatic continuation':'Automatic continuation stopped; awaiting reply'):m.replyState==='queued'?t('回复等待接续','Reply queued for continuation'):m.reply?t('回复等待处理','Reply awaiting processing'):t('尚未收到回复','No reply received yet');
-    return <div className="operation-row" key={m.id}>{owner&&<IdentityAvatar identity={owner} kind="agent" size={28}/>}<div className="operation-row-main"><OperationLink path={'/agents?agent='+encodeURIComponent(id??'')} onOpen={onOpen} iconOnly={false}>{name}</OperationLink><p className="operation-row-note">{processing}</p><div className="operation-message-actions">{m.reply&&!(m.state==='failed'&&m.submissionState==='not_submitted')&&<Disclosure title={t('查看回复','Read reply')}><MarkdownMessage text={m.reply}/></Disclosure>}{related&&<OperationLink path={'/?conversation='+encodeURIComponent(related)} onOpen={onOpen}>{t(incoming?'查看来源对话':'查看接收对话',incoming?'View source chat':'View receiving chat')}</OperationLink>}</div></div><StatusLabel filled icon={m.state==='succeeded'?'check':m.state==='failed'?'error':'clock'} tone={m.state==='succeeded'?'success':m.state==='failed'?'danger':m.state==='running'?'active':'warning'}>{label}</StatusLabel></div>;
+    return <div className="operation-row" key={m.id}>{owner&&<IdentityAvatar identity={owner} kind="agent" size={28}/>}<div className="operation-row-main"><OperationLink path={'/agents?agent='+encodeURIComponent(id??'')} onOpen={onOpen} iconOnly={false}>{name}</OperationLink><p className="operation-row-note">{processing}</p><div className="operation-message-actions">{m.reply&&!(m.state==='failed'&&m.submissionState==='not_submitted')&&<Disclosure title={t('查看回复','Read reply')}><MarkdownMessage text={m.reply}/></Disclosure>}{related&&<OperationLink path={'/?conversation='+encodeURIComponent(related)} onOpen={onOpen}>{t(incoming?'查看来源对话':'查看接收对话',incoming?'View source chat':'View receiving chat')}</OperationLink>}{related&&!incoming&&<button type="button" className="operation-focus-link" onClick={()=>dispatchEvent(new CustomEvent(collabFocusEvent,{detail:{conversationId:related}}))}>{t('在协作中查看','Show in Collaboration')}</button>}</div></div><StatusLabel filled icon={m.state==='succeeded'?'check':m.state==='failed'?'error':'clock'} tone={m.state==='succeeded'?'success':m.state==='failed'?'danger':m.state==='running'?'active':'warning'}>{label}</StatusLabel></div>;
    })}</div>
    {items.some(m=>m.text)&&<Disclosure title={t('查看原始委派','Review original request')}>{items.filter(m=>m.text).map(m=><div key={m.id} className="operation-original-request"><strong>{config.agents.find(a=>a.id===(incoming?m.sourceAgentId:m.targetAgentId))?.name??t('智能体','Agent')}</strong><p>{m.text}</p></div>)}</Disclosure>}
   </OperationCard>;
- })}{messages.filter(item=>item.kind==='agent_message'&&item.agentMessage?.direction==='reply'&&item.agentMessage.reply?.trim()).map(item=><AgentReply key={item.key} message={item.agentMessage!} config={config} onOpen={onOpen}/>)}</>;
+ })}{messages.filter(item=>item.kind==='agent_message'&&item.agentMessage?.direction==='reply'&&item.agentMessage.reply?.trim()).map(item=><AgentReply renderCopy={renderCopy} key={item.key} message={item.agentMessage!} config={config} onOpen={onOpen}/>)}</>;
 }

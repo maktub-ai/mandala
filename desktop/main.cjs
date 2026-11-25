@@ -162,13 +162,15 @@ async function start() {
   };
   browserSession.setPermissionRequestHandler((contents, permission, callback, details) => callback(permission === 'media' && trustedMicrophoneFrame(contents, details) && details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'audio'));
   browserSession.setPermissionCheckHandler((contents, permission, _origin, details) => permission === 'media' && trustedMicrophoneFrame(contents, details) && details.mediaType === 'audio');
+  const libraryViewPath = /^\/api\/v2\/library-sections\/[A-Za-z0-9_.%:-]+\/files\/[A-Za-z0-9._-]+\/view\.html$/;
   // HTML readers have a server-enforced opaque sandbox. Keep app scripts local elsewhere.
   browserSession.webRequest.onHeadersReceived({ urls: [service.origin + '/*'] }, (details, callback) => {
-    const preview = /^\/api\/conversations\/[a-zA-Z0-9_-]+\/(?:local-file|workspace-file)\/preview$/.test(new URL(details.url).pathname);
+    const pathname = new URL(details.url).pathname;
+    const preview = /^\/api\/conversations\/[a-zA-Z0-9_-]+\/(?:local-file|workspace-file)\/preview$/.test(pathname) || libraryViewPath.test(pathname);
     const policy = Object.entries(details.responseHeaders ?? {}).find(([key]) => key.toLowerCase() === 'content-security-policy')?.[1];
     if (preview && policy?.some(value => value.startsWith('sandbox allow-scripts;'))) return callback({ responseHeaders: details.responseHeaders });
     const headers = Object.fromEntries(Object.entries(details.responseHeaders ?? {}).filter(([key]) => key.toLowerCase() !== 'content-security-policy'));
-    callback({ responseHeaders: { ...headers, 'Content-Security-Policy': ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://lh1.googleusercontent.com https://lh2.googleusercontent.com https://lh3.googleusercontent.com https://lh4.googleusercontent.com https://lh5.googleusercontent.com https://lh6.googleusercontent.com https://avatars.githubusercontent.com; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'"] } });
+    callback({ responseHeaders: { ...headers, 'Content-Security-Policy': ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://lh1.googleusercontent.com https://lh2.googleusercontent.com https://lh3.googleusercontent.com https://lh4.googleusercontent.com https://lh5.googleusercontent.com https://lh6.googleusercontent.com https://avatars.githubusercontent.com https://clawhub.ai/api/v1/skill-icons/; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'"] } });
   });
   window = new BrowserWindow({ width: 1280, height: 860, minWidth: 720, minHeight: 500, title: 'Mandala', show: false, ...(process.platform === 'darwin' ? {titleBarStyle:'hiddenInset',trafficLightPosition:{x:16,y:16}} : {}), webPreferences: { partition, additionalArguments:['--mandala-account-partition='+bootstrap.partition], preload: join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
   let iconMode;
@@ -266,7 +268,8 @@ async function start() {
     petWindow = new BrowserWindow({ width, height, x: start.x, y: start.y, frame: false, transparent: true, backgroundColor: '#00000000', resizable: false, minimizable: false, maximizable: false, fullscreenable: false, skipTaskbar: true, hasShadow: false, alwaysOnTop: true, show: false, title: 'Mandala Pet',
       webPreferences: { partition, additionalArguments:['--mandala-account-partition='+bootstrap.partition], preload: join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
     petWindow.setAlwaysOnTop(true, 'floating');
-    petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // Keep Mandala a regular Dock app when the pet joins every macOS Space.
+    petWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
     // Only the pet takes the mouse; the transparent rest of the window passes clicks to what is underneath.
     petWindow.setIgnoreMouseEvents(true, { forward: true });
     petWindow.on('moved', () => { if (petWindow && !petWindow.isDestroyed()) { const [x, y] = petWindow.getPosition(); petPosition = { x, y }; } });
@@ -307,9 +310,27 @@ async function start() {
       throw Error('Invalid pet request');
     } catch (error) { return { ok: false, error: error.message || 'Pet window unavailable' }; }
   });
-  ipcMain.on('mandala:open-external', (event, value) => {
-    if (event.sender !== window.webContents || !allowedNavigation(event.senderFrame?.url ?? '', service.origin) || typeof value !== 'string') return;
-    try { const url = new URL(value); if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password) void shell.openExternal(url.href); } catch {}
+  ipcMain.on('mandala:open-external', async (event, value) => {
+    if (!trustedFrom(event, window) || typeof value !== 'string') return;
+    try {
+      const url = new URL(value);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return;
+      if (url.origin !== service.origin) { await shell.openExternal(url.href); return; }
+      if (!libraryViewPath.test(url.pathname)) return;
+      if (!bootstrap.token) throw Error('No desktop account session');
+      const response = await fetch(url.href, {
+        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10_000),
+        headers: { Origin: service.origin, Cookie: 'mandala_desktop=' + bootstrap.token, 'X-Mandala-File-Link': '1' },
+      });
+      if (!response.ok) throw Error('Library file unavailable');
+      const browserUrl = new URL((await response.json()).url);
+      if (browserUrl.origin !== url.origin || browserUrl.pathname !== url.pathname || browserUrl.username || browserUrl.password) throw Error('Invalid library file URL');
+      await shell.openExternal(browserUrl.href);
+    } catch {
+      if (typeof value === 'string' && value.startsWith(service.origin + '/api/v2/library-sections/')) {
+        dialog.showErrorBox('Mandala', '无法在浏览器中打开此文件。 / Could not open this file in the browser.');
+      }
+    }
   });
   // Update state is shared by the menu, the settings page and the background schedule.
   const updateStateFile = () => join(app.getPath('userData'), 'update-state.json');

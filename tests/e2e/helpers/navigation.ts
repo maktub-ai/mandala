@@ -144,7 +144,9 @@ export async function setAppearanceMode(page: Page, mode: 'light' | 'dark') {
     await settings.goto(new URL('/settings/general', page.url()).href);
     await settings.getByRole('button', { name: mode === 'dark' ? /^(深色|Dark)$/ : /^(浅色|Light)$/, exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', mode);
-    await expect(page.locator('body')).toHaveCSS('background-color', mode === 'dark' ? 'rgb(25, 25, 28)' : 'rgb(252, 252, 252)');
+    await expect(settings.locator('html')).toHaveAttribute('data-theme', mode);
+    const background = await settings.locator('body').evaluate(body => getComputedStyle(body).backgroundColor);
+    await expect(page.locator('body')).toHaveCSS('background-color', background);
   } finally { await settings.close(); }
 }
 

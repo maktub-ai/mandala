@@ -6,6 +6,14 @@ A Project scope combines authorized usage bindings and execution provenance. For
 
 A pinned association opens its exact version. An unreadable or missing pinned version never falls back to the latest version. Source labels use the selected version's provenance; historical versions without sufficient source metadata show a neutral historical-source label. The reader explicitly distinguishes a Project's pinned reference from another version selected in its URL.
 
+## Project file tabs
+
+An installed plugin can add a tab of project documents. The global view lists each linked project once. A single document opens directly, and projects with several documents provide a file list. The original HTML supplies the reading experience. A handbook plugin can open a workspace’s `docs/handbook.html` in the same reader.
+
+### Project blueprints
+
+Open a Project’s overview to read its blueprint, module status and recent work. Enable the blueprint in Project settings. Existing plans use the compatible Omino format and keep their original location. Each Project can bind several repositories to the same plan.
+
 ## Reading and editing
 
 The reader keeps version selection and available editing actions above the document. Source evidence, access, associations and maintenance remain inspectable in separate disclosures. Wiki citation presentation may collapse generated evidence and map historical workspace links for navigation; immutable version bytes remain unchanged.

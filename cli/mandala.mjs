@@ -4,6 +4,7 @@ import { lstat, open, readFile, rename, unlink, writeFile } from 'node:fs/promis
 import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { humanOutput, renderHelp, renderResult } from './presentation.mjs';
 import { productEnv, productHome } from './product-env.mjs';
 import { codexMailboxSid, ownedPrivatePath } from './private-path.mjs';
 import { COMMANDS, boundArguments, findCommand, resolveRequest } from './commands.mjs';
@@ -14,7 +15,7 @@ function options(argv) {
   for (let index = 0; index < argv.length; index++) {
     const argument = argv[index];
     if (argument === '--help' || argument === '-h') { values.help = true; continue; }
-    if (argument === '--json') continue;
+    if (argument === '--json' || argument === '--human') continue;
     if (!argument.startsWith('--')) { words.push(argument); continue; }
     const equals = argument.indexOf('='), flag = argument.slice(2, equals < 0 ? undefined : equals);
     const name = flag === 'command-key' ? 'key' : flag;
@@ -121,12 +122,16 @@ function help(words) {
   if (!entries.length || words.length > 1 && !entry) fail('unknown_command', 'Unknown command');
   return {
     usage: 'mandala <group> <action> [ids] [--data JSON|@file] [--query JSON|@file] [--key KEY] [--base-url URL]',
-    options: { '--data': 'JSON request body; @file reads UTF-8 JSON', '--query': 'JSON query parameters', '--key': 'Stable mutation key; generated if omitted (--command-key alias)', '--base-url': 'Local service URL (default http://127.0.0.1:4332); forbidden in Agent mode', '--input': 'File bytes for upload', '--output': 'Required destination for binary downloads', '--range': 'HTTP byte range for assets read/inspect', '--if-range': 'ETag for conditional byte ranges', '--help': 'Root, group or action help' },
-    commands: entries.map(item => ({ command: item.name, ids: item.idParams, method: item.method, path: item.path, agent: Boolean(item.boundTool), ...(item.boundTool ? { boundFields: item.boundFields } : {}), ...(item.invocationOnly ? { invocationOnly: true } : {}), ...(item.transport ? { transport: item.transport } : {}), ...inputHelp(item) })),
+    options: { '--human': 'Readable terminal output (local user)', '--json': 'Machine-readable JSON output', '--data': 'JSON request body; @file reads UTF-8 JSON', '--query': 'JSON query parameters', '--key': 'Stable mutation key; generated if omitted (--command-key alias)', '--base-url': 'Local service URL (default http://127.0.0.1:4332); forbidden in Agent mode', '--input': 'File bytes for upload', '--output': 'Required destination for binary downloads', '--range': 'HTTP byte range for assets read/inspect', '--if-range': 'ETag for conditional byte ranges', '--help': 'Root, group or action help' },
+    commands: entries.map(item => ({ command: item.name, ids: item.idParams, method: item.method, path: item.path, agent: Boolean(item.boundTool), ...(item.boundTool ? { boundFields: item.boundFields } : {}), ...(item.invocationOnly ? { invocationOnly: true } : {}), ...(item.transport ? { transport: item.transport } : {}), ...(item.readOnly ? {readOnly:true} : {}), ...inputHelp(item) })),
   };
 }
 function inputHelp(entry) {
   const examples = {
+    'tasks draft': { description: 'Prepare a weekly reading list', timeZone: 'UTC' },
+    'knowledge create': { kind: 'document', title: 'Reading guide', content: 'Collect verified reading notes.', scope: 'global', status: 'candidate' },
+    'knowledge update': { kind: 'document', title: 'Updated reading guide', content: 'Collect verified reading notes.', scope: 'global', status: 'candidate' },
+    'assets maintain': { enabled: false, expectedRevision: 0 },
     'progress report': {text:'Checking source inputs',steps:[{text:'Read inputs',status:'running'}]},
     'skills find': { query: 'query review' },
     'skills register': { name: 'query-review', content: '---\nname: query-review\ndescription: Review queries\n---\nCheck predicates.' },
@@ -143,7 +148,7 @@ function inputHelp(entry) {
     'conversations approve': { decision: 'approve' }, 'conversations answer': { answers: {} },
     'conversations workspace-file': { path: 'README.md' }, 'conversations local-file': { href: 'file:///absolute/output.txt' },
     'tasks create': { goal: 'Write a report', criteria: [{id:'evidence',text:'Return verifiable evidence',checkRef:null}], acceptance:'human', projectId: null, assigneeAgentId: null, participantAgentIds: [], originConversationId: null },
-    'tasks update': { expectedRevision: 1, goal: 'Updated report goal', projectId: null, participantAgentIds: ['agent-id'], originConversationId: null },
+    'tasks update': { expectedRevision: 1, goal: 'Updated report goal', projectIds: ['project-id'], moduleRef: { projectId: 'project-id', lane: 'Reports' } },
     'tasks execution-add': { conversationId:'chat-id', expectedRevision: 1 }, 'tasks execution-remove': { expectedRevision: 1 },
     'messages ask': {sourceConversationId:'chat-id',targetAgentId:'agent-id',text:'Confirm the parameter',policy:'resume'},
     'tasks delegate': { sourceConversationId: 'chat-id', targetAgentId: 'agent-id', request: 'Review', policy: 'resume' },
@@ -178,19 +183,41 @@ function inputHelp(entry) {
   if (entry.name.startsWith('tasks ') && ['start', 'stop', 'cancel', 'review', 'complete', 'mark-completed', 'accept', 'reopen', 'request-changes', 'assign'].includes(entry.name.split(' ')[1])) {
     dataExample = { expectedRevision: 1, ...(['reopen', 'request-changes'].some(action => entry.name.endsWith(action)) ? { reason: 'Needs changes' } : {}), ...(entry.name.endsWith('assign') ? { agentId: 'agent-id' } : {}) };
   }
-  const agentExamples = { message_ask:{targetAgentId:'agent-id',text:'Confirm the parameter',policy:'resume'},message_read:{messageId:'message-id'}, delegate: { targetAgentId: 'agent-id', request: 'Review', policy: 'resume' }, artifact_publish: { title: 'Report', files: [{ path: 'report.txt' }] }, artifact_read: { assetId: 'asset-id', versionId: 'version-id', fileId: '0' }, memory_search: { query: 'Historical decision' }, memory_read: { recordId: 'record-id' }, project_agents: {},
+  const agentExamples = { progress_report: examples['progress report'],
+    skill_find: examples['skills find'], skill_read: { skillId: 'skill-id' }, skill_register: examples['skills register'],
+    skill_update: { skillId: 'skill-id', expectedVersionId: 'version-id', content: '---\nname: query-review\ndescription: Review queries\n---\nCheck predicates.' },
+    skill_versions: { skillId: 'skill-id' }, skill_suggestions: { skillId: 'skill-id' },
+    skill_accept: { skillId: 'skill-id', suggestionId: 'suggestion-id' }, skill_reject: { skillId: 'skill-id', suggestionId: 'suggestion-id' },
+    artifact_update: { assetId: 'asset-id', expectedHeadVersionId: 'version-id', path: 'report.txt' }, task_runs: { taskId: 'task-id' },
+    wiki_list: {}, wiki_create: { name: 'Reading notes', purpose: 'Collect verified reading decisions', projectId: null, automatic: false, reception: { enabled: false } },
+    wiki_get: { baseId: 'base-id' }, wiki_read: { baseId: 'base-id', pageId: 'page-id' }, wiki_search: { baseId: 'base-id', query: 'decision' },
+    wiki_add_source: { baseId: 'base-id', assetId: 'asset-id', versionId: 'version-id' }, wiki_remove_source: { baseId: 'base-id', sourceId: 'source-id' },
+    wiki_configure: { baseId: 'base-id', expectedRevision: 1, automatic: false, reception: { enabled: false } }, wiki_refresh: { baseId: 'base-id' },
+    wiki_edit: { baseId: 'base-id', pageId: 'page-id', body: 'Updated notes', expectedHeadVersionId: 'version-id' }, wiki_versions: { baseId: 'base-id' },
+    wiki_restore: { baseId: 'base-id', versionId: 'version-id', expectedHeadVersionId: 'head-version-id' },
+    code_graph_status: {}, code_graph_refresh: { bindingId: 'binding-id' }, code_graph_search: { bindingId: 'binding-id', query: 'symbol' },
+    code_graph_definition: { bindingId: 'binding-id', nodeId: 'node-id' }, code_graph_callers: { bindingId: 'binding-id', nodeId: 'node-id', depth: 1 }, code_graph_callees: { bindingId: 'binding-id', nodeId: 'node-id', depth: 1 },
+    automation_list: {}, automation_create: { ...examples['automations create'], taskId: 'task-id' },
+    automation_update: { automationId: 'automation-id', expectedRevision: 1, enabled: false }, automation_remove: { automationId: 'automation-id', expectedRevision: 1 },
+    automation_run: { automationId: 'automation-id' }, automation_stop: { automationId: 'automation-id' },
+    message_ask:{targetAgentId:'agent-id',text:'Confirm the parameter',policy:'resume'},message_read:{messageId:'message-id'}, delegate: { targetAgentId: 'agent-id', request: 'Review', policy: 'resume' }, artifact_publish: { title: 'Report', files: [{ path: 'report.txt' }] }, artifact_read: { assetId: 'asset-id', versionId: 'version-id', fileId: '0' }, memory_search: { query: 'Historical decision' }, memory_read: { recordId: 'record-id' }, project_agents: {},
+    mandala_directory: { query: 'review', projectId: null }, mandala_goals: {}, mandala_receipts: { taskId: 'task-id' },
+    mandala_request: { taskId: 'task-id', expectedRevision: 1, text: 'Please confirm the requirement', blocked: true },
+    mandala_configure: { mode: 'propose', change: { kind: 'agent', action: 'create', values: { id: 'reviewer', name: 'Reviewer', instructions: 'Review the evidence', defaultCli: 'codex', models: {}, mcp: [], skills: [] } } },
+    mandala_temporary: { templateAgentId: 'template-agent-id', name: 'Temporary reviewer', projectId: null },
     mandala_discover_capabilities:{directories:[],query:'',limit:150},mandala_discover_work:{includePaths:[],excludePaths:[],limit:50},mandala_planning_guide:{},
     mandala_create:{goal:'Investigate the question',criteria:[{id:'evidence',text:'Return verifiable evidence',checkRef:null}],projectId:null},
     mandala_takeover:{taskId:'task-id',expectedRevision:1,criteria:[{id:'evidence',text:'Return verifiable evidence',checkRef:null}]},
     mandala_delegate:{taskId:'task-id',targetAgentId:'agent-id',projectId:null,request:'Investigate and return evidence',criteria:[{id:'evidence',text:'Return verifiable evidence',checkRef:null}]},
     ...Object.fromEntries(['review','mark_completed','accept','cancel','stop'].map(action=>['task_'+action,{taskId:'task-id',expectedRevision:1}])),
-    task_start:{taskId:'task-id',expectedRevision:1,conversationId:null},task_reopen:{taskId:'task-id',expectedRevision:1},task_request_changes:{taskId:'task-id',expectedRevision:1,reason:'Needs changes'},task_assign:{taskId:'task-id',expectedRevision:1,agentId:'agent-id'},
+    task_start:{taskId:'task-id',expectedRevision:1},task_reopen:{taskId:'task-id',expectedRevision:1},task_request_changes:{taskId:'task-id',expectedRevision:1,reason:'Needs changes'},task_assign:{taskId:'task-id',expectedRevision:1,agentId:'agent-id'},
+    blueprint_summary: {}, blueprint_record: { result: 'Verified the file reader', decisions: ['Keep text selectable'], lanes: ['Reader'] }, blueprint_report: { taskId: 'task-id' },
     task_context: {}, task_list: { query: 'Report', conversationId: 'chat-id' }, task_read: { taskId: 'task-id' },
-    task_create: examples['tasks create'], task_update: { taskId: 'task-id', expectedRevision: 1, goal: 'Updated report goal', projectId: null },
+    task_create: {goal:'Track the current investigation',criteria:['Return verifiable evidence'],projectId:'current-project-id'}, task_update: { taskId: 'task-id', expectedRevision: 1, goal: 'Updated report goal', projectId: null },
     task_execution_add: { taskId: 'task-id', expectedRevision: 1, conversationId: 'chat-id' }, task_execution_remove: { taskId: 'task-id', expectedRevision: 1, executionId: 'execution-id' },
     conversation_list: { query: 'Report' }, conversation_read: { conversationId: 'chat-id' }, conversation_history: { conversationId: 'chat-id', after: 0 },
   };
-  return { ...(['task_create','task_update','mandala_create','mandala_takeover','mandala_delegate'].includes(entry.boundTool)?{criteriaShape:{id:'unique string',text:'non-empty string',checkRef:'null or check reference'},criteriaShorthand:'Bound Agent commands also accept one text or an array of texts; the host assigns stable criterion IDs.'}:{}), ...(entry.boundTool==='task_create'?{acceptanceValues:['delivery','checks','human']}:{}), ...(dataExample ? { dataExample } : {}), ...(queryExamples[entry.name] ? { queryExample: queryExamples[entry.name] } : {}), ...(entry.boundTool ? { agentDataExample: agentExamples[entry.boundTool] } : {}), ...(entry.name === 'tasks get' ? { resultShape: { user: 'Task detail with runs and receipts', agent: 'Task; verified system Agent receives a readOnly task summary without private execution context' } } : {}), ...(['tasks list','tasks runs'].includes(entry.name) ? { note:'Verified system Agent reads return readOnly summaries. Run summaries omit native IDs, context snapshots, file references and raw events; delivery text is redacted when source/output access is unavailable. Observation never grants mutation or takeover authority.' } : {}), ...(entry.name === 'tasks create' ? { note: 'Project is optional; Agents must explicitly supply projectId (null allowed). Add execution Chats with tasks execution-add. Saving never starts execution. Users and authorized Agents may explicitly mark a Task completed. A successful Run alone does not complete the goal.' } : {}), ...(entry.name === 'tasks mark-completed' ? {note:'Explicitly mark completed. Other active or uncertain Runs block this action. For the current executor Run, completionRequested:true records intent applied only after successful settled delivery. Records the accepting user or Agent and disables old continuations.'} : {}), ...(entry.name === 'tasks accept' ? {note:'Accept a reviewed Task. Available to users and authorized Agents.'} : {}), ...(entry.name === 'tasks review' || entry.name === 'tasks complete' ? { note: 'Request review; this does not accept or complete the Task.' } : {}), ...(entry.name.startsWith('system-tasks ') ? { kindValues: ['title', 'memory'] } : {}) };
+  return { ...(['task_create','task_update','mandala_create','mandala_takeover','mandala_delegate'].includes(entry.boundTool)?{criteriaShape:{id:'unique string',text:'non-empty string',checkRef:'null or check reference'},criteriaShorthand:'Bound Agent commands also accept one text or an array of texts; the host assigns stable criterion IDs.'}:{}), ...(entry.boundTool==='task_create'?{acceptanceValues:['delivery','checks','human']}:{}), ...(dataExample ? { dataExample } : {}), ...(queryExamples[entry.name] ? { queryExample: queryExamples[entry.name] } : {}), ...(entry.boundTool ? { agentDataExample: agentExamples[entry.boundTool] } : {}), ...(entry.name === 'tasks get' ? { resultShape: { user: 'Task detail with runs and receipts', agent: 'Task; verified system Agent receives a readOnly task summary without private execution context' } } : {}), ...(['tasks list','tasks runs'].includes(entry.name) ? { note:'Verified system Agent reads return readOnly summaries. Run summaries omit native IDs, context snapshots, file references and raw events; delivery text is redacted when source/output access is unavailable. Observation never grants mutation or takeover authority.' } : {}), ...(entry.name === 'messages ask' ? {note:'Primary chat requires targetProjectId (null for no Project). For a follow-up, pass the targetConversationId from the original inquiry or the delegated run’s followUp address. Omit it for an independent inquiry. Project Agent chats use their current Project and omit targetProjectId. Only the explicit inquiry and reply are exchanged.'} : {}), ...(entry.name === 'tasks create' ? { note: 'Project is optional; Agents must explicitly supply projectId (null allowed). Use tasks context for the current projectId. Bound creation defaults to the current Chat as the origin and reuses it for execution when eligible. Explicit originConversationId:null creates an independent Task. Add other execution Chats with tasks execution-add. Saving never starts execution. Users and authorized Agents may explicitly mark a Task completed. A successful Run alone does not complete the goal.' } : {}), ...(entry.name === 'tasks mark-completed' ? {note:'Explicitly mark completed. Other active or uncertain Runs block this action. For the current executor Run, completionRequested:true records intent applied only after successful settled delivery. Records the accepting user or Agent and disables old continuations.'} : {}), ...(entry.name === 'tasks accept' ? {note:'Accept a reviewed Task. Available to users and authorized Agents.'} : {}), ...(entry.name === 'tasks review' || entry.name === 'tasks complete' ? { note: 'Request review; this does not accept or complete the Task.' } : {}), ...(entry.name.startsWith('system-tasks ') ? { kindValues: ['title', 'memory'] } : {}) };
 }
 async function request(baseUrl, method, path, { data, key, journal, token, upload, range, ifRange, localKey } = {}) {
   const headers = { Accept: 'application/json' };
@@ -262,15 +289,22 @@ async function events(response, emit) {
 
 export async function main(argv = process.argv.slice(2), env = process.env) {
   let name = '', key, token;
+  const human = humanOutput(argv, env, process.stdout.isTTY && process.stderr.isTTY);
   const output = (value, error = false) => {
-    const line = JSON.stringify(value, (_name, item) => token && typeof item === 'string' ? item.replaceAll(token, '[redacted]') : item);
-    (error ? process.stderr : process.stdout).write(line + '\n');
+    const json = JSON.stringify(value, (_name, item) => token && typeof item === 'string' ? item.replaceAll(token, '[redacted]') : item);
+    (error ? process.stderr : process.stdout).write((human ? renderResult(JSON.parse(json)) : json) + '\n');
   };
   const success = data => output({ ok: true, command: name, ...(key ? { commandKey: key } : {}), data });
   try {
     const { values, words } = options(argv);
     if (words[0] === 'help') { words.shift(); values.help = true; }
-    if (values.help || words.length === 0) { name = words.join(' '); success(help(words)); return 0; }
+    if (values.help || words.length === 0) {
+      name = words.join(' ');
+      const data = help(words);
+      if (human) process.stdout.write(renderHelp(data, words) + '\n');
+      else success(data);
+      return 0;
+    }
     name = words.slice(0, 2).join(' ');
     const entry = findCommand(name); if (!entry) fail('unknown_command', 'Unknown command; use mandala --help');
     const ids = words.slice(2), data = await jsonInput(values.data, '--data'), query = await jsonInput(values.query, '--query');

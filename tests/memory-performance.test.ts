@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
@@ -167,14 +167,15 @@ test('moving an event invalidates both transcript digests',()=>{
  s.store.database.prepare('UPDATE events SET conversationId=? WHERE id=?').run(s.chat.id,event.id);
  expect(s.memory.source(root,source.id).id).toBe(source.id);
 });
-test('one authority query materializes shared raw source payload only once across scope checks',()=>{
+test('already decoded source payload is reused across scope checks',()=>{
  const s=setup(),c=s.memory.ensureCollection(root,{projectId:null,agentId:null});
  s.store.appendEvent(s.chat.id,'user',{text:'Shared source payload'});s.store.appendEvent(s.chat.id,'status',{status:'idle'});
  const source=s.memory.captureConversation(root,{collectionId:c.id,conversationId:s.chat.id,trigger:'explicit',kind:'request'}).sources[0];
  const payload=s.store.database.prepare('SELECT data FROM memory_sources WHERE id=?').get(source.id)!.data;
+ s.memory.source(root,source.id);
  const parse=vi.spyOn(JSON,'parse');
  s.memory.withAuthorityQuery(()=>{s.memory.source(root,source.id);s.memory.source(root,source.id,null);});
- expect(parse.mock.calls.filter(([value])=>value===payload)).toHaveLength(1);
+ expect(parse.mock.calls.filter(([value])=>value===payload)).toHaveLength(0);
  s.store.database.prepare("UPDATE memory_sources SET data=json_set(data,'$.status','retracted') WHERE id=?").run(source.id);
  expect(()=>s.memory.source(root,source.id)).toThrow('source_retracted');
 });
@@ -385,4 +386,86 @@ test('capturing a dense tool turn does not repeatedly search its full event proj
  const original=Array.prototype.find;let comparisons=0;
  const find=vi.spyOn(Array.prototype,'find').mockImplementation(function(this:unknown[],predicate:any,thisArg?:unknown){const projection=this.length>count&&!!this[0]&&typeof this[0]==='object'&&'hash' in this[0];return original.call(this,(value,index,array)=>{if(projection)comparisons++;return predicate.call(thisArg,value,index,array);});});
  try{const result=s.memory.captureConversation(root,{collectionId:c.id,conversationId:s.chat.id,trigger:'explicit',kind:'request'});expect(result.sources[0].events).toHaveLength(count+3);expect(result.sources[0].events.filter(e=>e.kind==='tool'&&e.text).map(e=>e.text)).toEqual(['Finished']);expect(comparisons).toBeLessThan(count*4);}finally{find.mockRestore();}
+});
+
+test.each([false,true])('unrelated transactions retain committed event digests (nested: %s)',nested=>{
+ const authorize=vi.fn(),s=setup(authorize),c=s.memory.ensureCollection(root,{projectId:null,agentId:null});
+ const data={text:'Committed evidence'},event=s.store.appendEvent(s.chat.id,'user',data);s.store.appendEvent(s.chat.id,'status',{status:'idle'});
+ const source=s.memory.captureConversation(root,{collectionId:c.id,conversationId:s.chat.id,trigger:'explicit',kind:'request'}).sources[0];
+ s.memory.source(root,source.id);
+ const transaction=()=>s.store.transaction(()=>{s.store.database.prepare('UPDATE memory_collections SET data=data WHERE id=?').run(c.id);s.memory.source(root,source.id);});
+ const parse=vi.spyOn(JSON,'parse');
+ nested?s.memory.withAuthorityQuery(transaction):transaction();
+ authorize.mockClear();s.memory.source(root,source.id);
+ expect(parse.mock.calls.filter(([value])=>value===JSON.stringify(data))).toHaveLength(0);expect(authorize).toHaveBeenCalledTimes(1);
+ s.store.database.prepare('UPDATE events SET data=? WHERE id=?').run(JSON.stringify({text:'Changed evidence'}),event.id);
+ expect(()=>s.memory.source(root,source.id)).toThrow('source_changed');
+});
+
+test('a query that crosses a transaction cannot label old committed digests with a new revision',()=>{
+ const s=setup(),c=s.memory.ensureCollection(root,{projectId:null,agentId:null});
+ const event=s.store.appendEvent(s.chat.id,'user',{text:'Committed evidence'});s.store.appendEvent(s.chat.id,'status',{status:'idle'});
+ const source=s.memory.captureConversation(root,{collectionId:c.id,conversationId:s.chat.id,trigger:'explicit',kind:'request'}).sources[0];s.memory.source(root,source.id);
+ s.memory.withAuthorityQuery(()=>{
+  s.store.transaction(()=>s.memory.withAuthorityQuery(()=>{}));
+  s.store.database.prepare('UPDATE events SET data=? WHERE id=?').run(JSON.stringify({text:'Changed after transaction'}),event.id);
+  expect(()=>s.memory.source(root,source.id)).toThrow('source_changed');
+ });
+ expect(()=>s.memory.source(root,source.id)).toThrow('source_changed');
+});
+
+test('unchanged source decoding is reused across reads without retaining authorization or caller mutations',()=>{
+ let revoked=false;const authorize=vi.fn(()=>{if(revoked)throw new DomainError('forbidden',403,'forbidden');}),s=setup(authorize),c=s.memory.ensureCollection(root,{projectId:null,agentId:null});
+ s.store.appendEvent(s.chat.id,'user',{text:'Stable decoded evidence'});s.store.appendEvent(s.chat.id,'status',{status:'idle'});
+ const source=s.memory.captureConversation(root,{collectionId:c.id,conversationId:s.chat.id,trigger:'explicit',kind:'request'}).sources[0];
+ const payload=s.store.database.prepare('SELECT data FROM memory_sources WHERE id=?').get(source.id)!.data;
+ const first=s.memory.source(root,source.id);expect(()=>{first.events[0].hash='caller mutation';}).toThrow(TypeError);
+ const parse=vi.spyOn(JSON,'parse');authorize.mockClear();
+ expect(s.memory.source(root,source.id).events[0].hash).toBe(source.events[0].hash);
+ const ref={sourceId:source.id,sourceRevision:source.revision};const validated=s.memory.validateSource(root,ref);expect(()=>{validated.events[0].hash='another caller mutation';}).toThrow(TypeError);
+ expect(s.memory.validateSource(root,ref).events[0].hash).toBe(source.events[0].hash);
+ expect(parse.mock.calls.filter(([value])=>value===payload)).toHaveLength(0);expect(authorize).toHaveBeenCalledTimes(3);
+ revoked=true;expect(()=>s.memory.source(root,source.id)).toThrow('forbidden');
+});
+
+test('decoded sources follow exact database contents through direct edits, rollback and deletion',()=>{
+ const s=setup(),c=s.memory.ensureCollection(root,{projectId:null,agentId:null});s.store.appendEvent(s.chat.id,'user',{text:'Mutable storage, isolated reads'});s.store.appendEvent(s.chat.id,'status',{status:'idle'});
+ const source=s.memory.captureConversation(root,{collectionId:c.id,conversationId:s.chat.id,trigger:'explicit',kind:'request'}).sources[0];s.memory.source(root,source.id);
+ const db=s.store.database;db.exec('BEGIN');db.prepare("UPDATE memory_sources SET data=json_set(data,'$.status','retracted') WHERE id=?").run(source.id);
+ expect(()=>s.memory.source(root,source.id)).toThrow('source_retracted');db.exec('ROLLBACK');expect(s.memory.source(root,source.id).status).toBe(source.status);
+ const other=new DatabaseSync(join(s.store.home,'state.sqlite'));try{
+  other.prepare("UPDATE memory_sources SET data=json_set(data,'$.status','retracted') WHERE id=?").run(source.id);expect(()=>s.memory.source(root,source.id)).toThrow('source_retracted');
+  other.prepare('DELETE FROM memory_sources WHERE id=?').run(source.id);expect(()=>s.memory.source(root,source.id)).toThrow('memory_source_not_found');
+ }finally{other.close();}
+});
+
+
+test('a rolled-back source revision cannot poison a later committed revision with the same counter',()=>{
+ const s=setup(),c=s.memory.ensureCollection(root,{projectId:null,agentId:null});s.store.appendEvent(s.chat.id,'user',{text:'Evidence'});s.store.appendEvent(s.chat.id,'status',{status:'idle'});
+ const source=s.memory.captureConversation(root,{collectionId:c.id,conversationId:s.chat.id,trigger:'explicit',kind:'request'}).sources[0];s.memory.source(root,source.id);
+ const update=s.store.database.prepare("UPDATE memory_sources SET data=json_set(data,'$.text',?) WHERE id=?");
+ s.store.database.exec('BEGIN');update.run('Rolled back',source.id);expect(s.memory.source(root,source.id).text).toBe('Rolled back');s.store.database.exec('ROLLBACK');
+ update.run('Committed',source.id);expect(s.memory.source(root,source.id).text).toBe('Committed');
+});
+
+
+test('shared asset evidence is authorized once per synchronous read and revoked on the next read',async()=>{
+ const s=setup(),c=s.memory.ensureCollection(root,{projectId:null,agentId:null}),assets=s.memory.options.assets;
+ writeFileSync(join(s.store.home,'evidence.txt'),'Synthetic shared asset');
+ const staged=await createAssetFiles(s.store.home).stageFiles(root,null,[{allowedRoot:s.store.home,relativePath:'evidence.txt',manifestPath:'evidence.txt'}]);
+ const published=assets.importAsset(root,{kind:'file',title:'Shared evidence',submissionId:staged.submissionId},'shared-evidence'),ref={assetId:published.asset.id,versionId:published.version.id};
+ const chats=[s.chat,s.store.createConversation({projectId:'',agentId:'',cli:'codex',model:null})];
+ const sources=chats.map(chat=>{s.store.appendEvent(chat.id,'user',{text:'Evidence using the same asset'});s.store.appendEvent(chat.id,'status',{status:'idle'});return s.memory.captureConversation(root,{collectionId:c.id,conversationId:chat.id,trigger:'explicit',kind:'request'}).sources[0];});
+ expect(new Set(sources.map(source=>source.id)).size).toBe(2);
+ for(const source of sources){
+  const staged=await createAssetFiles(s.store.home).stageFiles(root,null,[{allowedRoot:s.store.home,relativePath:'evidence.txt',manifestPath:'evidence.txt'}]);
+  const asset=assets.createAsset(root,{kind:'file',title:'Derived evidence',owner:{userId:root.userId}});
+  const version=assets.publishAssetVersion(root,{assetId:asset.id,expectedHeadVersionId:null,submissionId:staged.submissionId,files:staged.files,provenance:{sourceVersions:[ref]}},source.id);
+  s.store.database.prepare("UPDATE memory_sources SET data=json_set(data,'$.versions',json(?)) WHERE id=?").run(JSON.stringify([{assetId:asset.id,versionId:version.id}]),source.id);
+ }
+ const prepare=vi.spyOn(s.store.database,'prepare');
+ s.memory.withAuthorityQuery(()=>{for(const source of sources)s.memory.source(root,source.id);});
+ expect(prepare.mock.calls.filter(([sql])=>sql==='SELECT data FROM asset_versions WHERE id=? AND asset_id=?')).toHaveLength(3);
+ assets.setLifecycle(root,published.asset.id,'retracted',published.asset.revision);
+ expect(()=>s.memory.source(root,sources[0].id)).toThrow('forbidden');
 });

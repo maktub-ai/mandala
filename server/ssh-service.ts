@@ -24,7 +24,7 @@ export const startSshRuntime:RemoteFactory=(cli,options)=>{
  const bound={...options,[bindLocalCatalogLauncher]:true as const};
  return cli==='codex'?startCodex(bound):cli==='omp'?startOmp(bound):startNativeRuntime(cli,bound);
 };
-const allowedMethods=new Set(['inspectContext','compactThread','getStatus','requiresRuntimeReload','assertReloadable','inspectInvocation','listModels','startThread','resumeThread','forkThread','setSkillRoots','listMcpStatus','listSkills','prepareTurn','startTurn','interrupt','replyApproval']);
+const allowedMethods=new Set(['getContextWindow','inspectContext','compactThread','getStatus','requiresRuntimeReload','assertReloadable','inspectInvocation','listModels','startThread','resumeThread','forkThread','setSkillRoots','listMcpStatus','listSkills','prepareTurn','startTurn','interrupt','replyApproval']);
 export function safeSshId(value:unknown):string{if(typeof value!=='string'||!/^[A-Za-z0-9_-]{1,160}$/.test(value))throw new Error('Invalid remote identifier');return value;}
 export function safeRelativePath(value:unknown):string{if(typeof value!=='string'||!value||value.length>4096||isAbsolute(value)||/[\\\x00-\x1f]/.test(value)||value.split('/').some(p=>!p||p==='.'||p==='..'))throw new Error('Invalid relative path');return value;}
 export async function readBoundedFile(root:string,path:string,limit=SSH_TRANSFER_LIMIT):Promise<Buffer>{

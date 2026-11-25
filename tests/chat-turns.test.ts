@@ -353,3 +353,45 @@ it('keeps draft recovery available after a matching writer-link receipt with no 
   {codexWriterRecovery:receipt,execution:'started'},
  ]) expect(recoverableUnsubmittedDraft(groupChatTurns([request,failure,terminal,event(4,'metadata',invalid)]),'error')).toBeUndefined();
 });
+
+it('renders submitted choices in order and leaves an identical pasted message intact', () => {
+  const replies = [
+    { questionItemId: '["request_user_input_async","call",0]', question: '你说的是哪个 Codex 界面？', answer: 'Codex 独立桌面 App' },
+    { questionItemId: '["request_user_input_async","call",1]', question: '备注？', answer: '第一行\n第二行' },
+  ];
+  const text = '<send_user_message_question_reply>\n' + JSON.stringify(replies) + '\n</send_user_message_question_reply>';
+  const events = [
+    event(1, 'user', { text, queuedInputId: 'manual' }),
+    event(2, 'metadata', { answeredQuestionId: 'async:form', queuedInputId: 'submitted', publicQuestionItems: replies.map(item=>item.questionItemId) }),
+    event(3, 'user', { text, queuedInputId: 'submitted' }),
+  ];
+  const users = groupChatTurns(events).flatMap(turn => turn.messages);
+  expect(users[0].text).toBe(text);
+  expect(users[0]).not.toHaveProperty('questionAnswers');
+  expect(users[1]).toMatchObject({
+    text: '你说的是哪个 Codex 界面？\nCodex 独立桌面 App\n\n备注？\n第一行\n第二行',
+    questionAnswers: replies.map(({ question, answer }) => ({ question, answer })),
+  });
+  expect(events[2].data).toEqual({ text, queuedInputId: 'submitted' });
+});
+
+it('masks a private form answer in displayed and copied text, and keeps malformed replies readable', () => {
+  const item = { id: 'form', delivery: 'async', questions: [{ isSecret: true }] };
+  const rows = [{ questionItemId: '["request_user_input_async","form",0]', question: 'Private value?', answer: 'synthetic-private-value' }];
+  const wire = '<send_user_message_question_reply>' + JSON.stringify(rows) + '</send_user_message_question_reply>';
+  const users = groupChatTurns([
+    event(1, 'tool', { method: 'item/completed', params: { item } }),
+    event(2, 'metadata', { answeredQuestionId: 'async:1', queuedInputId: 'input' }),
+    event(3, 'user', { queuedInputId: 'input', text: wire }),
+    event(4, 'metadata', { answeredQuestionId: 'async:2', queuedInputId: 'old' }),
+    event(5, 'user', { queuedInputId: 'old', text: 'An older unsupported reply' }),
+  ]).flatMap(turn => turn.messages);
+  expect(users[0]).toMatchObject({ text: 'Private value?\n••••••', questionAnswers: [{ question: 'Private value?', answer: '••••••' }] });
+  expect(users[1].text).toBe('An older unsupported reply');
+});
+
+it('conceals submitted form values when a history page omits its original questions',()=>{
+ const wire='<send_user_message_question_reply>'+JSON.stringify([{questionItemId:'unknown',question:'Key?',answer:'SECRET_FIXTURE'}])+'</send_user_message_question_reply>';
+ const rows=[event(4,'metadata',{answeredQuestionId:'async:partial',queuedInputId:'sent'}),event(5,'user',{queuedInputId:'sent',text:wire})];
+ expect(groupChatTurns(rows).flatMap(turn=>turn.messages).at(-1)?.text).toBe('Key?\n••••••');
+});

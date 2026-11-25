@@ -2,11 +2,9 @@
 .automation-heading, .automation-plan, .automation-run, .project-automations > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .automation-heading > label { display: grid; gap: 8px; min-width: 210px; font-size: var(--type-meta); color: var(--muted); }
 .automation-workspace button, .project-automations a { display: inline-flex; align-items: center; gap: 8px; }
-.automation-note, .automation-help, .automation-plan p, .automation-next { font-size: var(--type-meta); color: var(--muted); margin: 0; line-height: 1.7; }
-.automation-help summary { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.automation-help p { margin-top: 8px; }
+.automation-note, .automation-plan p, .automation-next { font-size: var(--type-meta); color: var(--muted); margin: 0; line-height: 1.7; }
 .automation-editor { border: 1px solid var(--border); border-radius: var(--panel-radius); padding: 16px; background: var(--panel); }
-.automation-editor h2, .automation-history h2 { font-size: var(--type-body); margin: 0 0 12px; }
+.automation-editor h2 { font-size: var(--type-body); margin: 0 0 12px; }
 .automation-editor fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 12px; }
 .automation-editor label { display: grid; gap: 8px; font-size: var(--type-meta); color: var(--muted); min-width: 0; }
 .automation-editor input:not([type=checkbox]), .automation-editor textarea { width: 100%; box-sizing: border-box; min-width: 0; }

@@ -1,8 +1,12 @@
-import {mkdtemp} from 'node:fs/promises';
+// For unattended Codex runs, use an isolated authenticated CODEX_HOME with
+// default_permissions = ":read-only" so Mandala can grant its invocation mailbox write access.
+import {mkdir,mkdtemp,writeFile} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {execFileSync} from 'node:child_process';
-import {readConfig,writeConfig} from '../server/config';
+import {ensureMandalaConfig,readConfig,writeConfig} from '../server/config';
+import {ensureMandalaConversation} from '../server/mandala';
 import {openStore} from '../server/store';
 import {createSessionManager} from '../server/sessions';
 import {createHttpServer} from '../server/http';
@@ -11,9 +15,14 @@ const cli=process.env.OPEN_MANA_SMOKE_CLI==='omp'?'omp':'codex';
 const home=await mkdtemp(join(tmpdir(),'mana-agent-message-smoke-'));
 console.log(execFileSync(cli,['--version'],{encoding:'utf8'}).trim());
 const initial=await readConfig(home);
+const reports=join(home,'reports'), capture=randomUUID();
+await mkdir(reports);
+await writeFile(join(reports,'render-trace.json'),JSON.stringify({capture,events:['mount placeholder','unmount on series key change','mount final series']}));
 await writeConfig(home,{...initial.config,runtimes:[cli],system:{cli,memory:{request:{generate:false,read:false},session:{generate:false,read:false}}},
- projects:[{id:'sample',name:'Personal confirmation sample',cwd:'',agentIds:['a','b'],resources:[],mcp:[],skills:[]}],
- agents:['a','b'].map(id=>({id,name:id==='a'?'Coordinator':'Helper',instructions:'Use only the synthetic sample. Never read personal files or credentials. Use the supplied Mandala CLI for platform commands.',defaultCli:cli,models:{},mcp:[],skills:[],runtime:{[cli]:{approvalMode:'auto' as const,...(cli==='codex'?{fullAccess:true}:{})}}}))},initial.revision);
+ projects:[{id:'sample',name:'Personal confirmation sample',cwd:'',agentIds:['a','b'],resources:[],mcp:[],skills:[]},
+  {id:'reports',name:'Weather reports',cwd:reports,agentIds:['a','b'],resources:[],mcp:[],skills:[],workspaces:[{id:'reports-local',name:'Weather reports',cwd:reports,resources:[]}]}],
+ agents:['a','b'].map(id=>({id,name:id==='a'?'Weather station hardware':'Report rendering diagnostics',instructions:'Use only the synthetic sample. Never read personal files or credentials. Use the supplied Mandala CLI for platform commands.',defaultCli:cli,models:{},mcp:[],skills:[],runtime:{[cli]:{approvalMode:'auto' as const,...(cli==='codex'?{fullAccess:true}:{})}}}))},initial.revision);
+const {config}=await ensureMandalaConfig(home);
 const store=openStore(home),manager=createSessionManager(store,async()=>(await readConfig(home)).config,undefined,undefined,home);
 const server=createHttpServer({home,store,manager,requireIdentity:false});await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
 const priorPort=process.env.OPEN_MANA_PORT;process.env.OPEN_MANA_PORT=String((server.address() as {port:number}).port);
@@ -22,8 +31,14 @@ const idle=(id:string)=>store.getConversation(id)?.status==='idle';
 const final=(id:string)=>store.listEvents(id,0).flatMap(e=>{const data=e.data as {text?:string;method?:string;params?:{item?:{type:string;phase?:string;text?:string}}};const item=data.params?.item;return e.kind==='text'?[data.text??'']:data.method==='item/completed'&&item?.type==='agentMessage'&&item.phase==='final_answer'?[item.text??'']:[];}).join('\n');
 const taskCounts=()=>['work_tasks','task_runs','task_receipts','tasks'].map(table=>Number(store.database.prepare('SELECT count(*) n FROM '+table).get()!.n));
 const ids:string[]=[];
+const coordinationCalls:string[]=[];
 const invoke=manager.callBoundTool.bind(manager);
-manager.callBoundTool=async(token,name,args,key)=>{const result=await invoke(token,name,args,key);if(name==='message_ask'&&!ids.includes((result as {id:string}).id))ids.push((result as {id:string}).id);return result;};
+manager.callBoundTool=async(token,name,args,key)=>{
+ const result=await invoke(token,name,args,key);
+ if(name==='mandala_directory'||name==='message_ask')coordinationCalls.push(name);
+ if(name==='message_ask'&&!ids.includes((result as {id:string}).id))ids.push((result as {id:string}).id);
+ return result;
+};
 try{
  const a=await manager.create('sample','a',undefined,cli,{workspaceId:null});
  await manager.send(a.id,'Run the exact Mandala CLI in your instructions: messages ask --data {"targetAgentId":"b","text":"Do not use tools. Reply exactly MESSAGE_CONFIRMED."} --key native-confirm. Omit policy. After sending, end your turn. When the helper reply arrives in a later turn, use it and reply exactly SOURCE_RESUMED. Do not resend or poll.');
@@ -42,6 +57,19 @@ try{
  await manager.continue(stopped.id,'Do not use tools. Reply exactly NEW_TOPIC_OK.');await wait(()=>idle(stopped.id),'explicit new topic');
  if(manager.getAgentMessage(ids[1]).replyState!=='parked'||taskCounts().some(n=>n!==0))throw Error('Old message revived');
  console.log('PASS stop idle A, B continues, late reply saved, explicit continue cannot revive old reply');
+
+ const main=ensureMandalaConversation(store,config);
+ const beforeInvestigation=coordinationCalls.length;
+ await manager.send(main.id,'The chart in the Weather reports project flashes on first load. Check the captured trace and tell me the cause and capture ID.');
+ const inquiry=()=>ids.map(id=>manager.getAgentMessage(id)).find(message=>message.sourceConversationId===main.id);
+ await wait(()=>inquiry()?.replyState==='consumed'&&idle(main.id),'specialist reply returns to primary chat');
+ const message=inquiry()!, recipient=store.getConversation(message.targetConversationId);
+ const routing=coordinationCalls.slice(beforeInvestigation);
+ if(routing.indexOf('mandala_directory')<0||routing.indexOf('message_ask')<=routing.indexOf('mandala_directory'))throw Error('Primary chat must look up candidates before sending the inquiry');
+ if(recipient?.agentId!=='b'||recipient.projectId!=='reports')throw Error('Primary chat chose the wrong specialist or Project');
+ if(!message.reply?.includes(capture)||!final(main.id).includes(capture))throw Error('Specialist evidence did not reach the primary chat');
+ if(taskCounts().some(n=>n!==0))throw Error('One-off investigation created a Task');
+ console.log('PASS unprompted primary chat specialist selection, original-chat delivery and zero Tasks');
 
  const delegated=await manager.create('sample','a',undefined,cli,{workspaceId:null});
  await manager.send(delegated.id,'Use the exact supplied Mandala CLI: tasks delegate --data {"targetAgentId":"b","request":"Do not use tools. Reply exactly DELEGATE_RESULT_OK."} --key native-delegate. Omit policy. End your turn after sending. When its reply arrives, reply exactly SOURCE_DELEGATE_RESUMED. Do not poll or resend.');

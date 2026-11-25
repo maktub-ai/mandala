@@ -164,3 +164,35 @@ it('rechecks binding access after asynchronous configuration loading',async()=>{
 });
 
 it('Project-owned Wiki listing survives a missing usage binding and cannot appear in another Project',async()=>{const {readConfig,writeConfig}=await import('../server/config'),{createKnowledgeBase}=await import('../server/knowledge-base'),{workspacePrincipal}=await import('../server/workspace-identity');const current=await readConfig(home);current.config.projects=['owned-p','other-q'].map(id=>({id,name:id,cwd:home,agentIds:[],resources:[],skills:[],mcp:[]}));await writeConfig(home,current.config,current.revision);const wiki=createKnowledgeBase({home,store,loadConfig:async()=>(await readConfig(home)).config});try{const owned=await wiki.create(workspacePrincipal(store),{name:'Owned knowledge',purpose:'Project identity',projectId:'owned-p',automatic:false,reception:{enabled:false}});store.database.prepare('DELETE FROM asset_bindings WHERE asset_id=?').run(owned.id);const rows=await(await fetch(base+'?ownerType=project&ownerId=owned-p')).json();expect(rows.map((a:any)=>a.id)).toContain(owned.id);const other=await(await fetch(base+'?ownerType=project&ownerId=other-q')).json();expect(other.map((a:any)=>a.id)).not.toContain(owned.id);}finally{await wiki.close();}});
+
+it('keeps Wiki feature times scoped and stable on retry without changing activity or version bindings', async () => {
+ const {readConfig,writeConfig}=await import('../server/config');
+ const {createKnowledgeBase}=await import('../server/knowledge-base');
+ const {workspacePrincipal}=await import('../server/workspace-identity');
+ const current=await readConfig(home);
+ current.config.projects=['todo-app','notes-app'].map(id=>({id,name:id,cwd:home,agentIds:[],resources:[],skills:[],mcp:[]}));
+ await writeConfig(home,current.config,current.revision);
+ const wiki=createKnowledgeBase({home,store,loadConfig:async()=>(await readConfig(home)).config});
+ try {
+  const {id}=await wiki.create(workspacePrincipal(store),{name:'Todo handbook',purpose:'Release notes',projectId:'todo-app',automatic:false,reception:{enabled:false}});
+  const feature=(featured:boolean,projectId?:string)=>json(base+'/'+id+'/featured','PUT',{featured,projectId});
+  const list=async(projectId?:string)=>(await (await fetch(base+(projectId?'?ownerType=project&ownerId='+projectId:''))).json()).find((row:{id:string})=>row.id===id);
+  const original=await list();
+  const first=await feature(true,'todo-app');expect(first.status).toBe(200);
+  const {featuredAt}=await first.json();expect(Date.parse(featuredAt)).toBeGreaterThan(0);
+  expect(await (await feature(true,'todo-app')).json()).toEqual({featuredAt});
+  expect((await list('todo-app')).featuredAt).toBe(featuredAt);
+  expect((await list()).featuredAt).toBeUndefined();
+  expect((await feature(true,'notes-app')).status).toBe(422);
+  expect((await feature(true)).status).toBe(200);
+  expect(await (await feature(false,'todo-app')).json()).toEqual({featuredAt:null});
+  expect((await list('todo-app')).featuredAt).toBeUndefined();
+  expect((await list()).featuredAt).toBeTruthy();
+  expect((await list()).recentAt).toBe(original.recentAt);
+  expect((await list()).revision).toBe(original.revision);
+  const bindings=await (await fetch(base+'/'+id+'/bindings')).json();
+  expect(bindings).toEqual([{ownerType:'project',ownerId:'todo-app',assetId:id,versionPolicy:'latest'}]);
+  const file=await publish('notes.md');
+  expect((await json(base+'/'+file.asset.id+'/featured','PUT',{featured:true})).status).toBe(422);
+ } finally { await wiki.close(); }
+});

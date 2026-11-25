@@ -4,10 +4,12 @@ import type { ComposerReferenceItem } from './composer-references';
 import type { DisplayEvent, Task } from "./types";
 import { summarizeOperations } from "./execution";
 
+import { type QuestionAnswer, questionReplyPresenter } from './questions';
 export const CHAT_HISTORY_PAGE_TURNS = 5;
 export type ChatHistoryPage = { events: DisplayEvent[]; before: number | null };
 
 export type ChatMessage = {
+  questionAnswers?: QuestionAnswer[];
   source?:import('./tasks').QueuedInputSource;
   kind: "user" | "text" | "error" | "agent_message";
   agentMessage?: Partial<AgentMessage> & {id:string;direction:'sent'|'request'|'reply';autoResumeAllowed?:boolean};
@@ -42,7 +44,7 @@ export function mergeChatEvents(previous: DisplayEvent[], incoming: DisplayEvent
   return changed ? next : previous;
 }
 
-export function groupChatTurns(events: DisplayEvent[]): ChatTurn[] {
+export function groupChatTurns(events: DisplayEvent[], presentReply=questionReplyPresenter(events)): ChatTurn[] {
   const turns: ChatTurn[] = [];
   const latestMessages=new Map<string,ChatMessage['agentMessage']>();
   const messageHeads=new Map<string,number>();
@@ -138,12 +140,13 @@ export function groupChatTurns(events: DisplayEvent[]): ChatTurn[] {
       }
       if(event.kind==='user'&&agentMessage)continue;
       if (event.kind !== "user" && event.kind !== "text" && event.kind !== "error") continue;
-      const data = event.data as { source?:ChatMessage["source"]; text?: string; message?: string; itemId?: string; task?: ChatMessage["task"]; attachments?: NativeAttachment[]; referenceItems?: ComposerReferenceItem[] };
+      const data = event.data as { questionAnswers?:QuestionAnswer[]; queuedInputId?: string; source?:ChatMessage["source"]; text?: string; message?: string; itemId?: string; task?: ChatMessage["task"]; attachments?: NativeAttachment[]; referenceItems?: ComposerReferenceItem[] };
       const last = turn.blocks.at(-1);
       if (mergeText && event.kind === "text" && last?.kind === "message" && last.message.kind === "text" && last.message.item === data.itemId)
         last.message.text += data.text ?? "";
       else {
         const message: ChatMessage = { kind: event.kind, text: data.text ?? data.message ?? "", key: event.id, item: data.itemId,
+          ...(event.kind === "user" && data.text ? data.questionAnswers?{questionAnswers:data.questionAnswers}:presentReply(data.queuedInputId, data.text) : undefined),
           ...(event.kind === "user" && data.attachments ? { attachments: data.attachments } : {}),
           ...(event.kind === 'user' && data.referenceItems ? { referenceItems: data.referenceItems } : {}),
           ...(event.kind === "user" && data.source ? {source:data.source} : {}),

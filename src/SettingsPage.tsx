@@ -27,6 +27,7 @@ import Disclosure from './ui/Disclosure';
 import React, { useEffect, useRef, useState } from "react";
 import type { Agent, Cli, Config, ModelChoice, Project, RuntimeConfig } from "../shared/types";
 import AppSidebar, { SidebarToggle, type SidebarNavigation } from "./AppSidebar";
+import ProjectBlueprintSettings from './ProjectBlueprintSettings';
 import ProjectWorkspaces from "./ProjectWorkspaces";
 import CapabilityCatalog from "./CapabilityCatalog";
 import SkillLibrary from "./SkillLibrary";
@@ -82,7 +83,7 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
   moduleOrder: string[];
   onModuleReorder: (id: string, offset: number) => void;
   onModulePin: (id: string, pinned: boolean) => void;
-  saveError?: string; onRetrySave: () => void; onReloadSettings: () => void;
+  saveError?: string; onRetrySave: () => void; onReloadSettings: () => void|Promise<void>;
   onNavigate: (section: Section, objectId?: string) => void;
   onOpenPath: (path: string) => void;
 }) {
@@ -90,7 +91,9 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
   const {text: localize,  t, language, setLanguage, languages, errorText } = useLanguage();
   const [desktopCliBusy,setDesktopCliBusy]=useState(false);
   useEffect(()=>{if(section!=='general')return;onNavigationLockChange(desktopCliBusy);return()=>onNavigationLockChange(false);},[desktopCliBusy,onNavigationLockChange,section]);
-  const locked = loading || runtimeSaving || desktopCliBusy;
+  const [blueprintBusy,setBlueprintBusy]=useState(false);
+  useEffect(()=>{if(!blueprintBusy)return;onNavigationLockChange(true);return()=>onNavigationLockChange(false);},[blueprintBusy,onNavigationLockChange]);
+  const locked = loading || runtimeSaving || desktopCliBusy || blueprintBusy;
   const [projectId, setProjectId] = useState(initialProjectId);
   const [agentId, setAgentId] = useState(initialAgentId);
   const [agentTab, setAgentTab] = useState<string>(["profile", "settings", "capabilities", "execution", "knowledge"].includes(initialAgentTab) ? initialAgentTab : "profile");
@@ -100,7 +103,7 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
     const query = new URLSearchParams(location.search); query.set("tab", value);
     history.replaceState(null, "", location.pathname + "?" + query); setTab(value);
   };
-  const [creatingProject, setCreatingProject] = useState(false);
+  const creatingProject = section === "projects" && !initialProjectId && new URLSearchParams(location.search).get("new") === "1";
   const requestedProjectTab = new URLSearchParams(location.search).get('tab') ?? 'background';
   useEffect(() => { if(section === 'projects' && !creatingProject) setProjectTab(['background','resources','capabilities'].includes(requestedProjectTab)?requestedProjectTab:'background'); }, [section,requestedProjectTab,creatingProject]);
   const projectName = projectPreparationName, setProjectName = onProjectPreparationNameChange;
@@ -111,7 +114,7 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
   useEffect(() => { if (section === "runtime") setAgentTab("execution"); }, [section]);
   const [objectSearch, setObjectSearch] = useState("");
   useEffect(() => { setAgentId(initialAgentId); }, [initialAgentId]);
-  useEffect(() => { setProjectId(initialProjectId); setProjectTab(["background", "resources", "capabilities"].includes(new URLSearchParams(location.search).get("tab") ?? "") ? new URLSearchParams(location.search).get("tab")! : "background"); if (initialProjectId) setCreatingProject(false); }, [initialProjectId, projectSelectionVersion]);
+  useEffect(() => { setProjectId(initialProjectId); setProjectTab(["background", "resources", "capabilities"].includes(new URLSearchParams(location.search).get("tab") ?? "") ? new URLSearchParams(location.search).get("tab")! : "background"); }, [initialProjectId, projectSelectionVersion]);
 
   const baseline = useRef(draft);
   const saved = savedConfig ?? baseline.current;
@@ -126,14 +129,14 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
     ...d, agents: d.agents.map((a) => a.id === id ? { ...a, ...patch } : a),
   }));
   const addProject = () => {
-    onNavigate("projects"); setCreatingProject(true); setProjectNameError(""); setObjectSearch("");
+    onOpenPath("/projects?new=1"); setProjectNameError(""); setObjectSearch("");
   };
   const createProject = () => {
     if (!projectName.trim()) { setProjectNameError("项目名称不能为空"); return; }
     const id = freshId();
     setDraft((d) => ({ ...d, projects: [...d.projects,
       { id, name: projectName.trim(), cwd: "", agentIds: [], resources: [], mcp: [], skills: [] }] }));
-    setProjectId(id); setProjectTab("background"); setCreatingProject(false); setProjectName(""); setObjectSearch(""); onNavigate("projects", id); history.replaceState(null,"","/projects/manage?project="+encodeURIComponent(id)+"&tab=background");
+    setProjectId(id); setProjectTab("background"); setProjectName(""); setObjectSearch(""); onNavigate("projects", id); history.replaceState(null,"","/projects/manage?project="+encodeURIComponent(id)+"&tab=background");
   };
   const removeProject = () => {
     if (!project) return;
@@ -212,7 +215,7 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
 
       {!loading && ((section === 'agents' && initialAgentId && !agent && !creatingAgent) || (section === 'projects' && initialProjectId && !project)) && <Notice>{localize('此项目或智能体不可用，可能已被移除或你无权访问。', 'This item is unavailable. It may have been removed or you may not have access.')}</Notice>}
       {showDirectory && <WorkspaceDirectory status={saveStatus} onMobileNav={()=>onMobileNav(true)} kind={section === 'projects' ? 'projects' : 'agents'} config={draft} disabled={locked} loading={loading} query={objectSearch} onQuery={setObjectSearch} onNavigate={onOpenPath} onCreate={section === 'projects' ? addProject : addAgent}/>}
-      {objectSection && !showDirectory && !selectedObject && <DirectoryLink className="directory-back" href={directoryUrl} disabled={locked} onNavigate={path => { setCreatingProject(false); onOpenPath(path); }}><Icon name="arrowLeft" size={16}/>{localize((objectKind === 'project' ? '返回项目' : '返回智能体'), (objectKind === 'project' ? 'Back to Projects' : 'Back to Agents'))}</DirectoryLink>}
+      {objectSection && !showDirectory && !selectedObject && <DirectoryLink className="directory-back" href={directoryUrl} disabled={locked} onNavigate={onOpenPath}><Icon name="arrowLeft" size={16}/>{localize((objectKind === 'project' ? '返回项目' : '返回智能体'), (objectKind === 'project' ? 'Back to Projects' : 'Back to Agents'))}</DirectoryLink>}
       {objectSection && selectedObject && !creatingProject && !creatingAgent && <ObjectHeader key={selectedObject.id} kind={objectKind} object={selectedObject} config={draft} disabled={locked} pending={objectPending} onNavigate={onOpenPath} onChange={patch=>objectKind==='project'?patchProject(selectedObject.id,patch):patchAgent(selectedObject.id,patch)} onDelete={objectKind==='project'?removeProject:removeAgent}>
         <Select ariaLabel={objectKind==='project'?(localize('选择对话智能体', 'Start with Agent')):(localize('对话所属项目', 'Chat project'))} disabled={locked||objectPending} value={objectKind==='project'?chatAgent:chatProject} onChange={value=>setChatChoice({objectId:selectedObject.id,value})} options={objectKind==='project'?[{value:'',label:localize('直接对话', 'Direct chat')},...draft.agents.filter(a=>!a.temporary&&(isSystemAgent(draft,a)||!a.systemRole&&project?.agentIds.includes(a.id))).map(a=>({value:a.id,label:a.name,group:isSystemAgent(draft,a)?(localize('系统智能体', 'System Agent')):(localize('智能体', 'Agents')),icon:<IdentityAvatar identity={a} kind="agent" size={20}/>}))]:[{value:'',label:localize('不关联项目', 'No project')},...relatedProjects.map(p=>({value:p.id,label:p.name,icon:<IdentityAvatar identity={p} kind="project" size={20}/>}))]}/>
         <Button className="primary" disabled={locked||objectPending} onClick={()=>onOpenPath('/?'+new URLSearchParams({project:objectKind==='project'?selectedObject.id:chatProject,agent:objectKind==='agent'?selectedObject.id:chatAgent}))}>{t('开始对话')}</Button>
@@ -225,6 +228,7 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
           <h2>{t("语言")}</h2><div className="settings-form-row"><span>{localize("界面语言", "Interface language")}</span><Select ariaLabel="Language / 语言" value={language} onChange={value => { setLanguage(value); if (value === 'en' || value === 'zh-CN') patchSystem({ memory: { ...draft.system?.memory, language: value } }); }} options={languages}/></div>
         </section>}
         {section === "execution-machines" && !loading && <ExecutionMachinesSettings config={draft} disabled={locked} onChange={executionMachines=>setDraft(value=>({...value,executionMachines}))} onOpenPath={onOpenPath}/>}
+        {section === "general" && <DetailSection title={localize('项目蓝图','Project blueprint')}><label className="system-feature-toggle"><span>{localize('新项目默认开启蓝图','Enable blueprints for new projects')}</span><Input type="checkbox" role="switch" checked={!!draft.blueprintDefaultEnabled} onChange={event=>{const enabled=event.target.checked;setDraft(current=>({...current,blueprintDefaultEnabled:enabled}));}}/></label></DetailSection>}
         {section === "general" && <ThemeSettings/>}
         {section === "general" && <VoiceSettings/>}
         {section === "general" && <DesktopCliSettings onBusyChange={setDesktopCliBusy}/>}
@@ -310,11 +314,12 @@ export default function SettingsPage({ navigation, mobileNav, onMobileNav, secti
             <p className="field-hint">{t("先为项目命名，再配置背景、工作目录和参与 Agent。")}</p>
             <form onSubmit={event => { event.preventDefault(); createProject(); }}>
               <Field label={t("项目名称")} error={projectNameError ? errorText(projectNameError) : undefined}><Input ref={projectNameInput} aria-label={t("项目名称")} value={projectName} onChange={event => { setProjectName(event.target.value); setProjectNameError(""); }} /></Field>
-              <div className="project-form-actions"><Button type="button" onClick={() => { setCreatingProject(false); setProjectName(""); }}>{t("取消新增项目")}</Button><Button type="submit" className="primary">{t("创建项目")}</Button></div>
+              <div className="project-form-actions"><Button type="button" onClick={() => { setProjectName(""); onOpenPath("/projects"); }}>{t("取消新增项目")}</Button><Button type="submit" className="primary">{t("创建项目")}</Button></div>
             </form>
           </section> : project ? <>
             <ProjectNavigation project={project} active="settings" disabled={locked||objectPending} onNavigate={onOpenPath}/>
             <ObjectGroup title={localize('名称与外观', 'Name and appearance')}><div className="object-settings-editor object-identity-fields"><ObjectIdentityFields kind="project" object={project} nameLabel={t('项目名称')} onChange={patch=>patchProject(project.id,patch)}/></div></ObjectGroup>
+            <ProjectBlueprintSettings key={project.id} projectId={project.id} disabled={!!locked||objectPending} onBusyChange={setBlueprintBusy} onReload={onReloadSettings}/>
             <ObjectGroup id="resources" title={t('工作资源')}><div className="object-settings-editor"><ProjectWorkspaces key={project.id} project={project} machines={draft.executionMachines} onChange={patch=>patchProject(project.id,patch)}/><NativeSkillsPanel key={project.id} config={draft} savedConfig={saved} projectId={project.id} directoryOnly/></div></ObjectGroup>
             <ObjectGroup id="capabilities" title={t('项目专用能力')}><div className="object-settings-editor"><p className="field-hint">{t('项目资源仅用于此项目的对话；同名能力优先于 Agent 与原生配置。')}</p><CapabilityLinks config={draft} owner={project} onChange={patch=>patchProject(project.id,patch)} onManage={onNavigate}/></div></ObjectGroup>
             {project.legacyRuntime && <Disclosure className="settings-card" title={<> {t("待迁移的旧运行参数")} </>}>

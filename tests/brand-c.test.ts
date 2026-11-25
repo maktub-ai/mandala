@@ -4,15 +4,13 @@ import { expect, it } from "vitest";
 const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const paths = (svg: string) => [...svg.matchAll(/<path\b[^>]*\bd="([^"]+)"/g)].map(match => match[1]);
 const full = read("src/assets/logo-petals.svg");
-const small = read("src/assets/logo-small.svg");
 
 it("keeps shipped C artwork on the same approved geometry", () => {
   expect(paths(full)).toHaveLength(12);
   for (const name of ["logo-on-light", "logo-on-dark", "logo-black", "logo-white", "app-icon"]) {
     expect(paths(read(`src/assets/${name}.svg`))).toEqual(paths(full));
   }
-  expect(paths(small)).toEqual(paths(full).slice(0, 6));
-  expect(paths(read("public/favicon.svg"))).toEqual(paths(small));
+  expect(paths(read("public/favicon.svg"))).toEqual(paths(full));
 });
 
 it("preserves C's mirrored petals and inward lower lobes", () => {
@@ -36,7 +34,7 @@ it("preserves C's mirrored petals and inward lower lobes", () => {
 });
 
 it("keeps logo cutouts transparent and removes the colored seed overlay", () => {
-  for (const name of ["logo-petals", "logo-small", "logo-on-light", "logo-on-dark", "logo-black", "logo-white"]) {
+  for (const name of ["logo-petals", "logo-on-light", "logo-on-dark", "logo-black", "logo-white"]) {
     const svg = read(`src/assets/${name}.svg`);
     expect(svg).not.toMatch(/<(?:image|rect|filter|text)\b/);
     expect(svg).not.toMatch(/#(?:a83c36|ff8a72|ff6b5e)/i);

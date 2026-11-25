@@ -7,10 +7,13 @@ for(const mode of ['light','dark'])for(const width of [1440,1024,768,390])test(`
  if(width<=1100)await page.getByRole('button',{name:'展开右侧栏',exact:true}).click();
  const panel=page.locator('.mandala-panels');await expect(panel.getByText('接通跨项目登录流程，并验证很长的中英文标题 Long operational goal',{exact:true}).last()).toBeVisible();
  await page.evaluate(()=>document.documentElement.style.setProperty('--accent','#7c3aed'));
- const textColor=await page.locator('body').evaluate(element=>getComputedStyle(element).color),mutedColor=await panel.locator('.task-work-meta').first().evaluate(element=>getComputedStyle(element).color);
- await expect(panel.locator('.task-work-heading > a').first()).toHaveCSS('color',textColor);await expect(panel.locator('a.task-work-project').first()).toHaveCSS('color',mutedColor);await expect(panel.locator('.mandala-all-tasks')).toHaveCSS('color',textColor);
- await panel.locator('.task-work-related > summary').last().click();await expect(panel.getByRole('link',{name:'打开执行对话：登录接口实现 · 共享测试 Agent',exact:true}).last()).toContainText('执行中');
- await page.screenshot({path:info.outputPath(`tasks-${mode}-${width}.png`),animations:'disabled'});
+ const textColor=await page.locator('body').evaluate(element=>getComputedStyle(element).color),mutedColor=await panel.locator('.mandala-collab-heading').first().evaluate(element=>getComputedStyle(element).color);
+ await expect(panel.locator('.mandala-collab-task-title').first()).toHaveCSS('color',textColor);await expect(panel.locator('.mandala-collab-task-count').first()).toHaveCSS('color',mutedColor);await expect(panel.locator('.mandala-all-tasks')).toHaveCSS('color',textColor);
+ // A Task is a thin parent line; its Chats sit underneath and open in place.
+ const toggle=panel.locator('.mandala-collab-task-toggle').last();if(await toggle.getAttribute('aria-expanded')==='false')await toggle.click();
+ const chatRow=panel.locator('.mandala-collab-task-chats .mandala-chat-row',{hasText:'登录接口实现'}).last();await expect(chatRow).toContainText('处理中');await expect(chatRow).toContainText('共享测试 Agent');
+ await chatRow.getByRole('button',{name:'登录接口实现',exact:true}).click();await expect(chatRow.getByRole('link',{name:'打开对话继续追问',exact:true})).toBeVisible();
+ await page.screenshot({path:info.outputPath(`collab-${mode}-${width}.png`),animations:'disabled'});
  await panel.getByRole('tab',{name:'智能体',exact:true}).click();
  await expect(panel.getByText('临时测试 Agent',{exact:true})).toHaveCount(0);
  await expect(panel.locator('.mandala-team-agent-name',{hasText:'共享测试 Agent'}).last()).toBeVisible();
@@ -23,9 +26,11 @@ for(const mode of ['light','dark'])for(const width of [1440,1024,768,390])test(`
  await panel.getByRole('button',{name:'引用 共享测试 Agent',exact:true}).last().click();await expect(page.locator('.composer-references .composer-reference-tag')).toHaveCount(1);
  await composer.fill('保留中文输入');await composer.dispatchEvent('compositionstart');await composer.dispatchEvent('keydown',{key:'Enter',isComposing:true});await expect(composer).toHaveValue('保留中文输入');await composer.dispatchEvent('compositionend');
  if(width<=1100)await page.getByRole('button',{name:'展开右侧栏',exact:true}).click();
- await panel.getByRole('tab',{name:'智能体',exact:true}).focus();await page.keyboard.press('ArrowRight');await expect(panel.getByRole('tab',{name:'定时',exact:true})).toHaveAttribute('aria-selected','true');
- await expect(panel.getByText('每日任务简报',{exact:true})).toBeVisible();await expect(panel.getByText('每天 18:00 · Asia/Singapore')).toBeVisible();await expect(panel.getByRole('link',{name:'查看上次执行',exact:true})).toBeVisible();
- await page.screenshot({path:info.outputPath(`scheduled-${mode}-${width}.png`),animations:'disabled'});
+ await panel.getByRole('tab',{name:'协作',exact:true}).focus();await page.keyboard.press('ArrowRight');await expect(panel.getByRole('tab',{name:'智能体',exact:true})).toHaveAttribute('aria-selected','true');
+ // Schedules live with the Agents that run them; there is no separate tab.
+ await expect(panel.getByRole('tab',{name:'定时',exact:true})).toHaveCount(0);
+ const schedules=panel.locator('.mandala-team-schedules');await expect(schedules.getByText('每日任务简报',{exact:true})).toBeVisible();await expect(schedules.getByRole('link',{name:/打开全部定时/})).toBeVisible();
+ await page.screenshot({path:info.outputPath(`agents-schedules-${mode}-${width}.png`),animations:'disabled'});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.keyboard.press('Escape');await expect(panel).not.toBeVisible();
  expect((await(await request.get('/api/mandala/goals')).json()).some((goal:{taskId:string})=>goal.taskId===fixture.goalId)).toBe(true);
@@ -47,7 +52,7 @@ test('selected public slice returns to Mandala without replacing its saved draft
 test('dragging Project, Agent and Task adds distinct stable references without duplicate or work',async({page,request})=>{
  await page.setViewportSize({width:1440,height:900});await page.goto('/mandala');
  const panel=page.locator('.mandala-panels'),composer=page.getByRole('textbox',{name:'消息',exact:true});
- await expect(panel.locator('.task-work-card')).toHaveCount(1);
+ await expect(panel.locator('.mandala-collab-task')).toHaveCount(1);
  for(const button of await page.locator('.composer-references button').all())await button.click();
  await panel.getByRole('tab',{name:'智能体',exact:true}).click();
  await expect(panel.getByRole('button',{name:'引用 共享测试 Agent',exact:true}).first()).toBeEnabled();
@@ -56,7 +61,7 @@ test('dragging Project, Agent and Task adds distinct stable references without d
  await panel.locator('.mandala-team-agent').nth(1).dragTo(composer);
  await expect(page.locator('.composer-reference-tag')).toHaveCount(2);
  await expect(page.locator('.composer-reference-tag').filter({hasText:'Agent'})).toHaveCount(1);
- await panel.getByRole('tab',{name:'任务',exact:true}).click();await panel.locator('.task-work-card').dragTo(composer);
+ await panel.getByRole('tab',{name:'协作',exact:true}).click();await panel.locator('.mandala-collab-task-head').dragTo(composer);
  await expect(page.locator('.composer-reference-tag')).toHaveCount(3);
  expect((await(await request.get('/api/mandala/goals')).json())).toHaveLength(1);
 });
@@ -65,10 +70,10 @@ test('panel loading, empty, error and revoked permission clear data and offer re
  let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
  await page.route('**/api/mandala/goals',async route=>{await gate;await route.fulfill({json:[]});});
  await page.goto('/mandala');const panel=page.locator('.mandala-panels');await expect(panel.getByText('正在读取…',{exact:true})).toBeVisible();release();
- await expect(panel.getByText('本对话还没有任务。在聊天中交代想完成的事情。')).toBeVisible();
+ await expect(panel.getByText('本对话还没有协作。在聊天中交代想完成的事情。')).toBeVisible();
  await page.unroute('**/api/mandala/goals');await page.route('**/api/mandala/goals',route=>route.fulfill({status:403,json:{error:'Synthetic permission revoked'}}));
- await expect(panel.getByRole('alert')).toContainText('Synthetic permission revoked');await expect(panel.locator('.task-work-card')).toHaveCount(0);
- await page.unroute('**/api/mandala/goals');await panel.getByRole('button',{name:'重试',exact:true}).click();await expect(panel.locator('.task-work-card')).toHaveCount(1);
+ await expect(panel.getByRole('alert')).toContainText('Synthetic permission revoked');await expect(panel.locator('.mandala-collab-task')).toHaveCount(0);
+ await page.unroute('**/api/mandala/goals');await panel.getByRole('button',{name:'重试',exact:true}).click();await expect(panel.locator('.mandala-collab-task')).toHaveCount(1);
 });
 
 test('Teams keeps missing and null lifecycle unknown while known idle stays non-running',async({page})=>{

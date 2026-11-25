@@ -4,6 +4,7 @@ const chat = '/api/conversations/:conversationId';
 const asset = '/api/v2/assets/:assetId';
 const task = '/api/v2/tasks/:taskId';
 export const COMMANDS = [
+  ...[['summary',[],true],['record',['result','decisions','lanes'],false],['report',['taskId'],true]].map(([name,boundFields,readOnly])=>command('blueprint '+name,'POST','/api/cli/invoke',{invocationOnly:true,boundTool:'blueprint_'+name,boundFields,readOnly})),
   command('progress report', 'POST', '/api/cli/invoke', { invocationOnly:true, boundTool:'progress_report', boundFields:['text','steps'] }),
   command('service status', 'GET', '/api/status'),
   command('workbench overview', 'GET', '/api/workbench'),
@@ -19,6 +20,7 @@ export const COMMANDS = [
   command('capabilities list', 'GET', '/api/capabilities'), command('capabilities effective', 'GET', '/api/effective'),
   command('skills find', 'POST', '/api/cli/invoke', { readOnly: true, invocationOnly: true, boundTool: 'skill_find', boundFields: ['query'] }),
   command('skills read', 'POST', '/api/cli/invoke', { readOnly: true, invocationOnly: true, idParams: ['skillId'], boundTool: 'skill_read', boundFields: ['skillId'] }),
+  command('skills export', 'GET', '/api/skills/:skillId/versions/:versionId/export', { transport:'binary' }),
   command('skills register', 'POST', '/api/cli/invoke', { invocationOnly: true, boundTool: 'skill_register', boundFields: ['name', 'content'] }),
   command('skills update', 'POST', '/api/cli/invoke', { invocationOnly:true, boundTool:'skill_update', boundFields:['skillId','content','expectedVersionId'] }),
   command('skills versions', 'POST', '/api/cli/invoke', { readOnly:true, invocationOnly:true, idParams:['skillId'], boundTool:'skill_versions', boundFields:['skillId'] }),
@@ -89,7 +91,7 @@ export const COMMANDS = [
   command('memory correct', 'POST', '/api/v2/memory/records/:recordId/correct'), command('memory retract', 'POST', '/api/v2/memory/records/:recordId/retract'),
   ...['search', 'detail', 'installed'].map(action => command(`market ${action}`, 'GET', `/api/market/${action}`)),
   command('market install', 'POST', '/api/market/install'),
-  ...['unlink', 'uninstall'].map(action => command(`market ${action}`, 'POST', `/api/market/installed/:installationId/${action}`)),
+  ...['upgrade', 'unlink', 'uninstall'].map(action => command(`market ${action}`, 'POST', `/api/market/installed/:installationId/${action}`)),
   command('automations list', 'GET', '/api/automations', {boundTool:'automation_list',boundFields:[]}), command('automations create', 'POST', '/api/automations', {boundTool:'automation_create',dataExample:{name:'Workday review',instructions:'Review the latest state',projectId:'project-id',agentId:'agent-id',cli:'codex',enabled:false,executionMode:'independent',schedule:{kind:'weekly',weekdays:[1,2,3,4,5],time:'09:00',timeZone:'Asia/Singapore'}},note:'Saves paused. taskId defaults continuous; standalone defaults independent. goalId selects the task/report source. New policies default latest/coalesce; each defaults queue. Each occurrence opens a new execution conversation on the target Task.',boundFields:['executionMode','goalId','missedPolicy','overlapPolicy','taskId','conversationId','name','instructions','projectId','agentId','cli','workspaceId','enabled','schedule']}),
   command('automations update', 'PATCH', '/api/automations/:automationId', {boundTool:'automation_update',boundFields:['executionMode','missedPolicy','overlapPolicy','automationId','expectedRevision','conversationId','name','instructions','projectId','agentId','cli','workspaceId','enabled','schedule']}), command('automations remove', 'DELETE', '/api/automations/:automationId', {boundTool:'automation_remove',boundFields:['automationId','expectedRevision']}),
   ...['run', 'stop'].map(action => command(`automations ${action}`, 'POST', `/api/automations/:automationId/${action}`, {boundTool:`automation_${action}`,boundFields:['automationId']})),

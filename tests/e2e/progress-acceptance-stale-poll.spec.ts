@@ -9,7 +9,7 @@ test.describe('Progress 用户目标验收',()=>{test('P39 late Progress respons
  await page.route('**/api/conversation-progress?*',async route=>{if(!hold){await route.continue();return;}hold=false;const response=await route.fetch();captured();await held;await route.fulfill({response});});
  // A starts before completion. B is requested after the user changes the object/window.
  await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));await ready;
- await card.getByRole('button',{name:'标记完成',exact:true}).click();await expect(page.getByRole('region',{name:'已完成',exact:true}).locator('[data-conversation-id="'+d.long+'"]')).toBeVisible();
+ await card.getByRole('button',{name:'结束对话',exact:true}).click();await expect(page.getByRole('region',{name:'已完成',exact:true}).locator('[data-conversation-id="'+d.long+'"]')).toBeVisible();
  await page.getByRole('button',{name:'筛选',exact:true}).click();await chooseOption(page,'最近使用窗口','240');await expect(page.getByRole('combobox',{name:'最近使用窗口',exact:true})).toHaveAttribute('data-value','240');release();
  await expect(page.getByRole('region',{name:'已完成',exact:true}).locator('[data-conversation-id="'+d.long+'"]')).toBeVisible();await page.reload();await expect(page.getByRole('region',{name:'已完成',exact:true}).locator('[data-conversation-id="'+d.long+'"]')).toBeVisible();
 

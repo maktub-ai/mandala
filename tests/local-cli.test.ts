@@ -71,6 +71,23 @@ it('streams Cursor text once, maps tools, fails exit-zero errors and resumes exa
  await client.startTurn(id,'second','auto');await expect.poll(()=>launches.length).toBe(3);const second=launches.at(-1)!;expect(second.args.slice(second.args.indexOf('--resume'),second.args.indexOf('--resume')+2)).toEqual(['--resume',id]);
  line(second.child,{type:'result',is_error:true,result:'native rejected',session_id:id});end(second.child);await expect.poll(()=>events.at(-1)?.params?.turn?.status).toBe('failed');expect(events.at(-1).params.turn).toMatchObject({status:'failed',error:{message:'native rejected'}});await client.close();
 });
+it('keeps complete Cursor messages distinct and ignores an anonymous replay between tool calls',async()=>{
+ const {client,id,events}=await setup();
+ await client.startTurn(id,'test','auto');await tick();
+ const child=launches.at(-1)!.child;
+ const answer={type:'assistant',message:{role:'assistant',content:[{type:'text',text:'yes yes'}]}};
+ line(child,{...answer,timestamp_ms:1});
+ line(child,{type:'thinking',subtype:'delta',text:'checking'});
+ line(child,answer);
+ line(child,{type:'tool_call',subtype:'completed',call_id:'read',tool_call:{readToolCall:{}}});
+ line(child,answer);
+ line(child,{type:'assistant',message:{content:[{type:'text',text:'done'}]}});
+ line(child,{type:'result',is_error:false,result:'yes yesyes yesyes yesdone',session_id:id});
+ end(child);await expect.poll(()=>events.at(-1)?.method).toBe('turn/completed');
+ expect(events.filter(e=>e.method==='item/agentMessage/delta').map(e=>e.params.delta)).toEqual(['yes yes','yes yes','done']);
+ expect(events.filter(e=>e.method==='item/completed'&&e.params.item.type==='agentMessage').map(e=>e.params.item.text)).toEqual(['yes yes','yes yes','done']);
+ await client.close();
+});
 it('adopts the Antigravity native ID and resumes it on following prompts',async()=>{
  const {client,id,events,home}=await setup('antigravity');await client.startTurn(id,'first','auto');await expect.poll(()=>launches.length).toBe(1);const first=launches.at(-1)!;
  expect(first.command).toBe('agy');expect(first.args).toContain('--dangerously-skip-permissions');line(first.child,{event:'init',conversation_id:'agy-real-1'});
@@ -80,6 +97,7 @@ it('adopts the Antigravity native ID and resumes it on following prompts',async(
  line(first.child,{event:'result',result:{conversation_id:'agy-real-1',status:'SUCCESS',response:'Answer',usage:{input_tokens:8,output_tokens:2}}});end(first.child);await expect.poll(()=>events.at(-1)?.method).toBe('turn/completed');
  expect(events.filter(e=>e.method==='item/agentMessage/delta').map(e=>e.params.delta).join('')).toBe('Answer');
  expect(events.find(e=>e.method==='item/completed'&&e.params.item.tool==='run_command').params.item).toMatchObject({status:'completed',arguments:{command:'pwd'},result:'/tmp'});
+ expect(events.some(e=>e.params.item?.type==='nativeSubagent')).toBe(false);
  const mapping=join(home,'native','antigravity-sessions',id.slice('mandala-agy:'.length)+'.json');expect(JSON.parse(await readFile(mapping,'utf8'))).toEqual({nativeId:'agy-real-1'});expect((await stat(mapping)).mode&0o777).toBe(0o600);
  expect(id).toMatch(/^mandala-agy:/);expect(events.at(-1).params).toMatchObject({threadId:id,turn:{status:'completed'}});
  await client.startTurn(id,'second','auto');await expect.poll(()=>launches.length).toBe(2);expect(launches.at(-1)!.args).toContain('--conversation');expect(launches.at(-1)!.args).toContain('agy-real-1');
@@ -158,4 +176,27 @@ it('settles only once when the host closes again from a terminal callback',async
  client=await startLocalCli('cursor',{cwd:'/tmp',onApproval:a=>approvals.push(a),onExit(){},onEvent:e=>{events.push(e);if(e.method==='turn/completed'&&!requested){requested=true;void client.close();}}});
  const id=await client.startThread({cwd:'/tmp',instructions:''});await client.startTurn(id,'wait');await expect.poll(()=>approvals.length).toBe(1);await client.close();
  expect(events.filter(e=>e.method==='turn/completed')).toHaveLength(1);
+});
+
+it('keeps Cursor task receipts and subagent results separate from parent text',async()=>{
+ const {client,id,events}=await setup();
+ try {
+  await client.startTurn(id,'delegate','auto');await expect.poll(()=>launches.length).toBe(2);
+  const child=launches.at(-1)!.child;
+  const task=(call_id:string,subtype:string,value:unknown)=>line(child,{type:'tool_call',subtype,call_id,tool_call:{taskToolCall:value}});
+  task('one','started',{args:{description:'Review changes',subagentType:{custom:{name:'Reviewer'}}}});
+  task('one','completed',{result:{success:{agentId:'child',conversationSteps:[{thinkingMessage:{text:'private'}},{assistantMessage:{text:'Reviewed'}}]}}});
+  task('two','completed',{args:{description:'Background review'},result:{success:{agentId:'pending',isBackground:true}}});
+  task('three','completed',{args:{description:'No identity'},result:{error:{error:'Could not start'}}});
+  task('four','completed',{args:{description:'No result yet'}});
+  line(child,{type:'result',is_error:false,result:'Parent reply',session_id:id});end(child);
+  await expect.poll(()=>events.at(-1)?.method).toBe('turn/completed');
+  const items=events.map(e=>e.params.item).filter(x=>x?.type==='nativeSubagent');
+  expect(items.map(x=>x.status)).toEqual(['dispatching','completed','dispatched','failed','unknown']);
+  expect(items[0].id).toBe(items[1].id);expect(items[0].agentId).toBeUndefined();
+  expect(items[1]).toMatchObject({agentId:'child',name:'Reviewer',task:'Review changes',text:'Reviewed'});
+  expect(items[2].agentId).toBe('pending');expect(items[3].agentId).toBeUndefined();
+  expect(items[3].text).toBe('Could not start');
+  expect(events.filter(e=>e.method==='item/agentMessage/delta').map(e=>e.params.delta)).toEqual(['Parent reply']);
+ } finally {await client.close();}
 });

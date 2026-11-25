@@ -44,10 +44,11 @@ export async function conversationActivityFixture(req:IncomingMessage,res:Server
   }
   emit('item/started',{id:'validation',type:'commandExecution',command:'node scripts/validate-export.mjs --env test --read-only',status:'inProgress'});
   options.onEvent({method:'item/commandExecution/outputDelta',params:{threadId:current.nativeId,turnId:current.turnId,itemId:'validation',delta:'字段顺序：匹配\n文件编码：UTF-8\n记录数校验：执行中…'}});
-  if(input.state==='ended'){
+  if(input.state==='ended'||input.state==='capture-failed'){
    emit('item/completed',{id:'validation',type:'commandExecution',command:'node scripts/validate-export.mjs --env test --read-only',status:'completed',exitCode:0,aggregatedOutput:'字段顺序：匹配\n文件编码：UTF-8\n记录数校验：通过'});
    emit('item/completed',{id:'answer',type:'agentMessage',phase:'final_answer',text:'导出校验通过。字段顺序、UTF-8 编码与记录数均符合约定。本次没有修改导出脚本。'});
    options.onEvent({method:'turn/completed',params:{threadId:current.nativeId,turn:{id:current.turnId,status:'completed'}}});
+   if(input.state==='capture-failed')store.appendEvent(chat.id,'metadata',{memoryCapture:'failed',message:'storage_failure'});
   }
  }
  res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({id:chat.id,reportId:latest.id}));

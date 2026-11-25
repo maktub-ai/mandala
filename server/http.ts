@@ -1,5 +1,7 @@
-import {conversationResults} from './conversation-results';
+import {chatDeliveries,conversationResults} from './conversation-results';
 import {createVoiceHttp} from './voice-http';
+import {createBlueprintHttp} from './blueprint-http';
+import {createBlueprintService,type BlueprintDraftGenerator} from './blueprint';
 import { createMessageReference } from "./composer-references";
 import { ensureMandalaConversation } from "./mandala";
 import { createTelegramService } from "./telegram";
@@ -9,15 +11,21 @@ import { createDraftHttp } from './drafts';
 import { readJsonBody } from './http-body';
 import {createConversationProgress} from './conversation-progress';
 import { createRemoteTransport } from './remote-transport';
-import { remoteConfigSummary } from './remote-policy';
+import { displayedAsyncReply } from './async-questions';
+import { remoteTaskRequest } from './remote-task';
+import { remoteConfigSummary,remoteRequestAllowed } from './remote-policy';
 import { createKnowledgeBaseHttp } from './knowledge-base-http';
+import { createLibraryFiles } from './library-files';
+import { librarySections } from '../shared/data-plugins';
+import { pipeline } from 'node:stream/promises';
 import { createSkillManagement } from "./skill-http";
+import { exportSkillPackage } from "./skill-export";
 import { isCli, enabledRuntimes } from "../shared/runtimes";
 import { fileURLToPath } from "node:url";
 import { createLocalAccess } from "./local-access";
 import { cloneProjectWorkspace } from "./clone-workspace";
 import { saveAttachment, loadAttachments, readAttachmentBytes, MAX_ATTACHMENT_SIZE } from "./attachments";
-import { linkedLocalFiles, localFilePath, readLocalFilePreview, resolveConversationLocalFiles } from "./local-files";
+import { linkedLocalFiles, localFilePath, readLinkedMedia, readLocalFilePreview, resolveConversationLocalFiles } from "./local-files";
 import { openLocalFile } from './local-file-open';
 import { isRelativeLocalFileReference, messageFileLinks } from "../shared/local-file-links";
 import { createChatPreferences } from "./chat-preferences";
@@ -100,6 +108,7 @@ export function createHttpServer({
   localOrigin,
   setupToken,
   taskDraftGenerate,
+  blueprintDraftGenerate,
   telegram: suppliedTelegram,
 }: {
   home: string;
@@ -115,6 +124,7 @@ export function createHttpServer({
   localOrigin?: string;
   setupToken?: string;
   taskDraftGenerate?: TaskDraftGenerator;
+  blueprintDraftGenerate?: BlueprintDraftGenerator;
   telegram?: ReturnType<typeof createTelegramService>;
 }): Server & { hasActiveWork(): boolean } {
   // Last connection check per SSH target, kept for this service's lifetime so settings can show a status without re-probing.
@@ -123,6 +133,8 @@ export function createHttpServer({
   const remoteTransport = access ? createRemoteTransport({
     identity: access.remoteIdentity, peer: access.remotePeer, replayFile: resolve(home, 'remote-replays.json'),
     async dispatch(req, inner, signal) {
+      if (inner.path==='/api/remote/tasks'||inner.path.startsWith('/api/remote/tasks/'))
+        return remoteTaskRequest(inner,()=>access.remotePeer(req),signal,store,manager.taskService,async()=>(await readConfig(home,{hydrateSkills:false})).config);
       if (inner.path === '/api/remote/config') return Response.json(remoteConfigSummary((await readConfig(home)).config));
       if (inner.path === '/api/remote/mandala') {
         // Projection of GET /api/mandala: the primary chat identity only, never soul or settings.
@@ -136,8 +148,10 @@ export function createHttpServer({
     },
   }) : undefined;
   const marketService = market ?? createMarket(home);
+  const sectionFiles = createLibraryFiles();
   const chatPreferences = createChatPreferences(store);
   const voice = createVoiceHttp(home);
+  const blueprint = createBlueprintHttp(home,createBlueprintService(home,{draft:blueprintDraftGenerate}));
   let progress:ReturnType<typeof createConversationProgress>|undefined;
   const conversationProgress=()=>progress??=createConversationProgress(store,manager);
   const terminalService = terminals ?? createTerminals();
@@ -221,11 +235,19 @@ export function createHttpServer({
         return json(res,200,await invokeBusinessCli(manager,req,await requestBody(req),name=>findCommand(name)?.boundTool));
       if (req.headers.authorization?.startsWith('Bearer '))
         throw new DomainError('forbidden',403,'Invocation credentials cannot access local-user endpoints');
+      const skillExport = path.match(/^\/api\/skills\/([A-Za-z0-9_-]+)\/versions\/([A-Za-z0-9-]+)\/export$/);
+      if (skillExport) {
+        if (method !== 'GET') throw new DomainError('method_not_allowed', 405, 'Unsupported Skill export operation');
+        const archive = await exportSkillPackage(home, store, skillExport[1], skillExport[2]);
+        res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Disposition': `attachment; filename="${archive.filename}"`, 'Content-Length': String(archive.data.length), 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        return res.end(archive.data);
+      }
       if (path===telegramPath||path.startsWith(telegramPath+'/')) {
         access?.requireLocalSession(req,method!=='GET');
         return await handleTelegramRequest(telegram,req,res,url,()=>requestBody(req),json);
       }
       if (await handleDraftRequest(req,res,url)) return;
+      if (await blueprint(req,res,url,()=>requestBody(req))) return;
       if (await voice.handle(req,res,url)) return;
       if ((req.headers['x-mandala-cli'] ?? req.headers['x-openmana-cli']) === '1' && path.startsWith('/api/') &&
           method !== 'GET' && method !== 'HEAD' && req.headers['content-type']?.startsWith('application/json')) {
@@ -347,8 +369,8 @@ export function createHttpServer({
       if (await handleMemoryRequest(req,res,url,requestBody)) return;
       if (path === '/api/v2/task-notifications') {
         if (method !== 'GET') return json(res,405,{error:'Method not allowed'});
-        if ([...url.searchParams.keys()].some(key=>key!=='after') || url.searchParams.getAll('after').length>1 || url.searchParams.has('after')&&!/^\d+$/.test(url.searchParams.get('after')!)) throw new DomainError('invalid_cursor',422,'invalid_cursor');
-        return json(res,200,taskNotifications(store,manager.taskService,workspacePrincipal(store),url.searchParams.has('after')?Number(url.searchParams.get('after')):undefined,id=>manager.authorizeConversationRead(id)));
+        if ([...url.searchParams.keys()].some(key=>!['after','shown'].includes(key)) || url.searchParams.getAll('after').length>1 || url.searchParams.getAll('shown').length>1 || url.searchParams.has('after')&&!/^\d+$/.test(url.searchParams.get('after')!)) throw new DomainError('invalid_cursor',422,'invalid_cursor');
+        return json(res,200,taskNotifications(store,manager.taskService,workspacePrincipal(store),url.searchParams.has('after')?Number(url.searchParams.get('after')):undefined,id=>manager.authorizeConversationRead(id),url.searchParams.get('shown')?.split(',').map(Number)));
       }
       if (await handleTaskRequest(req, res, url, requestBody)) return;
       const codeGraphPath=path.match(/^\/api\/projects\/([^/]+)\/workspaces\/([^/]+)\/code-graph(?:\/(refresh))?$/);
@@ -359,6 +381,27 @@ export function createHttpServer({
         return json(res,405,{error:'Method not allowed'});
       }
       if(handleKnowledgeBaseRequest&&await handleKnowledgeBaseRequest(req,res,url,requestBody))return;
+      const libraryFileRoute = /^\/api\/v2\/library-sections\/([^/]+)\/files(?:\/([a-zA-Z0-9._-]+)\/view\.html)?$/.exec(path);
+      if (libraryFileRoute) {
+        if (method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
+        const [, sectionKey, fileId] = libraryFileRoute;
+        const section = librarySections(await marketService.extensions.read()).find(item => encodeURIComponent(fileId ? item.pluginId : item.id) === sectionKey);
+        if (!section) return json(res, 404, { error: 'Library section unavailable' });
+        if ([...url.searchParams.keys()].some(key => key !== 'project' || url.searchParams.getAll(key).length !== 1))
+          return json(res, 422, { error: 'Invalid library section query' });
+        const { config } = await readConfig(home);
+        const id = url.searchParams.get('project');
+        const project = config.projects.find(item => item.id === id);
+        if (id !== null && !project) return json(res, 404, { error: 'Project not found' });
+        if (!fileId) return json(res, 200, await sectionFiles.list(section, project ? [project] : config.projects));
+        const file = project && await sectionFiles.view(section, project, fileId);
+        if (!file) return json(res, 404, { error: 'Library file not found' });
+        const connect = section.loopback ? 'http://127.0.0.1:*' : "'none'";
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+          'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src " + connect });
+        await pipeline(file.createReadStream(), res);
+        return;
+      }
       if (await handleAssetRequest(req, res, url, requestBody)) return;
       if (await handleAutomationRequest(req, res, url, automations, requestBody)) return;
       if (await handleMarketRequest(req, res, url, marketService, requestBody)) return;
@@ -404,6 +447,17 @@ export function createHttpServer({
         }
         return json(res, 200, { path: directory, parent: dirname(directory) === directory ? null : dirname(directory),
           home: homedir(), breadcrumbs, entries });
+      }
+      const remoteReview=path.match(/^\/api\/remote\/mandala\/route-reviews\/([a-zA-Z0-9_-]{1,100})$/);
+      if(remoteReview){
+        const input=method==='POST'?await requestBody(req):undefined;
+        if(!remoteRequestAllowed(method??'',url.pathname+url.search,input))return json(res,403,{error:'Remote operation forbidden'});
+        const {config}=await readConfig(home);
+        const chat=store.listConversations().find(c=>c.purpose==='mandala-main'&&c.agentId===config.mandala?.agentId);
+        if(!chat)throw new DomainError('route_review_missing',404,'Task creation suggestion not found');
+        manager.authorizeConversationRead(chat.id);
+        const routes=manager.coordination.routes;
+        return json(res,200,method==='GET'?await routes.readForChat(remoteReview[1],chat.id):await routes.decideForChat(remoteReview[1],chat.id,input.selection));
       }
       if(path==='/api/mandala/goals'&&method==='GET')return json(res,200,readScope(()=>manager.coordination.list().map(own=>({...own,task:manager.taskService.getTask(workspacePrincipal(store),own.taskId)}))));
       if(path==='/api/mandala/proposals'&&method==='GET'){
@@ -630,7 +684,7 @@ export function createHttpServer({
       }
       if(path==='/api/agent-messages'&&method==='POST'){
         const b=await requestBody(req);
-        if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!['sourceConversationId','targetAgentId','text','targetConversationId','policy','commandKey'].includes(k)))throw new DomainError('invalid_message',422,'Invalid Agent message');
+        if(!b||typeof b!=='object'||Array.isArray(b)||Object.keys(b).some(k=>!['sourceConversationId','targetAgentId','targetProjectId','text','targetConversationId','policy','commandKey'].includes(k)))throw new DomainError('invalid_message',422,'Invalid Agent message');
         const {sourceConversationId,commandKey,...input}=b;
         return json(res,201,await manager.askAgent(string(sourceConversationId),input,{commandKey:string(commandKey)}));
       }
@@ -653,14 +707,14 @@ export function createHttpServer({
         }
       }
       const match = path.match(
-        /^\/api\/conversations\/([a-zA-Z0-9_-]+)(?:\/(workspace|environment|workspace-file|local-file|local-files|attachments|model|queue|results|messages|edit|branch|fork|stop|continue|events|history|reference-summary|references|questions|approvals|completion|archive|title|memory|approval-mode|codex-writer-recovery)(?:\/([a-zA-Z0-9_:-]+))?)?$/,
+        /^\/api\/conversations\/([a-zA-Z0-9_-]+)(?:\/(workspace|environment|workspace-file|local-file|local-files|attachments|model|queue|results|messages|edit|branch|fork|stop|continue|events|history|reference-summary|references|questions|approvals|completion|archive|title|memory|compact|approval-mode|codex-writer-recovery)(?:\/([a-zA-Z0-9_:-]+))?)?$/,
       );
       if (match) {
         const [, id, action, approvalId] = match;
         const conversation = store.getConversation(id);
         if (!conversation) throw new Error("conversation not found");
-        if(method==='GET'||method==='POST'&&['workspace-file','local-file','local-files','attachments','model','queue','fork','branch','edit','messages','continue','questions','title','memory','codex-writer-recovery'].includes(action??''))manager.authorizeConversationRead(id);
-        if(action==='results'&&method==='GET')return json(res,200,readScope(()=>conversationResults(store,manager.taskService,{userId:store.ownerUserId},id,manager.authorizeConversationRead)));
+        if(method==='GET'||method==='POST'&&['workspace-file','local-file','local-files','attachments','model','queue','fork','branch','edit','messages','continue','questions','title','memory','compact','codex-writer-recovery'].includes(action??''))manager.authorizeConversationRead(id);
+        if(action==='results'&&method==='GET')return json(res,200,readScope(()=>(url.searchParams.get('view')==='chat'?chatDeliveries:conversationResults)(store,manager.taskService,{userId:store.ownerUserId},id,manager.authorizeConversationRead)));
         if (action === "reference-summary" && method === "GET") return json(res,200,await manager.listReferenceSummary(id,url.searchParams.get("view")==="outputs"));
         const assertSameNativeAssociation = () => {
           if (conversation.purpose === 'mandala-main' && conversation.cli === 'codex' && conversation.status === 'error' &&
@@ -757,7 +811,7 @@ export function createHttpServer({
             throw new DomainError("file_changed", 409, "File scope changed while loading");
           return json(res, 200, result);
         }
-        if (action === "local-file" && (method === "POST" || approvalId === 'preview' && method === 'GET')) {
+        if (action === "local-file" && (method === "POST" || (approvalId === 'preview' || approvalId === 'media') && method === 'GET')) {
           const b = method === 'GET' ? {href:url.searchParams.get('href')} : await requestBody(req);
           const { config, revision } = await readConfig(home);
           const { project } = conversationContext(config, conversation, resolve(home, "workspaces", "conversations", id));
@@ -782,11 +836,18 @@ export function createHttpServer({
           const scoped = relative || !absoluteLinked();
           const outputs = store.database.prepare("SELECT id FROM task_runs WHERE json_extract(routing,'$.executionConversationId')=?").all(id)
             .map(run => resolve(home, "outputs", run.id as string));
-          const roots = [project.cwd, ...project.resources.filter(resource => resource.kind === "local").map(resource => resource.location), ...outputs, tmpdir(), "/tmp"];
-          const file = await readLocalFilePreview(string(b.href), scoped ? [project.cwd] : roots, !scoped, project.cwd);
+          const workspaceRoots = [project.cwd, ...project.resources.filter(resource => resource.kind === 'local').map(resource => resource.location), ...outputs];
+          const roots = [...workspaceRoots, tmpdir(), "/tmp"];
+          const file = approvalId === 'media' && method === 'GET'
+            ? await readLinkedMedia(string(b.href), relative ? [project.cwd] : [...workspaceRoots, resolve(home, 'outputs', 'conversations', id)], project.cwd)
+            : await readLocalFilePreview(string(b.href), scoped ? [project.cwd] : roots, !scoped, project.cwd);
           manager.authorizeConversationRead(id);
           if (!linked() || !scoped && !absoluteLinked() || store.getConversation(id)?.cwd !== conversation.cwd || (await readConfig(home)).revision !== revision)
             throw new DomainError("file_changed", 409, "File changed while loading; open it again");
+          if ('bytes' in file) {
+            res.writeHead(200, {'Content-Type':file.mediaType,'Content-Disposition':'attachment','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; sandbox",'Cache-Control':'no-store'});
+            return res.end(file.bytes);
+          }
           if(approvalId==='preview'&&method==='GET')return htmlPreview(res,file);
           if(approvalId==='open'&&method==='POST'){await openLocalFile(file.path);return json(res,200,{ok:true});}
           if(approvalId)throw new DomainError('invalid_request',400,'Invalid file action');
@@ -837,12 +898,13 @@ export function createHttpServer({
           }
         }
         if (action === "queue") {
-          if (method === "GET") return json(res,200,manager.listUserInputs(id));
+          if (method === "GET") return json(res,200,manager.listUserInputs(id).map(input=>({...input,...displayedAsyncReply(store,id,input.id,input.text)})));
           if(method==='POST'&&approvalId){const b=await requestBody(req);if(b.expectedExecutionId!==undefined&&b.expectedExecutionId!==null&&typeof b.expectedExecutionId!=='string')throw new DomainError('invalid_execution_id',400,'Invalid execution identity');await manager.sendQueuedInput(id,approvalId,b.expectedExecutionId);return json(res,202,{ok:true});}
           if (method === "POST") {
             const b=await requestBody(req),text=b.text === "" ? "" : string(b.text),key=string(b.commandKey);
             const attachments=(await loadAttachments(home,id,b.attachments??[])).map(item=>item.id);
             assertSameNativeAssociation();
+            if(b.steer===true)return json(res,202,manager.interject(id,text,key,attachments,b.references));
             if(b.expectedExecutionId===undefined)return json(res,202,manager.enqueueUserInput(id,text,key,attachments,b.references));
             if(typeof b.expectedExecutionId!=='string'||!b.expectedExecutionId)throw new DomainError('invalid_execution_id',400,'Invalid execution identity');
             return json(res,202,await manager.interruptAndSend(id,text,key,b.expectedExecutionId,attachments,b.references));
@@ -936,7 +998,10 @@ export function createHttpServer({
           const b = await requestBody(req);
           const current = store.getConversation(id);
           if (!current) return json(res, 404, { error: "Not found" });
-          if (action === "completion") {
+          if (action === "compact" && !approvalId) {
+            if(!b || typeof b!=='object' || Array.isArray(b) || Object.keys(b).length)throw new DomainError('invalid_request',400,'Context organization accepts an empty object.');
+            return json(res,200,await manager.compactMandalaContext(id));
+          } else if (action === "completion") {
             if (typeof b.completed !== "boolean") throw new Error("invalid completion");
             if (["running", "approval"].includes(current.status)) throw new Error("conversation busy");
             store.completeConversation(id, b.completed);

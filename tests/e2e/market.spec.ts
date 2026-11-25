@@ -48,6 +48,34 @@ test("browse, install, link both scopes, reload, unlink and uninstall a complete
   await page.goBack();
 });
 
+for (const [width, theme] of [[1280, 'light'], [390, 'dark']] as const) test(`checks a Skill update and keeps paused project bindings (${width} ${theme})`, async ({ page, request }, info) => {
+  await page.setViewportSize({ width, height: 850 });
+  await page.addInitScript(theme => localStorage.setItem('mana-theme', theme), theme);
+  const id = 'market-' + (width === 1280 ? '1' : '2').repeat(20), current = await (await request.get('/api/config')).json();
+  current.config.skillLibrary = [{ id, name: 'synthetic-reading', path: '', content: '---\nname: synthetic-reading\ndescription: Previous local version\n---\nPrevious instructions.' }];
+  current.config.marketInstallations = [{ id, catalogId: 'skill:anthropics/synthetic-reading', kind: 'skill', name: 'synthetic-reading', description: 'Previous local version', version: 'b'.repeat(40), sourceUrl: 'https://github.com/anthropics/skills', installedAt: new Date().toISOString() }];
+  current.config.agents.find((agent: { id: string }) => agent.id === 'market-reader').skillIds = [id];
+  current.config.projects[0].skillIds = [id]; current.config.projects[0].disabledSkillIds = [id];
+  const configured = await request.put('/api/config', { data: current });
+  expect(configured.ok(), await configured.text()).toBe(true);
+  await page.goto('/market?tab=installed');
+  await page.getByRole('button', { name: '查看详情 synthetic-reading', exact: true }).click();
+  const drawer = page.getByRole('dialog');
+  await drawer.getByRole('button', { name: '检查更新', exact: true }).click();
+  await expect(drawer.getByText('bbbbbbbb', { exact: true })).toBeVisible();
+  await expect(drawer.getByText('aaaaaaaa', { exact: true }).first()).toBeVisible();
+  await expect(drawer.getByText('升级会替换完整技能包及本地修改，保留所有关联和停用状态；下一轮执行生效。', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: info.outputPath('skill-upgrade.png'), fullPage: true });
+  await drawer.getByRole('button', { name: '升级并保留关联', exact: true }).click();
+  await expect(drawer.getByRole('status')).toContainText('已升级，关联保持不变');
+  const saved = (await (await request.get('/api/config')).json()).config;
+  expect(saved.marketInstallations[0].version).toBe('a'.repeat(40));
+  expect(saved.skillLibrary[0].id).toBe(id); expect(saved.skillLibrary[0].versionRef).toBeTruthy();
+  expect(saved.agents.find((agent: { id: string }) => agent.id === 'market-reader').skillIds).toEqual([id]);
+  expect(saved.projects[0].skillIds).toEqual([id]); expect(saved.projects[0].disabledSkillIds).toEqual([id]);
+});
+
 test("MCP shows the launch recipe and accepts environment references without saving credentials", async ({ page, request }) => {
   await page.goto("/market?tab=mcp");
   await page.getByRole("button", { name: "查看详情 synthetic-tools", exact: true }).click();
@@ -197,4 +225,22 @@ test("source popularity is visible and sorting preserves unknown values, URL sta
   await expect(page.getByRole("combobox", { name: "市场排序", exact: true })).toHaveAttribute("data-value","updated");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test("Skill cards and drawer show only author icons or the default book", async ({ page }) => {
+  const artwork = "https://clawhub.ai/api/v1/skill-icons/" + "a".repeat(64);
+  const skill = (name: string) => ({ kind: "skill", name, catalogId: "skill:clawhub/example/" + name, description: "Synthetic Skill", version: "1.0.0", sourceUrl: "https://clawhub.ai" });
+  const planning = { ...skill("weekly-planning"), skillIcon: artwork };
+  await page.route(artwork, route => route.fulfill({ status: 404 }));
+  await page.route("**/api/market/search?*", route => route.fulfill({ json: { items: [planning, skill("workspace-health"), { ...skill("miscellaneous"), description: "Write and edit documents" }] } }));
+  await page.route("**/api/market/detail?*", route => route.fulfill({ json: { ...planning, skillIcon: "🗓️" } }));
+  const failedArtwork = page.waitForResponse(artwork);
+  await page.goto("/market?source=clawhub");
+  expect((await failedArtwork).status()).toBe(404);
+  const card = (name: string) => page.getByRole("button", { name: "查看详情 " + name, exact: true });
+  await expect(card("weekly-planning").locator(".lucide-book-open")).toBeVisible();
+  await expect(card("workspace-health").locator(".lucide-book-open")).toBeVisible();
+  await expect(card("miscellaneous").locator(".lucide-book-open")).toBeVisible();
+  await card("weekly-planning").click();
+  await expect(page.getByRole("dialog").locator(".market-capability-icon")).toHaveText("🗓️");
 });

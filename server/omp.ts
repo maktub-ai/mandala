@@ -8,8 +8,9 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import type { ExecutionClient, RuntimeOptions } from './execution-client';
 import type { McpServer, Skill, ApprovalMode } from "../shared/types";
-import { bindLocalCatalogLauncher, runtimeError } from "./runtime";
+import { bindLocalCatalogLauncher, rpcModelContextWindow, runtimeError } from "./runtime";
 import { createRpcClient } from "./rpc";
+import { nativeTaskUpdates } from "../shared/native-subagents";
 
 export async function prepareCapabilityRuntime(home: string, conversationId: string,
   mcp: McpServer[], skills: Skill[], instructions = "", validateHandoff?: () => void | Promise<void>): Promise<string> {
@@ -84,6 +85,10 @@ export async function startOmp(options: OmpOptions): Promise<ExecutionClient> {
   const pending = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }>();
   const uiRequests = new Map<string, "confirm" | "select">();
   const toolOutput = new Map<string, string>();
+  const activeToolCalls = new Set<string>();
+  const subagents = new Map<string, { turnId: string; threadId: string; parentToolCallId?: string;
+    item: { id: string; type: "nativeSubagent"; agentId: string; status: string; name?: string; task?: string; text?: string } }>();
+  let subscribed = false, turnRunning = false;
   let sessionId = options.resume ?? "";
   let turnId = "";
   let messageSequence = 0;
@@ -171,8 +176,31 @@ export async function startOmp(options: OmpOptions): Promise<ExecutionClient> {
     }
     if(event.type==='auto_compaction_end'&&event.action==='context-full'&&!event.result&&!event.aborted)options.onEvent({method:'mandala/contextLimitReached',params:{threadId:sessionId,turnId}});
     if(event.type==='auto_compaction_end'&&event.result&&!event.aborted){options.onEvent({method:'mandala/contextCompacted',params:{threadId:sessionId,turnId}});return;}
+    if (event.type === "subagent_lifecycle" || event.type === "subagent_progress") {
+      const payload = event.payload, progress = payload?.progress;
+      const record = event.type === "subagent_lifecycle" ? payload : progress;
+      if (typeof record?.id !== "string" || !record.id) return;
+      const previous = subagents.get(record.id), parent = payload.parentToolCallId;
+      if (previous && parent && previous.parentToolCallId && previous.parentToolCallId !== parent) return;
+      if (!previous && !(record.status === "started" && turnRunning && (!parent || activeToolCalls.has(parent)))) return;
+      const status = record.status === "started" ? "running" : record.status === "pending" ? "dispatched"
+        : record.status === "aborted" ? "interrupted" : record.status;
+      if (!["running","dispatched","completed","failed","interrupted"].includes(status)) return;
+      const output = Array.isArray(progress?.recentOutput) ? progress.recentOutput.filter((s: unknown) => typeof s === "string").reverse().join("\n") : "";
+      const item = { ...previous?.item, type: "nativeSubagent" as const, id: "omp:subagent:" + record.id, agentId: record.id,
+        name: payload.agent, task: record.description || previous?.item.task || payload.task, status, text: output || previous?.item.text };
+      const owner = { turnId: previous?.turnId ?? turnId, threadId: previous?.threadId ?? sessionId, parentToolCallId: parent ?? previous?.parentToolCallId, item };
+      const terminal = ["completed","failed","interrupted"].includes(status);
+      if (event.type === "subagent_lifecycle" && terminal) subagents.delete(record.id);
+      else subagents.set(record.id, owner);
+      // OMP can report token counters every 150 ms without changing any visible detail.
+      if (!previous || previous.item.status !== status || previous.item.text !== item.text || previous.item.task !== item.task || previous.item.name !== item.name)
+        options.onEvent({method: terminal ? "item/completed" : "item/started", params: { threadId: owner.threadId, turnId: owner.turnId, item }});
+      return;
+    }
     if (event.type === "agent_start") {
       interrupted = false;
+      turnRunning = true;
       options.onEvent({ method: "turn/started", params: {
         threadId: sessionId, turn: { id: turnId, status: "inProgress" },
       } });
@@ -226,13 +254,19 @@ export async function startOmp(options: OmpOptions): Promise<ExecutionClient> {
         threadId: sessionId, turnId, itemId: event.toolCallId, delta,
       } });
     } else if (event.type === "tool_execution_start" || event.type === "tool_execution_end") {
+      const item = { type: "mcpToolCall", id: event.toolCallId, server: "OMP", tool: event.toolName,
+        status: event.type === "tool_execution_end" ? (event.isError ? "failed" : "completed") : "inProgress",
+        arguments: event.args, result: event.result };
+      if (event.type === "tool_execution_start") activeToolCalls.add(event.toolCallId);
+      else if (activeToolCalls.delete(event.toolCallId)) {
+        // Progress contains a short preview. The task's own results carry each child's final public output.
+        for (const result of nativeTaskUpdates("omp", item))
+          emitItem("item/completed", {type:"nativeSubagent", id:"omp:subagent:"+result.agentId, ...result});
+      }
       toolOutput.delete(event.toolCallId);
-      options.onEvent({ method: event.type === "tool_execution_start" ? "item/started" : "item/completed",
-        params: { threadId: sessionId, turnId,
-          item: { type: "mcpToolCall", id: event.toolCallId, server: "OMP", tool: event.toolName,
-            status: event.type === "tool_execution_end" ? (event.isError ? "failed" : "completed") : "inProgress",
-            arguments: event.args, result: event.result } } });
+      emitItem(event.type === "tool_execution_start" ? "item/started" : "item/completed", item);
     } else if (event.type === "agent_end" && event.isTerminal !== false) {
+      turnRunning = false;
       const lastAssistant = event.messages?.filter((message: any) => message.role === "assistant").at(-1);
       options.onEvent({ method: "turn/completed", params: {
         threadId: sessionId, turn: { id: turnId,
@@ -283,6 +317,7 @@ export async function startOmp(options: OmpOptions): Promise<ExecutionClient> {
       const current = await request("get_state");
       return { status: current.model ? "ready" : "login-required", version: null };
     },
+    getContextWindow: model => rpcModelContextWindow(request,model),
     async listModels() {
       const result = await request("get_available_models");
       const current = await request("get_state");
@@ -356,6 +391,11 @@ export async function startOmp(options: OmpOptions): Promise<ExecutionClient> {
         .map((x: any) => ({ name: x.name.replace(/^skill:/, ""), path: "" }));
     },
     async startTurn(_threadId, text, _approvalMode, _roots, turnOptions = {}) {
+      if (!subscribed) {
+        // Optional observation. Older OMP releases can ignore or reject it without delaying the prompt.
+        send({type:"set_subagent_subscription", id:randomUUID(), level:"progress"});
+        subscribed = true;
+      }
       if (turnOptions.model) {
         const slash = turnOptions.model.indexOf("/");
         if (slash < 1) throw new Error("invalid OMP model: provider/model required");
@@ -365,6 +405,7 @@ export async function startOmp(options: OmpOptions): Promise<ExecutionClient> {
       const images = await Promise.all((turnOptions.images ?? []).map(async image => ({ type: "image", mimeType: image.mimeType, data: (await readFile(image.path)).toString("base64") })));
 
       turnId = randomUUID();
+      activeToolCalls.clear();
       messageId = "";
       const result = await request("prompt", { message: text, ...(images.length ? { images } : {}) });
       if (result?.agentInvoked === false) {

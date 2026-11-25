@@ -7,10 +7,10 @@ test('result and execution headings show the execution conversation title instea
  try{
   await setGoal('用户问：请在账单项目授权上下文中做一次聚焦只读核验。'.repeat(30));await rename(title);
   await page.setViewportSize({width:1440,height:900});await page.goto('/mandala');
-  const headings=page.locator('.execution-result').filter({has:page.locator('a[href*="conversation='+fixture.executionId+'"]')}).locator('.execution-result-heading strong'),chat=page.locator('.mandala-panels .execution-chats a[href="/?conversation='+fixture.executionId+'"]'),child=chat.locator('.execution-chat-title > span');
+  const headings=page.locator('.execution-result').filter({has:page.locator('a[href*="conversation='+fixture.executionId+'"]')}).locator('.execution-result-heading strong'),chat=page.locator('.mandala-panels .mandala-chat-row[data-chat-id="'+fixture.executionId+'"]'),child=chat.locator('.mandala-chat-title');
   await expect(headings).toHaveCount(2);await expect(headings.first()).toHaveText(title);await expect(headings.last()).toHaveText(title);
-  await page.locator('.mandala-panels .task-work-card').filter({has:page.locator('a[href="/tasks/'+fixture.taskId+'"]')}).locator('.task-work-related > summary').click();
-  await expect(child).toHaveText(title);await expect(chat).toHaveAttribute('href','/?conversation='+fixture.executionId);
+  const toggle=page.locator('.mandala-panels .mandala-collab-task').filter({has:page.locator('a[href="/tasks/'+fixture.taskId+'"]')}).locator('.mandala-collab-task-toggle');if(await toggle.getAttribute('aria-expanded')==='false')await toggle.click();
+  await expect(child).toHaveText(title);await child.click();await expect(chat.getByRole('link',{name:'打开对话继续追问',exact:true})).toHaveAttribute('href','/?conversation='+fixture.executionId);
   await page.screenshot({path:info.outputPath('execution-conversation-titles.png')});
   const longTitle='账单采集核验结果'.repeat(9);await rename(longTitle);await expect(headings.first()).toHaveText(longTitle);await expect(child).toHaveText(longTitle);
   expect(await child.evaluate(element=>element.scrollWidth>element.clientWidth&&getComputedStyle(element).textOverflow==='ellipsis')).toBe(true);
@@ -28,7 +28,11 @@ test('result replies stay readable when their task is completed or reopened',asy
   const card=page.getByRole('article',{name:fixture.title+' · 执行结果',exact:true}).last();
   await expect(card).toBeVisible();
   await expect(card.locator('.execution-result-body')).toContainText('复查完成，两项配置差异仍然存在。');
-  await move(fixture.taskId,'completed');
+  const older=page.getByRole('article',{name:fixture.title+' · 执行结果',exact:true}).first();
+  await expect(older.getByRole('button',{name:'确认完成'})).toHaveCount(0);
+  await card.getByRole('button',{name:'确认完成'}).click();
+  await expect(card).toContainText('用户已验收');
+  await expect(card.getByRole('button',{name:'确认完成'})).toHaveCount(0);
   await expect(card.locator('.execution-result-body')).toContainText('复查完成，两项配置差异仍然存在。');
   expect((await(await request.get('/api/v2/tasks/'+fixture.taskId)).json()).task.state).toBe('completed');
   await page.reload();await expect(card.locator('.execution-result-body')).toContainText('复查完成，两项配置差异仍然存在。');
@@ -47,6 +51,23 @@ test('the main chat explains access-blocked reports even when the delivery is hi
  const card=page.getByRole('article',{name:fixture.title+' · 执行结果',exact:true}).last();
  await expect(card.getByText(/Mandala 缺少读取交付物或来源资料的权限/)).toBeVisible();
  await expect(card.getByRole('link',{name:'查看执行详情'})).toHaveCount(0);
+});
+
+test('a normal chat can accept a tracked task with no execution receipt and stay open',async({page,request},info)=>{
+ const chat=await(await request.post('/api/conversations',{data:{projectId:'',agentId:'',cli:'codex'}})).json();
+ const goal='核对本次交付';
+ const task=await(await request.post('/api/v2/tasks',{headers:{'Idempotency-Key':crypto.randomUUID()},data:{goal,originConversationId:chat.id}})).json();
+ const path='/api/v2/tasks/'+task.id;
+ expect((await request.post(path+'/complete',{data:{expectedRevision:task.revision}})).ok()).toBe(true);
+ await page.addInitScript(()=>localStorage.setItem('mana-theme','dark'));
+ await page.setViewportSize({width:390,height:850});await page.goto('/?conversation='+chat.id);
+ const review=page.getByRole('article',{name:'待验收任务',exact:true});
+ await expect(review).toContainText(goal);await expect(review.getByRole('link',{name:'查看任务'})).toHaveAttribute('href','/tasks/'+task.id);
+ await review.scrollIntoViewIfNeeded();await page.screenshot({path:info.outputPath('chat-review-dark-390.png')});
+ await review.getByRole('button',{name:'确认完成'}).click();await expect(review).toHaveCount(0);
+ const {task:accepted}=await(await request.get(path)).json();expect(accepted).toMatchObject({state:'completed',completion:{completedBy:'user',sourceRunId:null}});
+ await expect(page.getByRole('textbox',{name:'消息',exact:true})).toBeEditable();
+ await page.reload();await expect(page.getByRole('textbox',{name:'消息',exact:true})).toBeVisible();await expect(review).toHaveCount(0);
 });
 for(const mode of ['light','dark'] as const)for(const width of [1440,1024,768,390])test(`execution results persist and link to the exact continuous turn ${mode} ${width}`,async({page,request},info)=>{
  const fixture=await(await request.post('/__test__/execution-results')).json();
@@ -71,25 +92,43 @@ for(const mode of ['light','dark'] as const)for(const width of [1440,1024,768,39
  await page.goBack();await expect(cards).toHaveCount(2);await expect(composer).toHaveValue('保留我的草稿');
 });
 
-test('primary scheduled panel includes rules reported by other executors and exposes the destination',async({page,request})=>{
+test('primary scheduled panel links to the Mandala chat using its configured tab name',async({page,request})=>{
  const fixture=await(await request.post('/__test__/execution-results')).json();
  await page.setViewportSize({width:1440,height:900});await page.goto('/mandala');
- const panel=page.locator('.mandala-panels');await panel.getByRole('tab',{name:'定时',exact:true}).click();
- await expect(panel.getByText('委派的自动化检查',{exact:true})).toBeVisible();
- await panel.locator('.mandala-rule').filter({has:page.getByText('委派的自动化检查',{exact:true})}).getByRole('button',{name:'查看规则：委派的自动化检查',exact:true}).click();
+ const panel=page.locator('.mandala-panels');await panel.getByRole('tab',{name:'智能体',exact:true}).click();
+ const rule=panel.locator('.mandala-team-schedules .mandala-team-schedule').filter({hasText:'委派的自动化检查'});await expect(rule).toBeVisible();
+ await rule.click();
  await expect(page).toHaveURL(new RegExp('schedule='+fixture.ruleId));
- await expect(page.getByText('结果回报到：',{exact:false})).toBeVisible();
+ const destination=page.locator('.automation-plan a[href="/?conversation='+fixture.mainId+'"]');
+ const initial=await(await request.get('/api/mandala')).json();
+ const {name,defaultCli:cli,models}=initial.config.agents.find((agent:{id:string})=>agent.id===initial.config.mandala.agentId);
+ const {soul,maxParallel}=initial.config.mandala;
+ const rename=async(name:string)=>{
+  const {revision}=await(await request.get('/api/mandala')).json();
+  expect((await request.put('/api/mandala',{data:{revision,settings:{name,soul,cli,models,maxParallel}}})).ok()).toBe(true);
+ };
+ expect(initial.conversation.title).toBeTruthy();
+ expect(initial.conversation.title).not.toBe(name);
+ await expect(destination).toHaveText(name);
+ try{
+  const renamed='我的工作台';
+  await rename(renamed);
+  await page.reload();
+  await expect(destination).toHaveText(renamed);
+  await destination.click();
+  await expect(page.locator('.mandala-header-identity strong')).toHaveText(renamed);
+ }finally{await rename(name);}
 });
 
 
 test('result replies show long failure details directly and retain deliverable links without a body',async({page,request})=>{
  const fixture=await(await request.post('/__test__/execution-results')).json();
  let empty=false;
- await page.route('**/api/conversations/*/results',async route=>{
-  const response=await route.fetch(),items=await response.json();
+ await page.route('**/api/conversations/*/results?view=chat',async route=>{
+  const response=await route.fetch(),payload=await response.json(),items=payload.items;
   const index=items.findIndex((item:{conversationId:string;runId:string})=>item.conversationId===fixture.executionId&&item.runId!==fixture.runId);
   items[index]={...items[index],state:'failed',title:'跨项目自动化检查：配置、数据同步与历史任务回执的完整性核对',summary:empty?'':'**检查未完成。** 部分项目的配置暂时无法读取。\n\n'+('已确认：备份配置可读取，未执行任何修改。\n\n').repeat(35)+'请恢复访问后重试。',artifactCount:1,awaitingReview:false};
-  await route.fulfill({response,json:items});
+  await route.fulfill({response,json:payload});
  });
  await page.setViewportSize({width:390,height:900});await page.goto('/mandala');
  const card=page.getByRole('article').filter({hasText:'跨项目自动化检查'});
@@ -104,11 +143,11 @@ test('result replies show long failure details directly and retain deliverable l
 
 test('results received before the first loaded turn precede that turn',async({page,request})=>{
  const fixture=await(await request.post('/__test__/execution-results')).json();
- await page.route('**/api/conversations/*/results',async route=>{
-  const response=await route.fetch(),items=await response.json();
+ await page.route('**/api/conversations/*/results?view=chat',async route=>{
+  const response=await route.fetch(),payload=await response.json(),items=payload.items;
   const index=items.findIndex((item:{conversationId:string;runId:string})=>item.conversationId===fixture.executionId&&item.runId!==fixture.runId);
   items[index]={...items[index],title:'更早返回的结果',createdAt:'2000-01-01T00:00:00.000Z'};
-  await route.fulfill({response,json:items});
+  await route.fulfill({response,json:payload});
  });
  await page.goto('/mandala');
  const card=page.getByRole('article',{name:'更早返回的结果 · 执行结果',exact:true});

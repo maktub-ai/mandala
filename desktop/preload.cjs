@@ -58,7 +58,8 @@ window.addEventListener('click', event => {
   if (!link) return;
   let url;
   try { url = new URL(link.href); } catch { return; }
-  if (!['http:', 'https:'].includes(url.protocol) || url.origin === window.location.origin || url.username || url.password) return;
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return;
+  if (url.origin === window.location.origin && !(link.target === '_blank' && /^\/api\/v2\/library-sections\/[A-Za-z0-9_.%:-]+\/files\/[A-Za-z0-9._-]+\/view\.html$/.test(url.pathname))) return;
   event.preventDefault(); event.stopImmediatePropagation();
   ipcRenderer.send('mandala:open-external', url.href);
 }, true);

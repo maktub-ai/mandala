@@ -1,14 +1,15 @@
+import {DomainError} from '../shared/workspace-contracts';
 import type {CodexClient} from '../server/codex';
 import {createTasks} from '../server/tasks';
 import {createAssets} from '../server/assets';
 import {createAssetFiles} from '../server/asset-files';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
 import { openStore } from '../server/store';
-import { readConfig } from '../server/config';
+import { readConfig, writeConfig } from '../server/config';
 import { createSessionManager } from '../server/sessions';
 import { createHttpServer } from '../server/http';
 let nativeForks=0,nativeFactories=0,nativeTurns=0;
@@ -24,6 +25,63 @@ test('task list and detail expose execution conversations directly without hiera
  expect(detail.executions).toEqual([]);expect(detail.task.executions).toEqual([]);
  expect(detail).not.toHaveProperty('children');expect(detail).not.toHaveProperty('dependencies');
  expect((await(await request('/api/v2/tasks')).json())[0].executions).toEqual([]);
+});
+test('workspace users can override and reset the project groups independently of the execution route',async()=>{
+ const {config,revision}=await readConfig(home);
+ const projects=['app','service'].map(id=>({id,name:id,cwd:home,agentIds:[],resources:[],mcp:[],skills:[]}));
+ await writeConfig(home,{...config,projects},revision);
+ const created=await request('/api/v2/tasks','POST',{goal:'Review integration',projectId:'app',projectIds:['app','service']},'create-groups');
+ expect(created.status).toBe(201);
+ const task=await created.json(),path='/api/v2/tasks/'+task.id;
+ const list=async(id:string)=>(await(await request('/api/v2/tasks?projectId='+id)).json()).map((t:{id:string})=>t.id);
+ expect(await list('service')).toEqual([task.id]);
+ const moduleRef={projectId:'service',lane:'API'};
+ const linked=await request(path,'PATCH',{expectedRevision:task.revision,moduleRef},'link-module');
+ expect(linked.status).toBe(200);
+ expect((await linked.json()).moduleRef).toEqual(moduleRef);
+ expect((await request(path,'PATCH',{expectedRevision:task.revision+1,projectIds:['missing']},'unknown')).status).toBe(422);
+ const cleared=await request(path,'PATCH',{expectedRevision:task.revision+1,projectIds:[],moduleRef:null},'clear-groups');
+ expect(await cleared.json()).toMatchObject({projectId:'app',projectIds:[],moduleRef:null});
+ expect(await list('app')).toEqual([]);
+ expect(await list('service')).toEqual([]);
+ const reset=await request(path,'PATCH',{expectedRevision:task.revision+2,projectIds:null},'auto-groups');
+ expect(await reset.json()).toMatchObject({projectId:'app',projectIds:['app']});
+ expect(await list('app')).toEqual([task.id]);
+});
+
+test('project filters and labels omit executions redacted by conversation read permissions',async()=>{
+ const p={userId:store.ownerUserId},tasks=manager.taskService;
+ const chat=store.createConversation({projectId:'restricted',agentId:'a',cli:'codex',model:null});
+ const task=tasks.createTask(p,todo,'scoped-task');
+ tasks.attachExecution(p,task.id,task.revision,chat.id,'attach-restricted');
+ const path='/api/v2/tasks';
+ expect((await(await request(path+'?projectId=restricted')).json()).map((row:{id:string})=>row.id)).toEqual([task.id]);
+ const authorize=manager.authorizeConversationRead;
+ vi.spyOn(manager,'authorizeConversationRead').mockImplementation((id,...args)=>{
+   if(id===chat.id)throw new DomainError('forbidden',403,'Conversation unavailable');
+   return authorize(id,...args);
+ });
+ expect(await(await request(path+'?projectId=restricted')).json()).toEqual([]);
+ const detail=await(await request(path+'/'+task.id)).json();
+ expect(detail.task).toMatchObject({projectIds:[],executions:[]});
+});
+
+test('the source chat accepts one reviewed task revision without a run or a chat closure',async()=>{
+ const source=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null});
+ const other=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null});
+ const task=await(await request('/api/v2/tasks','POST',{...todo,originConversationId:source.id},'source-task')).json();
+ const review=await(await request('/api/v2/tasks/'+task.id+'/complete','POST',{expectedRevision:task.revision})).json();
+ const results=(id:string)=>request('/api/conversations/'+id+'/results?view=chat').then(r=>r.json());
+ expect(await results(source.id)).toMatchObject({items:[],reviews:[{taskId:task.id,goal:todo.goal,revision:review.revision,runId:null}]});
+ expect((await results(other.id)).reviews).toEqual([]);
+ const accept=(expectedRunId:string|null,key:string)=>request('/api/v2/tasks/'+task.id+'/accept','POST',{expectedRevision:review.revision,expectedRunId},key);
+ expect((await accept('stale-run','wrong')).status).toBe(409);
+ const accepted=await(await accept(null,'chat-accept')).json();
+ expect(accepted).toMatchObject({state:'completed',revision:review.revision+1,completion:{completedBy:'user',sourceRunId:null}});
+ expect(await(await accept(null,'chat-accept')).json()).toEqual(accepted);
+ expect((await accept(null,'another-window')).status).toBe(409);
+ expect((await results(source.id)).reviews).toEqual([]);
+ expect(store.getConversation(source.id)?.completedAt).toBeFalsy();
 });
 test('saves a projectless manual todo; user review then acceptance completes with stale revision protection',async()=>{
  const saved=await request('/api/v2/tasks','POST',todo);expect(saved.status).toBe(201);const task=await saved.json();

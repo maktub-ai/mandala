@@ -173,3 +173,39 @@ test('find retries an earlier-history failure and does not carry loading into an
  await expect(page.getByText('History answer 25',{exact:true})).toBeVisible();
  expect(otherReads).toBe(0);
 });
+
+test('history skeleton aligns with the loaded message column', async ({ page, request }) => {
+ const created = await request.post('/api/conversations', { data: { projectId: '', agentId: '', cli: 'codex', workspaceId: null } });
+ await expect(created).toBeOK();
+ const { id } = await created.json();
+ const event = { id: 1, conversationId: id, kind: 'user', data: { text: 'Synthetic chat history' }, createdAt: new Date().toISOString() };
+ let release!: () => void;
+ const held = new Promise<void>(resolve => { release = resolve; });
+ await page.route('**/api/conversations/' + id + '/events', async route => {
+  await held;
+  await route.fulfill({ contentType: 'text/event-stream', body: 'data: ' + JSON.stringify(event) + '\n\nevent: history-ready\ndata: {}\n\n' });
+ });
+ const widths = [1600, 390];
+ const skeleton = page.getByRole('status', { name: '正在读取对话历史…', exact: true });
+ const row = skeleton.locator('.ui-loading-row').first();
+ const loadingBounds: { x: number; width: number; avatarX: number }[] = [];
+ try {
+  await page.goto('/?conversation=' + id);
+  await expect(skeleton).toBeVisible();
+  for (const width of widths) {
+   await page.setViewportSize({ width, height: 850 });
+   const { x, width: rowWidth } = (await row.boundingBox())!;
+   const { x: avatarX } = (await row.locator('.ui-loading-symbol').boundingBox())!;
+   loadingBounds.push({ x, width: rowWidth, avatarX });
+  }
+ } finally { release(); }
+ const message = page.getByRole('article', { name: '你的消息', exact: true });
+ await expect(message).toContainText('Synthetic chat history');
+ await expect(skeleton).toHaveCount(0);
+ for (const [index, width] of widths.entries()) {
+  await page.setViewportSize({ width, height: 850 });
+  const { x, width: messageWidth } = (await message.boundingBox())!;
+  const { x: avatarX } = (await message.locator('.message-avatar').boundingBox())!;
+  expect(loadingBounds[index], `at ${width}px`).toEqual({ x, width: messageWidth, avatarX });
+ }
+});

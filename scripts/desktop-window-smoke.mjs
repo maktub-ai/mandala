@@ -91,6 +91,17 @@ try {
   await expect(guide).toHaveCount(0);
   await page.unroute('**/api/cli/status?*');
   const composer = page.getByRole('textbox', { name: /^(Message|消息)$/ }); await expect(composer).toBeEnabled();
+  const settingsButton = page.locator('.mandala-header-identity button');
+  const details = page.getByRole('checkbox', { name: /^(Show execution details|显示执行详情)$/ });
+  await settingsButton.click();
+  await expect(details).not.toBeChecked();
+  await details.check();
+  await page.getByRole('button', { name: /^(Save|保存)$/ }).click();
+  await page.reload();
+  await settingsButton.click();
+  await expect(details).toBeChecked();
+  await details.uncheck();
+  await page.getByRole('button', { name: /^(Save|保存)$/ }).click();
   const cdp = await page.context().newCDPSession(page);
   const { root } = await cdp.send('DOM.getDocument');
   const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector: 'input[type=file]' });

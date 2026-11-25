@@ -240,3 +240,19 @@ test('content-denied control still stops a genuinely active run and hides stop a
  await expect.poll(async()=>(await control()).runs[0]?.state).toBe('interrupted');
  await expect(page.getByRole('button',{name:'停止本次执行',exact:true})).toHaveCount(0);
 });
+
+test('starting tracked chat work keeps the original execution conversation',async({page,request})=>{
+ const binding=await executionFixture(request,'chat-tracking');
+ const chat=await (await request.post('/api/conversations',{data:binding})).json();
+ await request.patch('/api/conversations/'+chat.id,{data:{title:'Rollout investigation'}});
+ const task=await (await createTaskWithExecutionChats(request,{headers:{'Idempotency-Key':'chat-tracking'},data:{
+  goal:'hold',originConversationId:chat.id,projectId:binding.projectId,assigneeAgentId:binding.agentId,
+ }},[chat.id])).json();
+ await page.goto('/tasks/'+task.id);
+ await page.locator('.task-execution-process > summary').click();
+ await page.locator('.task-execution-options > summary').click();
+ await expect(page.getByRole('combobox',{name:'执行会话',exact:true})).toContainText('Rollout investigation');
+ await page.getByRole('button',{name:'开始任务',exact:true}).click();
+ await expect.poll(async()=>(await (await request.get('/api/v2/tasks/'+task.id)).json()).runs[0]?.routing)
+  .toMatchObject({mode:'existing',executionConversationId:chat.id});
+});

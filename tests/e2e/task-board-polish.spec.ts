@@ -91,6 +91,7 @@ test('mac titlebar slots preserve accessible sidebar controls and no repeated br
  expect(regions.sidebar).not.toContain('drag');
  expect(regions.collapsed).not.toContain('drag');
  expect(regions.windowDrag).toContain('drag');
+ expect(await page.locator('.sidebar').evaluate(sidebar => getComputedStyle(sidebar).getPropertyValue('-webkit-app-region'))).not.toBe('drag');
  await expect(page.locator('.workspace-brand')).toBeHidden();
  const toggle=page.locator('#desktop-titlebar-left').getByRole('button',{name:'收起侧栏',exact:true});await expect(toggle).toBeVisible();await toggle.click();
  await expect(page.locator('.sidebar')).toHaveAttribute('data-collapsed','true');await page.getByRole('button',{name:'展开侧栏',exact:true}).click();

@@ -12,7 +12,7 @@ test('Tasks defaults to task-only discovery while independent chats remain reach
  await expect(page.locator('[data-conversation-id="'+independent.id+'"]')).toBeVisible();
  for(const type of ['type=conversations','tab=conversations']){
   await page.goto('/tasks?'+type+'&scope=all&q=no-match-'+crypto.randomUUID());
-  await page.getByRole('button',{name:'清除筛选',exact:true}).click();
+  await page.getByRole('region',{name:'当前筛选',exact:true}).getByRole('button',{name:'清除筛选',exact:true}).click();
   await expect(page.locator('.conversation-progress').getByRole('searchbox',{name:'搜索对话',exact:true})).toBeVisible();
   expect(new URL(page.url()).searchParams.get('type')).toBe('conversations');
  }
@@ -26,13 +26,10 @@ test('chat task scope follows explicit ownership and keeps reference and deliver
  });
  await page.setViewportSize({width:1440,height:950});await page.goto('/mandala');
  const panel=page.locator('.mandala-panels');
- await expect(panel.getByRole('button',{name:'本对话 1',exact:true})).toHaveAttribute('aria-pressed','true');
- await expect(panel.getByRole('button',{name:'全部任务 2',exact:true})).toBeVisible();
- await expect(panel.locator('.task-work-heading > a')).toHaveCount(1);
+ // The panel only answers for this chat; other chats' Tasks live on the Tasks page.
+ await expect(panel.getByRole('button',{name:/^(本对话|全部)/})).toHaveCount(0);
+ await expect(panel.locator('.mandala-collab-task-title')).toHaveCount(1);
  await expect(panel.getByText('另一段对话的任务',{exact:true})).toHaveCount(0);
- await panel.getByRole('button',{name:'全部任务 2',exact:true}).click();
- await expect(panel.getByRole('link',{name:'另一段对话的任务',exact:true})).toBeVisible();
- await panel.getByRole('button',{name:'本对话 1',exact:true}).click();
  await expect(panel.getByRole('button',{name:/^引用 接通跨项目/})).toBeEnabled();
  await expect(panel.getByRole('link',{name:'打开全部任务',exact:true})).toHaveAttribute('href','/tasks?scope=all');
  await expect(panel.locator('.task-progress-meter')).not.toBeVisible();

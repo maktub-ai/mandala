@@ -45,8 +45,8 @@ function nativeChoices(approval: Approval): ApprovalDecision[] {
 
 export function supportsConversationApproval(approval: Approval): boolean {
   if (!nativeChoices(approval).includes("approve")) return false;
-  const params = approval.params as { wholeTurnApproval?:boolean; grantRoot?: unknown; toolApproval?: boolean; additionalPermissions?: unknown; networkApprovalContext?: unknown; proposedNetworkPolicyAmendments?: unknown };
-  return !params.wholeTurnApproval && !params.grantRoot && !params.additionalPermissions && !params.networkApprovalContext && !params.proposedNetworkPolicyAmendments && (approval.method !== "omp/confirm" || params.toolApproval === true);
+  const params = approval.params as { nativeSubagentId?: string; wholeTurnApproval?:boolean; grantRoot?: unknown; toolApproval?: boolean; additionalPermissions?: unknown; networkApprovalContext?: unknown; proposedNetworkPolicyAmendments?: unknown };
+  return !params.nativeSubagentId && !params.wholeTurnApproval && !params.grantRoot && !params.additionalPermissions && !params.networkApprovalContext && !params.proposedNetworkPolicyAmendments && (approval.method !== "omp/confirm" || params.toolApproval === true);
 }
 
 export function approvalChoices(approval: Approval): ApprovalDecision[] {

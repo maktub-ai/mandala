@@ -72,3 +72,50 @@ test('keeps native commentary on cards while an explicitly tagged final answer s
  }
  await request.post('/__test__/live-output-update',{data:{id:f.id,stage:'done'}});
 });
+
+test('keeps native child reports in the selected chat workspace and retains focus and identity on update',async({page,request},info)=>{
+ const {id}=await(await request.post('/__test__/live-output-fixture')).json();
+ const update=async(stage:string)=>expect((await request.post('/__test__/live-output-update',{data:{id,stage}})).ok()).toBe(true);
+ await page.goto('/?conversation='+id);
+ await page.getByRole('button',{name:'展开右侧栏',exact:true}).click();
+ const panel=page.locator('#chat-environment-panel'),files=panel.getByRole('tab',{name:'文件',exact:true}),subagents=panel.getByRole('tab',{name:'子代理',exact:true});
+ await subagents.click();
+ await expect(panel.getByText('此对话还没有子代理记录。',{exact:true})).toBeVisible();
+ await files.click();
+ await update('spawn-child');
+ await expect(panel.locator('.native-subagent-row')).toHaveCount(1);
+ await expect(files).toBeFocused();await expect(files).toHaveAttribute('aria-selected','true');
+ await subagents.click();
+ const row=panel.locator('.native-subagent-row');
+ await expect(row).toHaveCount(1);
+ await row.locator('summary').click();
+ await expect(row).toContainText('正在核对升级步骤。');
+ const avatar=await row.locator('.identity-avatar').innerHTML();
+ await files.click();
+ await update('child-result');await expect(row).toContainText('升级步骤已经核对。');
+ await expect(files).toBeFocused();await expect(files).toHaveAttribute('aria-selected','true');
+ await subagents.click();
+ await expect(row).toHaveCount(1);await expect(row.getByText('升级步骤已经核对。',{exact:true})).toBeVisible();
+ expect(await row.locator('.identity-avatar').innerHTML()).toBe(avatar);
+ await expect(page.locator('.messages .native-subagent-row')).toHaveCount(0);
+ await page.reload();
+ if(!await panel.isVisible())await page.getByRole('button',{name:'展开右侧栏',exact:true}).click();
+ await subagents.click();await expect(row).toHaveCount(1);
+ await row.locator('summary').click();
+ await expect(row.getByText('升级步骤已经核对。',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'收起右侧栏',exact:true}).click();
+ await update('another-child');
+ await expect(row).toHaveCount(2);await expect(panel).toBeHidden();
+ await page.getByRole('button',{name:'展开右侧栏',exact:true}).click();
+ await expect(subagents).toHaveAttribute('aria-selected','true');
+ expect(await row.nth(1).locator('.identity-avatar').innerHTML()).not.toBe(avatar);
+ for(const [mode,width] of [['dark',1280],['light',390]] as const){
+  await page.evaluate(({key,value})=>{localStorage.setItem(key,value);window.dispatchEvent(new StorageEvent('storage',{key,newValue:value}));},{key:themeStorageKey,value:JSON.stringify({...defaultPreferences(),mode})});
+  await page.setViewportSize({width,height:850});
+  await expect(row.first()).toBeInViewport();
+  expect(await panel.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
+  await page.screenshot({path:info.outputPath('subagents-'+mode+'.png'),animations:'disabled'});
+  if(mode==='dark')await panel.screenshot({path:info.outputPath('subagents-panel.png'),animations:'disabled'});
+ }
+ await update('done');
+});

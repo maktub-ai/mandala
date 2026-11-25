@@ -13,6 +13,7 @@ import { createAssets } from './assets';
 import { createAssetFiles } from './asset-files';
 import { workspacePrincipal } from './workspace-identity';
 import { DomainError, type VersionRef } from '../shared/workspace-contracts';
+import { skillPackageSources } from './skill-package';
 
 // Configuration contains references. AssetVersion + its immutable manifest are the body authority.
 export function createSkillCatalog(home:string,store:Store) {
@@ -57,21 +58,25 @@ export function createSkillCatalog(home:string,store:Store) {
    });return result;
   },
   versions(skill:SkillDefinition,agentId?:string,config?:Config,projectId=''){return skill.versionRef?assets.listVersions(root,skill.versionRef.assetId).map(version=>{assertEvidence({...skill,...version.provenance.skill},version.provenance.skill?.source,agentId,config,projectId);if(agentId){const scoped=createAssets(store,files,p=>skillEvidenceProject(store,p,projectId));for(const ref of version.provenance.sourceVersions)scoped.getAuthorizedVersion({...root,agentId},ref);}return version;}):[];},
-  async persist(skill:SkillDefinition,assertActive:()=>void=()=>{}):Promise<SkillDefinition>{
+  async persist(skill:SkillDefinition,assertActive:()=>void=()=>{},packageDirectory?:string):Promise<SkillDefinition>{
    if(skill.path!==''||typeof skill.content!=='string')return skill;
    assertEvidence(skill);
    const current=skill.versionRef?read(skill):undefined;
-   if(current?.content===skill.content){const {content:_,unavailable:_availability,...metadata}=skill;return {...metadata,...(current.source?{source:current.source}:{}),...(current.creatorAgentId?{creatorAgentId:current.creatorAgentId}:{})};}
-   const fingerprint=createHash('sha256').update(JSON.stringify([skill.id,skill.versionRef??null,skill.content,skill.source])).digest('hex');
-   const prior=store.database.prepare("SELECT * FROM skill_publication_journal WHERE skill_id=? AND fingerprint=? AND state IN ('staged','abandoned') ORDER BY rowid DESC LIMIT 1").get(skill.id,fingerprint);
-   if(prior){assertActive();store.database.prepare("UPDATE skill_publication_journal SET state='staged' WHERE version_id=?").run(prior.version_id as string);const {content:_,...metadata}=skill;return {...metadata,versionRef:{assetId:prior.asset_id as string,versionId:prior.version_id as string}};}
+   const {content:_,unavailable:_availability,...metadata}=skill;
+   if(current?.content===skill.content&&!packageDirectory)return {...metadata,...(current.source?{source:current.source}:{}),...(current.creatorAgentId?{creatorAgentId:current.creatorAgentId}:{})};
    const directory=await mkdtemp(join(tmpdir(),'mandala-skill-'));
    try{
     await writeFile(join(directory,'SKILL.md'),skill.content,{mode:0o600});
     const sources=[{allowedRoot:directory,relativePath:'SKILL.md',manifestPath:'SKILL.md'}];
-    if(skill.versionRef){const version=assets.getAuthorizedVersion(root,skill.versionRef);for(const [index,file]of version.files.entries())if(file.path!=='SKILL.md'){const target=join(directory,file.path);await mkdir(dirname(target),{recursive:true});await cp(assets.readAssetFile(root,skill.versionRef,String(index)).blobPath,target);await chmod(target,file.executable?0o700:0o600);sources.push({allowedRoot:directory,relativePath:file.path,manifestPath:file.path});}}
-    const staged=await files.stageFiles(root,null,sources);
+    if(packageDirectory)sources.push(...(await skillPackageSources(packageDirectory)).filter(file=>file.manifestPath!=='SKILL.md'));
+    else if(skill.versionRef){const version=assets.getAuthorizedVersion(root,skill.versionRef);for(const [index,file]of version.files.entries())if(file.path!=='SKILL.md'){const target=join(directory,file.path);await mkdir(dirname(target),{recursive:true});await cp(assets.readAssetFile(root,skill.versionRef,String(index)).blobPath,target);await chmod(target,file.executable?0o700:0o600);sources.push({allowedRoot:directory,relativePath:file.path,manifestPath:file.path});}}
+    const staged=await files.stageFiles(root,null,sources,'skill');
     assertActive();assertEvidence(skill);
+    const manifest=(entries:AssetVersion['files'])=>JSON.stringify([...entries].sort((a,b)=>a.path.localeCompare(b.path)));
+    if(skill.versionRef&&manifest(assets.getAuthorizedVersion(root,skill.versionRef).files)===manifest(staged.files)&&JSON.stringify(current?.source)===JSON.stringify(skill.source))return metadata;
+    const fingerprint=createHash('sha256').update(JSON.stringify([skill.id,skill.versionRef??null,manifest(staged.files),skill.source,skill.creatorAgentId])).digest('hex');
+    const prior=store.database.prepare("SELECT * FROM skill_publication_journal WHERE skill_id=? AND fingerprint=? AND state IN ('staged','abandoned') ORDER BY rowid DESC LIMIT 1").get(skill.id,fingerprint);
+    if(prior){store.database.prepare("UPDATE skill_publication_journal SET state='staged' WHERE version_id=?").run(prior.version_id as string);return {...metadata,versionRef:{assetId:prior.asset_id as string,versionId:prior.version_id as string}};}
     // The publication callback runs inside the Asset transaction: a crash can never expose a
     // candidate head without its journal record. Config commit chooses which candidate is live.
     const stage=(version:AssetVersion,previous:Asset)=>{
@@ -84,13 +89,13 @@ export function createSkillCatalog(home:string,store:Store) {
       const asset=assets.getAuthorizedAsset(root,skill.versionRef.assetId);
       version=assets.publishAssetVersion(root,{assetId:asset.id,expectedHeadVersionId:asset.headVersionId,submissionId:staged.submissionId,files:staged.files,provenance:{sourceVersions:skill.source?.sourceVersions??[],skill:{source:skill.source,creatorAgentId:skill.creatorAgentId}}},'skill:'+fingerprint,undefined,undefined,value=>stage(value,asset));
     }else{
-      const imported=assets.importAsset(root,{kind:'skill',title:skill.name,agentId:skill.creatorAgentId,submissionId:staged.submissionId,sourceVersions:skill.source?.sourceVersions??[]},'skill:'+fingerprint,undefined,({asset,version})=>{
+      // A removed registration may reuse its stable ID; journal entries handle interrupted retries.
+      const imported=assets.importAsset(root,{kind:'skill',title:skill.name,agentId:skill.creatorAgentId,submissionId:staged.submissionId,sourceVersions:skill.source?.sourceVersions??[]},'skill:'+fingerprint+':'+staged.submissionId,undefined,({asset,version})=>{
         version.provenance.skill={source:skill.source,creatorAgentId:skill.creatorAgentId};store.database.prepare('UPDATE asset_versions SET data=? WHERE id=?').run(JSON.stringify(version),version.id);
         stage(version,{...asset,headVersionId:null,lifecycle:'archived'});
       },true);version=imported.version;
     }
-    const {content:_,unavailable:_availability,...metadata}=skill;
-    return {...metadata,versionRef:{assetId:version.assetId,versionId:version.id},...(!skill.creatorAgentId?{humanMaintained:true}:{})};
+    return {...metadata,versionRef:{assetId:version.assetId,versionId:version.id},...(!skill.creatorAgentId&&skill.humanMaintained===undefined?{humanMaintained:true}:{})};
    }finally{await rm(directory,{recursive:true,force:true});}
   },
   assertSources(refs:VersionRef[],agentId:string,projectId=''){const scoped=createAssets(store,files,p=>skillEvidenceProject(store,p,projectId));for(const ref of refs)scoped.getAuthorizedVersion({...root,agentId},ref);},

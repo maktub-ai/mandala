@@ -6,14 +6,17 @@ import { join, resolve, relative, sep } from "node:path";
 import type { Attachment, NativeAttachment } from "../shared/chat-input";
 export const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024;
 export const MAX_ATTACHMENTS = 8;
-export async function saveAttachment(home: string, conversationId: string, name: string, data: Buffer): Promise<Attachment> {
-  if (!name || name.length > 255 || /[/\\\x00-\x1f\x7f]/.test(name) || name === "." || name === "..") throw new Error("invalid attachment name");
-  if (!data.length || data.length > MAX_ATTACHMENT_SIZE) throw new Error("Attachment must be between 1 byte and 20 MB");
+export function attachmentImageType(data: Buffer) {
   // Derive image types from their bytes; arbitrary uploads remain ordinary files.
-  const imageType = data.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? "image/png" :
+  return data.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) ? "image/png" :
     data[0] === 255 && data[1] === 216 && data[2] === 255 ? "image/jpeg" :
     ["GIF87a", "GIF89a"].includes(data.subarray(0, 6).toString()) ? "image/gif" :
     data.subarray(0, 4).toString() === "RIFF" && data.subarray(8, 12).toString() === "WEBP" ? "image/webp" : undefined;
+}
+export async function saveAttachment(home: string, conversationId: string, name: string, data: Buffer): Promise<Attachment> {
+  if (!name || name.length > 255 || /[/\\\x00-\x1f\x7f]/.test(name) || name === "." || name === "..") throw new Error("invalid attachment name");
+  if (!data.length || data.length > MAX_ATTACHMENT_SIZE) throw new Error("Attachment must be between 1 byte and 20 MB");
+  const imageType = attachmentImageType(data);
   const item: Attachment = { id: randomUUID(), name, size: data.length, mimeType: imageType ?? "application/octet-stream" };
   const root = join(home, "attachments", conversationId, item.id);
   await mkdir(join(root, "files"), { recursive: true, mode: 0o700 });

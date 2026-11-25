@@ -118,7 +118,7 @@ npm ci && npm run build && npm start
 
 1. **Enable a runtime.** Settings → Runtimes. Mandala detects which CLIs start on your machine.
 2. **Create an Agent.** Give it a responsibility, a default runtime and a model.
-3. **Hand off work.** Start a chat with the Agent, or tell Mandala and let it create the task.
+3. **Hand off work.** Tell Mandala or the Agent what you need. Get one-off results in chat. For ongoing work, ask “Track this as a task” in the same chat.
 
 <details>
 <summary>Data directory, port and backups</summary>
@@ -155,6 +155,8 @@ npm run restore -- --input "$HOME/mandala-snapshot" --home "$HOME/.mandala-resto
 | OpenClaw | Native Gateway · native default model · whole-turn approval · no per-session MCP |
 
 Every runtime can be enabled, disabled and set as an Agent's default. Credentials are never written to Mandala's config. Actual capability depends on the installed CLI version and its login.
+
+DeepSeek Harness connects through `dsh acp`. If a legacy connection is disabled, choose **Use native CLI settings** under DSH. DeepSeek R1 requires a provider configured in DSH that offers it. Thinking controls for the native default model follow the options reported by DSH.
 
 Gateway-backed setup, limitations and live tests: [Hermes Agent / OpenClaw](docs/hermes-openclaw.md).
 

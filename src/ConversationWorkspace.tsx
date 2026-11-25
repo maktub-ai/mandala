@@ -40,7 +40,7 @@ function DeferredTerminal({loadingLabel,...props}:ComponentProps<typeof Terminal
  return <Suspense fallback={<LoadingState label={loadingLabel}/>}><TerminalPanel {...props} focusOrigin={focusOrigin}/></Suspense>;
 }
 
-export type ConversationWorkspaceTab = 'references' | 'files' | 'changes' | 'materials' | 'terminal' | 'configuration';
+export type ConversationWorkspaceTab = 'references' | 'files' | 'changes' | 'materials' | 'terminal' | 'configuration' | 'subagents';
 type WorkspaceFile = { path: string; status: string; additions?: number | null; deletions?: number | null; binary?: boolean };
 type Workspace = { cwd: string; git: boolean; files: WorkspaceFile[]; directories?: string[]; truncated: boolean; untracked?: number; comparison?: {baseRef:string;baseRefs:string[];mergeBase:string;head:string;headRef:string;error?:string} };
 type FilePreview = { name: string; path: string; text: string; language?: string; diff: string | null; binary?: boolean };
@@ -56,10 +56,10 @@ function read<T>(url: string, signal: AbortSignal, body?: unknown): Promise<T> {
  return requestJson(url,{signal,...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
 }
 
-export default function ConversationWorkspace({conversationId,projectId,activityVersion='',config,theme,onCloseTerminal,requestedContent,initialTab='references',onTabChange,onReference,configuration,contextSources,onClosePreview}: {
+export default function ConversationWorkspace({conversationId,projectId,activityVersion='',config,theme,onCloseTerminal,requestedContent,initialTab='references',onTabChange,onReference,configuration,contextSources,subagents,onClosePreview}: {
  conversationId: string; projectId: string; config: Config; requestedContent?: ContentTarget | null;
  onClosePreview?: () => void;
- configuration?: ReactNode; contextSources?: ReactNode; activityVersion?: string;
+ configuration?: ReactNode; contextSources?: ReactNode; subagents?: ReactNode; activityVersion?: string;
  theme: string; onCloseTerminal: () => void;
  onReference: (value:string)=>void;
  initialTab?: ConversationWorkspaceTab; onTabChange?: (tab: ConversationWorkspaceTab) => void;
@@ -71,6 +71,8 @@ export default function ConversationWorkspace({conversationId,projectId,activity
  const [capabilitiesVisited,setCapabilitiesVisited]=useState(initialTab==='configuration');
  useEffect(()=>{if(showConfiguration)setCapabilitiesVisited(true);},[showConfiguration]);
  const activeTab=showConfiguration?'configuration':tab;
+ const subagentsVisited=useRef(false);
+ if(activeTab==='subagents')subagentsVisited.current=true;
  const [workspace,setWorkspace]=useState<Load<Workspace>|null>(null),[workspaceReload,setWorkspaceReload]=useState(0);
  const workspaceScope=conversationId+':'+activityVersion;
  const workspaceCache=useRef({scope:workspaceScope,views:new Map<string,{loadedAt:number;load:Load<Workspace>}>()});
@@ -97,6 +99,7 @@ export default function ConversationWorkspace({conversationId,projectId,activity
   // Context lives in the chat's context popover; 'references' remains only as the document reader.
   ...(configuration?[{key:'configuration' as const,name:label('能力','Capabilities'),icon:'sparkles' as IconName}]:[]),{key:'files',name:label('文件','Files'),icon:'file'},
   {key:'changes',name:label('改动','Changes'),icon:'gitBranch'},{key:'terminal',name:label('终端','Terminal'),icon:'terminal'},
+  {key:'subagents',name:label('子代理','Subagents'),icon:'users'},
  ];
  // Tabs read as words; only when the panel is too narrow for every label do they fold to icons (names stay as tooltips).
  const tabList=useRef<HTMLDivElement>(null),labelsWidth=useRef(0),[compactTabs,setCompactTabs]=useState(false);
@@ -243,7 +246,8 @@ export default function ConversationWorkspace({conversationId,projectId,activity
   </div>}
   <div role={onClosePreview?"region":"tabpanel"} id={id+'-panel'} aria-labelledby={onClosePreview||activeTab==='references'?undefined:id+'-'+activeTab} aria-label={onClosePreview||activeTab==='references'?label('预览','Preview'):undefined}>
    {(showConfiguration||capabilitiesVisited)&&<div className="content-browser chat-capabilities" hidden={!showConfiguration}>{configuration}{contextSources&&<section className="chat-instructions" aria-label={label('指令与候选资料','Instructions and available sources')}>{contextSources}</section>}</div>}
-   <div className="conversation-workspace-content" hidden={showConfiguration}>
+   {subagentsVisited.current&&<div className="native-subagents-panel" hidden={activeTab!=='subagents'}>{subagents}</div>}
+   <div className="conversation-workspace-content" hidden={showConfiguration||tab==='subagents'}>
    {tab==='files'&&!external&&openPaths.length>0&&<div className="open-file-tabs" role="group" aria-label={label('打开的文件','Open files')}>
     <Button type="button" className="icon-button" aria-label={label('文件列表','File list')} title={label('文件列表','File list')} aria-pressed={!selected} onClick={back}><Icon name="files" size={15}/></Button>
     {openPaths.map(item=>{const name=item.split('/').pop()??item;return <span key={item} className="open-file-tab" data-active={selected?.path===item||undefined}>
@@ -251,7 +255,7 @@ export default function ConversationWorkspace({conversationId,projectId,activity
      <Button type="button" className="icon-button" aria-label={label('关闭 ','Close ')+name} onClick={()=>closeFile(item)}><Icon name="close" size={12}/></Button>
     </span>;})}
    </div>}
-   {tab==='terminal'?<DeferredTerminal loadingLabel={label('正在打开终端…','Opening terminal…')} conversationId={conversationId} theme={theme} onClose={onCloseTerminal} onReference={onReference}/>:reading?<>
+   {tab==='subagents'?null:tab==='terminal'?<DeferredTerminal loadingLabel={label('正在打开终端…','Opening terminal…')} conversationId={conversationId} theme={theme} onClose={onCloseTerminal} onReference={onReference}/>:reading?<>
     <header className="content-reader-heading">
      <div className="content-reader-bar">
       {(()=>{const backLabel=onClosePreview||tab==='references'?label('关闭预览','Close preview'):tab==='changes'?label('返回改动','Back to changes'):label('返回文件','Back to files');return <Button type="button" variant="ghost" className="content-reader-back icon-button" aria-label={backLabel} title={backLabel} onClick={back}><Icon name="arrowLeft" size={15}/></Button>;})()}
@@ -317,13 +321,13 @@ export default function ConversationWorkspace({conversationId,projectId,activity
 }
 
 function isImage(type:string){return /^image\/(png|jpeg|gif|webp)$/.test(type);}
-function ReaderText({name,text,language,markdown=false,referencePath,onReference,previewUrl}:{name:string;text:string;language?:string;markdown?:boolean;referencePath?:string;onReference?:(text:string)=>void;previewUrl?:string}){
+export function ReaderText({name,text,language,markdown=false,referencePath,onReference,previewUrl}:{name:string;text:string;language?:string;markdown?:boolean;referencePath?:string;onReference?:(text:string)=>void;previewUrl?:string}){
  if(markdown||/\.(md|markdown)$/i.test(name))return <MarkdownMessage text={text} frontmatter/>;
  const syntax=language??codeLanguage(name);
  const source=referencePath&&onReference?<WorkspaceCodePreview path={referencePath} text={text} language={syntax} onReference={onReference}/>:syntax?<CodePreview text={text} language={syntax}/>:<pre className="content-plain-text">{text}</pre>;
  return previewUrl&&/\.html?$/i.test(name)?<HtmlPreview key={previewUrl} name={name} url={previewUrl} source={source}/>:source;
 }
-function ReaderImage({src,name}:{src:string;name:string}){
+export function ReaderImage({src,name}:{src:string;name:string}){
  const {t}=useLanguage(),[failed,setFailed]=useState(false),[actualSize,setActualSize]=useState(false);
  return failed?<p role="alert">{t('图片无法加载')}</p>:<>
   <div className="content-image-toolbar"><Button type="button" aria-pressed={actualSize} onClick={()=>setActualSize(value=>!value)}>{t(actualSize?'适应宽度':'查看原尺寸')}</Button></div>
@@ -337,7 +341,7 @@ function ChangeStats({file}:{file?:Pick<WorkspaceFile,'additions'|'deletions'|'b
  if(file.additions==null||file.deletions==null)return <small className="content-item-status">{file.binary?(localize('二进制', 'Binary')):(localize('无法统计', 'Unavailable'))}</small>;
  return <span className="change-stats"><span className="change-add">+{file.additions}</span><span className="change-remove">−{file.deletions}</span></span>;
 }
-async function readAttachment(target:Extract<ContentTarget,{kind:'attachment'}>,signal:AbortSignal):Promise<FilePreview> {
+export async function readAttachment(target:Extract<ContentTarget,{kind:'attachment'}>,signal:AbortSignal):Promise<FilePreview> {
  const textFormat=target.mimeType.startsWith('text/')||/^(?:application\/(?:json|javascript|xml))$/.test(target.mimeType)||!!codeLanguage(target.name)||/\.(md|markdown|txt|csv)$/i.test(target.name);
  if(!textFormat||target.size>1024*1024)return {name:target.name,path:target.name,text:'',diff:null,binary:true};
  const response=await fetch(target.src,{signal});

@@ -1,12 +1,13 @@
-import {afterEach,expect,test} from 'vitest';
+import {afterEach,expect,test,vi} from 'vitest';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {openStore} from '../server/store';
 import {createTasks} from '../server/tasks';
+import type {Task} from '../shared/tasks';
 const owner={userId:'local'},clean:(()=>void)[]=[];
 afterEach(()=>clean.splice(0).forEach(f=>f()));
-function setup(){const home=mkdtempSync(join(tmpdir(),'task-agent-actions-')),store=openStore(home),tasks=createTasks(store,{resolve:(_p,t)=>({agentId:t.assigneeAgentId!,projectId:t.projectId,hostId:'local',input:t.goal,sourceVersions:[],requiredOutputAssetIds:[],effectiveCapabilities:[],nativeVisibility:'partial'})});clean.push(()=>{store.close();rmSync(home,{recursive:true,force:true});});return {store,tasks};}
+function setup(onCompleted?:(task:Task)=>void){const home=mkdtempSync(join(tmpdir(),'task-agent-actions-')),store=openStore(home),tasks=createTasks(store,{onCompleted,resolve:(_p,t)=>({agentId:t.assigneeAgentId!,projectId:t.projectId,hostId:'local',input:t.goal,sourceVersions:[],requiredOutputAssetIds:[],effectiveCapabilities:[],nativeVisibility:'partial'})});clean.push(()=>{store.close();rmSync(home,{recursive:true,force:true});});return {store,tasks};}
 test.each(['creator','assignee','participant'] as const)('authorized %s Agent can finish and reopen a task with actor attribution and no execution',role=>{
  const {tasks}=setup(),agent={...owner,agentId:'a'},task=tasks.createTask(role==='creator'?agent:owner,{goal:'Human or Agent objective',assigneeAgentId:role==='assignee'?'a':null,participantAgentIds:role==='participant'?['a']:[]},'new');
  const done=tasks.moveTask(agent,task.id,task.revision,'completed',null,'finish');expect(done).toMatchObject({state:'completed',completion:{completedBy:'agent',completedByAgentId:'a'},futureAutoResume:false});
@@ -40,7 +41,8 @@ test('creation source uses the actual creator or trusted coordination origin, ne
  const spoofed=tasks.createTask(owner,{goal:'Not a coordinator'},'coordinate:spoofed');expect(spoofed.creationSource).toBe('user');expect(tasks.getTask(owner,user.id).creationSource).toBe('user');expect(tasks.getTask(owner,agent.id).creationSource).toBe('agent');expect(tasks.getTask(owner,system.id).creationSource).toBe('system');expect(tasks.getTask(owner,legacy.id).creationSource).toBe('unknown');
 });
 test.each(['succeeded','failed','interrupted','recovered','stale','active-execution','missing-delivery'] as const)('own Run explicit completion intent finalizes only current settled success: %s',outcome=>{
- const {store,tasks}=setup(),agent={...owner,agentId:'a'},task=tasks.createTask(owner,{goal:'Executor-owned goal',assigneeAgentId:'a'},'new'),run=tasks.startTask(owner,task.id,1,'start'),identity={runId:run.id,hostId:'local',nativeSessionId:'own-session',nativeTurnId:'own-turn'};tasks.bindRunIdentity(identity);
+ const accepted=vi.fn();
+ const {store,tasks}=setup(accepted),agent={...owner,agentId:'a'},task=tasks.createTask(owner,{goal:'Executor-owned goal',assigneeAgentId:'a'},'new'),run=tasks.startTask(owner,task.id,1,'start'),identity={runId:run.id,hostId:'local',nativeSessionId:'own-session',nativeTurnId:'own-turn'};tasks.bindRunIdentity(identity);
  const current=tasks.getTask(agent,task.id),bound={...agent,runId:run.id};
  const requested=tasks.requestCompletion(bound,task.id,current.revision,'request-finish');expect(requested).toMatchObject({state:'running',completion:null,completionRequested:true});expect(tasks.getRun(owner,run.id).state).toBe('running');
  expect(tasks.requestCompletion(bound,task.id,current.revision,'request-finish')).toEqual(requested);
@@ -49,6 +51,8 @@ test.each(['succeeded','failed','interrupted','recovered','stale','active-execut
  if(outcome==='recovered')tasks.markUnknown(run.id);
  tasks.applyRunEvent({...identity,eventKey:'terminal-own',outcome:outcome==='failed'||outcome==='interrupted'?outcome:'succeeded',summary:outcome==='missing-delivery'?'':'Final delivery',artifactVersions:[]});
  const finished=tasks.getTask(owner,task.id);if(outcome==='succeeded'||outcome==='recovered'){expect(finished).toMatchObject({state:'completed',completion:{completedBy:'agent',completedByAgentId:'a',sourceRunId:run.id}});expect(tasks.getRun(owner,run.id).completion).toMatchObject({completedBy:'agent'});}else expect(finished.state).not.toBe('completed');if(outcome==='active-execution'){expect(finished.state).toBe('running');expect(tasks.listRuns(owner,task.id).map(item=>item.state)).toEqual(['succeeded','queued']);}
+ expect(accepted).toHaveBeenCalledTimes(finished.state==='completed'?1:0);
+ if(finished.state==='completed')expect(accepted.mock.calls[0][0]).toMatchObject({id:task.id,state:'completed',completion:{completedBy:'agent'}});
  expect(store.database.prepare('SELECT * FROM task_completion_intents WHERE run_id=?').get(run.id)).toBeUndefined();
 });
 

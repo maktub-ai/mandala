@@ -11,10 +11,34 @@ test('real encrypted remote draft text and File bytes survive host-offline refre
   await computer.getByLabel('账号服务地址',{exact:true}).fill(fixture.relayUrl);await computer.getByLabel('电脑名称',{exact:true}).fill('Synthetic draft computer');await computer.getByLabel('服务账号',{exact:true}).fill('mobile');await computer.getByLabel('服务密码',{exact:true}).fill(fixture.password);await computer.getByRole('button',{name:'连接账号服务',exact:true}).click();
   const code=await computer.getByLabel('电脑配对码',{exact:true}).textContent();await page.setViewportSize({width:390,height:844});await signIn(page,fixture.relayUrl);await page.getByRole('button',{name:'请求授权',exact:true}).click();await computer.getByRole('button',{name:'批准',exact:true}).click();await page.getByRole('button',{name:'刷新',exact:true}).click();await page.getByRole('button',{name:'连接',exact:true}).click();await page.getByLabel('电脑配对码',{exact:true}).fill(code!);await page.getByRole('button',{name:'确认配对',exact:true}).click();
   await page.getByRole('button',{name:'对话列表',exact:true}).click();await page.getByRole('button',{name:/手机端合成对话/}).click();const message=page.getByLabel('消息',{exact:true});await expect(message).toBeEnabled();
-  let sends=0;page.on('request',request=>{if(request.url().endsWith('/api/remote/transport')&&request.postDataBuffer()){try{const original=fixture.inspectRequest(request.postDataBuffer()!.toString('utf8'));if(original.method==='POST'&&/\/(queue|continue)$/.test(original.path))sends++;}catch{}}});
-  await message.fill('Remote offline draft · 离线草稿');await page.locator('input[type=file]').setInputFiles({name:'retained-file.txt',mimeType:'text/plain',buffer:Buffer.from('Actual IndexedDB File bytes')});await expect(page.locator('.composer-draft-feedback')).toHaveCount(0);
-  await fixture.disconnectHost();await page.reload();await expect(message).toHaveValue('Remote offline draft · 离线草稿');await expect(page.locator('.remote-attachment')).toContainText('retained-file.txt');
-  const bytes=await page.evaluate(async()=>{const db=await new Promise<IDBDatabase>((resolve,reject)=>{const request=indexedDB.open('mandala-composer-drafts',1);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});const values=await new Promise<any[]>((resolve,reject)=>{const request=db.transaction('drafts').objectStore('drafts').getAll();request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});const file=values.flatMap(value=>value.files??[]).find(file=>file.name==='retained-file.txt');return file instanceof File?await file.text():null;});
-  expect(bytes).toBe('Actual IndexedDB File bytes');expect(sends).toBe(0);await page.screenshot({path:'/tmp/compact-remote-offline-draft-390.png'});
+  let offline=false, sends=0;
+  const uploadBodies:string[]=[];
+  await page.route('**/api/remote/transport',async route=>{
+   if(offline)return route.abort('internetdisconnected');
+   const original=fixture.inspectRequest(route.request().postData()!);
+   if(original.method==='POST'&&original.path.includes('/attachments?'))uploadBodies.push(original.body);
+   if(original.method==='POST'&&/\/(queue|continue)$/.test(original.path))sends++;
+   await route.continue();
+  });
+  const text='Remote offline draft · 离线草稿',contents='Actual IndexedDB File bytes',fileName='retained-file.txt';
+  await message.fill(text);
+  await page.locator('input[type=file]').setInputFiles({name:fileName,mimeType:'text/plain',buffer:Buffer.from(contents)});
+  await expect.poll(()=>page.evaluate(async({text,contents,fileName})=>{
+   const db=await new Promise<IDBDatabase>((resolve,reject)=>{const r=indexedDB.open('mandala-composer-drafts',1);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+   try{
+    const values=await new Promise<any[]>((resolve,reject)=>{const r=db.transaction('drafts').objectStore('drafts').getAll();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+    const record=values.find(value=>value.format==='remote-composer-v1'&&value.files?.length===1);
+    if(!record)return false;
+    const raw=JSON.stringify(values)+[record.manifest,...record.files].map(part=>new TextDecoder().decode(part.bytes)).join('');
+    return record.files[0].bytes instanceof ArrayBuffer&&record.files[0].bytes.byteLength>contents.length&&[text,fileName,contents].every(secret=>!raw.includes(secret));
+   }finally{db.close();}
+  },{text,contents,fileName})).toBe(true);
+  offline=true;await page.reload();await expect(message).toHaveValue(text);
+  await expect(page.locator('.remote-attachment')).toContainText(fileName);
+  expect(uploadBodies).toEqual([]);expect(sends).toBe(0);
+  offline=false;
+  await page.getByRole('button',{name:'刷新远程工作区'}).click();
+  await page.getByRole('button',{name:'发送',exact:true}).click();
+  await expect.poll(()=>uploadBodies).toEqual([contents]);await expect.poll(()=>sends).toBe(1);
  }finally{await context.close();await fixture.close();}
 });

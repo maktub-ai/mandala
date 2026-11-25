@@ -11,7 +11,7 @@ node cli/openmana.mjs service status
 
 Commands use `openmana <group> <action> [ids]`. IDs are ordered as shown in action help and URL encoded. `--data` supplies a JSON object body, `--query` supplies a JSON object of scalar query values, and either accepts `@/absolute/file.json`. Request field validation remains with the existing API.
 
-All results are JSON. Successful commands print one line to stdout with `{ok:true,command,commandKey?,data}`. Errors print `{ok:false,command,commandKey?,error:{code,message,status?,details?}}` to stderr and exit 1. `--json` is accepted for callers that explicitly request JSON. Event commands emit one success envelope per SSE message and remain connected until the stream closes or the caller interrupts them; `conversations history` provides a finite read.
+Interactive terminals show readable help, results and errors. Use `--human` to request this format in a pipe. Agent invocations, redirected output and `--json` use JSON by default; explicit `--json` and Agent mode take precedence over `--human`. In JSON mode, successful commands print one line to stdout with `{ok:true,command,commandKey?,data}`. Errors print `{ok:false,command,commandKey?,error:{code,message,status?,details?}}` to stderr and exit 1. `--json` is accepted for callers that explicitly request JSON. Event commands emit one success envelope per SSE message and remain connected until the stream closes or the caller interrupts them; `conversations history` provides a finite read.
 
 ## Local user commands
 
@@ -66,15 +66,19 @@ node cli/openmana.mjs conversations history chat-id --query '{"after":0}'
 node cli/openmana.mjs conversations approve chat-id approval-id --data '{"decision":"approve"}' --key approve-1
 node cli/openmana.mjs conversations answer chat-id question-id --data '{"answers":{}}' --key answer-1
 node cli/openmana.mjs conversations workspace-file chat-id --data '{"path":"README.md"}'
-node cli/openmana.mjs tasks create --data '{"goal":"Write a report","criteria":[],"acceptance":"delivery","projectId":"project-id","assigneeAgentId":"agent-id","parentTaskId":null}' --key task-1
+node cli/openmana.mjs tasks create --data '{"goal":"Write a report","criteria":[],"acceptance":"delivery","projectId":"project-id","assigneeAgentId":"agent-id"}' --key task-1
 node cli/openmana.mjs tasks start task-id --data '{"expectedRevision":1}' --key start-1
 node cli/openmana.mjs tasks control task-id
 node cli/openmana.mjs tasks request-changes task-id --data '{"expectedRevision":3,"reason":"Add evidence"}' --key changes-1
 ```
 
-`messages ask/get` handles a simple confirmation without creating a Task. Both messages and new delegations default to `resume`; explicit `notify` only stores the reply. Source stop revokes queued auto replies durably while the recipient continues. Message calls return before execution; a queued or unknown state is not a delivered answer. After a resume inquiry, yield the turn instead of polling while holding its directory. A receiver turn that is still waiting for its own resume inquiries is intermediate: only its final checked reply propagates upstream. A platform-created dedicated receiver is marked completed in Progress only after a successful final answer with no human input, linked Task or pending work. Explicit reopen or a human follow-up permits continued discussion; failed/unknown execution is not completed. No new Task or small-talk category is introduced.
+Use `messages ask/get` for a one-off question or check with another Agent. Project Chats ask within their Project. In the primary Mandala Chat, `messages ask` requires an explicit `targetProjectId` (a Project ID or null). For a follow-up, supply the original inquiry’s `targetConversationId` from `messages get` or the source request’s `outgoingInquiries` in `conversations history`. For work the primary Chat dispatched with `mandala delegate`, or a Task it created and started in a dedicated Agent Chat with `tasks start`, `tasks runs` returns the matching run’s `followUp` address. Pass that address to `messages ask` with the new information. Omit `targetConversationId` for an independent inquiry. Replies return to the source Chat. Both messages and new delegations default to `resume`; explicit `notify` only stores the reply. Source stop revokes queued auto replies durably while the recipient continues. Message calls return before execution; a queued or unknown state is not a delivered answer. After a resume inquiry, yield the turn instead of polling while holding its directory. A receiver turn that is still waiting for its own resume inquiries is intermediate: only its final checked reply propagates upstream. A platform-created dedicated receiver is marked completed in Progress only after a successful final answer with no human input, linked Task or pending work. Explicit reopen or a human follow-up permits continued discussion; failed/unknown execution is not completed. No new Task or small-talk category is introduced.
+
+For one-off work, reply in the current Chat. When the user asks to track it or it needs ongoing follow-up, a bound Agent can use `tasks create` to link that Chat as the source. When the Chat matches the Task assignee and Project and is available as an execution Chat, the first start reuses it. Saving the Task itself leaves the current turn in place.
 
 `tasks list/get/control/create/...` use durable `/api/v2/tasks` APIs. `tasks legacy-list` and local user `tasks delegate` expose the existing helper-task API. In local user mode, delegation additionally requires `sourceConversationId` in `--data`; `--key` is forwarded as its `commandKey`.
+
+In local user mode, a Task's `projectIds` lists its project groups. The execution route still uses `projectId`. To override the groups, send `tasks update task-id --data '{"expectedRevision":1,"projectIds":["app","service"]}' --key group-1`. An empty array clears the groups. Sending `projectIds: null` restores automatic grouping from the task and its current execution conversations. Use `tasks list --query '{"projectId":"service"}'` to find matching tasks. An optional `moduleRef` identifies a lane by `projectId` and `lane` within the task's groups.
 
 ### Assets, memory, installation and automation
 
@@ -139,7 +143,7 @@ Agent mode allows only the following commands; the host additionally checks the 
 | `conversations get` / `conversations history` | `conversation_read` / `conversation_history` | `conversationId`; authorized conversation events; history optionally accepts `after` |
 | `project agents` | `project_agents` | No arguments; host determines project |
 | `tasks delegate` | `delegate` | `--data {"targetAgentId":"…","request":"…","targetConversationId":"…","policy":"resume"}`; last two fields optional; new delegations default to resume |
-| `messages ask` | `message_ask` | `--data {"targetAgentId":"…","text":"…","targetConversationId":"…","policy":"resume"}`; last two fields optional; simple confirmation without creating a Task |
+| `messages ask` | `message_ask` | `--data {"targetAgentId":"…","text":"…","targetConversationId":"…","policy":"resume"}`; last two fields optional in a Project Chat. The primary Chat requires `targetProjectId`. Supply the original `targetConversationId` for a follow-up |
 | `messages get` | `message_read` | `<messageId>`; request outcome, reply text and reply delivery state |
 | `assets publish` | `artifact_publish` | `--data {"title":"…","files":[{"path":"relative/output.txt"}]}`; paths are within the declared output root |
 | `assets update` | `artifact_update` | `--data {"assetId":"…","expectedHeadVersionId":"…","path":"relative/output.md"}`; enabled target owned by this Agent, current exact project policy, stable `--key` |
@@ -305,3 +309,5 @@ Mandala 的按需团队规划同时整理长期职责和已有能力。仅在当
 用户确认具体范围后，复用现有配置提议／确认机制。已有库对象用 ID 绑定；外部 Skill 可用 `skills: [{name, path}]` 绑定包含 `SKILL.md` 的完整目录，运行时准备会携带整个包。它是外部引用，后续会受源包修改影响，不等于导入不可变的托管版本。不能只注册正文而丢掉脚本和资源。
 
 新增原生 MCP 的跨 Runtime 导入、插件安装、凭据和全局库编辑，没有受限工具支持时保留为设置中的人工配置事项。发现不会暴露密钥，也不会代替用户授权。保存设置仅证明已配置；实际加载和安全工具调用必须另有目标 Runtime 证据，未验收则明确报告。草稿确认本身不自动启动模型或验证任务。
+
+When task creation returns `awaiting_confirmation`, the desktop shows a blueprint routing suggestion. Wait for the user to choose the project, module and observer. A review ID identifies a suggestion. Only a confirmed task can be delegated or started.

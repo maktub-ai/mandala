@@ -136,9 +136,26 @@ export async function connectCodex(rpc: RpcClient, cwd?: string, fullAccess = tr
     }
     return { selection: named !== undefined ? { permissions: named } : { sandbox: config.sandbox_mode ?? "workspace-write" }, profiles:undefined, signature, needsMailboxPreparation };
   };
+  const terminalThread = (thread: any, threadId: string, status: string) => thread?.id === threadId &&
+    thread.status?.type === status && Array.isArray(thread.turns) &&
+    thread.turns.every((turn: any) => ['completed', 'failed', 'interrupted'].includes(turn.status));
+  const backgroundTerminals = async (threadId: string) => {
+    try { return await rpc.request('thread/backgroundTerminals/list', { threadId }); }
+    catch (error) {
+      // After a process restart this endpoint only knows loaded threads, even
+      // when thread/read can still retrieve the completed history from disk.
+      if (!(error instanceof Error) || error.message !== `thread not found: ${threadId}`) throw error;
+      const { thread } = await rpc.request('thread/read', { threadId, includeTurns: true });
+      if (!terminalThread(thread, threadId, 'notLoaded')) throw error;
+      const { thread: resumed } = await rpc.request('thread/resume', { threadId });
+      if (!terminalThread(resumed, threadId, 'idle')) throw error;
+      return await rpc.request('thread/backgroundTerminals/list', { threadId });
+    }
+  };
   return {
     async inspectContext(threadId){
-      const [{thread},terminals]=await Promise.all([rpc.request('thread/read',{threadId,includeTurns:true}),rpc.request('thread/backgroundTerminals/list',{threadId})]);
+      const terminals=await backgroundTerminals(threadId);
+      const {thread}=await rpc.request('thread/read',{threadId,includeTurns:true});
       return {settled:thread?.id===threadId&&['idle','notLoaded'].includes(thread.status?.type)&&Array.isArray(thread.turns)&&thread.turns.every((turn:any)=>['completed','failed','interrupted'].includes(turn.status))&&Array.isArray(terminals?.data)&&terminals.data.length===0&&!terminals.nextCursor,
         completedCompactions:(thread?.turns??[]).filter((turn:any)=>turn.status==='completed'&&turn.items?.some((item:any)=>item.type==='contextCompaction')).map((turn:any)=>turn.id)};
     },
@@ -151,7 +168,7 @@ export async function connectCodex(rpc: RpcClient, cwd?: string, fullAccess = tr
     },
     async assertReloadable(threadId){
       let terminals:any;
-      try{terminals=await rpc.request('thread/backgroundTerminals/list',{threadId});if(!Array.isArray(terminals?.data))throw Error('Invalid background state');}
+      try{terminals=await backgroundTerminals(threadId);if(!Array.isArray(terminals?.data))throw Error('Invalid background state');}
       catch{throw new DomainError('native_background_check_failed',409,'Background command status could not be checked. Retry later; the current conversation is preserved.');}
       if(terminals.data.length||terminals.nextCursor)throw new DomainError('native_background_active',409,'Background commands are still running. Let them finish, then retry; the current conversation is preserved.');
     },
@@ -175,6 +192,12 @@ export async function connectCodex(rpc: RpcClient, cwd?: string, fullAccess = tr
         version,
         ...(explain?{nativeAccountPresent:!!result.account&&typeof result.account==='object'}:{}),
       };
+    },
+    async getContextWindow(model) {
+      const {config}=await rpc.request('config/read',cwd?{cwd}:{});
+      if(model && model!==config?.model)return undefined;
+      const limit=config?.model_context_window;
+      return Number.isSafeInteger(limit)&&limit>0 ? limit : undefined;
     },
     async listModels() {
       const models: ModelChoice[] = [];

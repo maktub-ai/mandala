@@ -9,7 +9,7 @@ import type { ApprovalMode, McpServer } from '../shared/types';
 import type { TurnOptions } from '../shared/chat-input';
 import { canApproveAcpLocally } from './approval-policy';
 import { spawn } from './native-spawn';
-import { bindLocalCatalogLauncher, runtimeError } from './runtime';
+import { bindLocalCatalogLauncher, rpcModelContextWindow, runtimeError } from './runtime';
 
 const approvalPrefix = 'Mandala tool approval: ';
 const noMcp = (mcp?: McpServer[]) => {
@@ -214,6 +214,7 @@ export async function startPi(options: RuntimeOptions): Promise<ExecutionClient>
   };
   return {
     async getStatus(){const state=await request('get_state');return {status:state.model?'ready':'login-required',version:null};},
+    getContextWindow: model => rpcModelContextWindow(request,model),
     async listModels(){
       const [catalog,state,thinking]=await Promise.all([request('get_available_models'),request('get_state'),request('get_available_thinking_levels')]);
       return (catalog.models??[]).map((value:any)=>{

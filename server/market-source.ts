@@ -1,4 +1,5 @@
 import { parseDocument } from "yaml";
+import { isIdentityEmoji } from "../shared/identity";
 
 export type MarketFetcher = (url: string, signal?: AbortSignal) => Promise<Response>;
 export const safeMarketPath = (path: string) => path.split("/").every(part => !!part && part !== "." && part !== ".." && !/[\\\x00-\x1f:]/.test(part));
@@ -25,5 +26,6 @@ export function skillHeader(readme: string) {
   const strings = (input: unknown): string[] => Array.isArray(input) ? input.filter((item): item is string => typeof item === "string").slice(0, 50).map(item => item.slice(0, 200)) : [];
   const metadata = value.metadata?.openclaw ?? value.metadata?.clawdbot ?? {};
   return { name: value.name, description: typeof value.description === "string" ? value.description.trim().slice(0, 5000) : "",
+    ...(isIdentityEmoji(metadata.emoji) ? { skillIcon: metadata.emoji } : {}),
     requirements: { binaries: [...strings(metadata.requires?.bins), ...strings(metadata.requires?.anyBins)], environment: strings(metadata.requires?.env), platforms: strings(metadata.os) } };
 }

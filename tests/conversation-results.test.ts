@@ -28,7 +28,17 @@ it('returns durable receipt results with the exact execution, never unrelated or
  store.renameConversation(execution.id,'Renamed collection check');
  expect(conversationResults(store,tasks,p,destination.id,()=>{})[0].title).toBe('Renamed collection check');
  expect(conversationResults(store,tasks,p,destination.id,chat=>{if(chat===execution.id)throw new DomainError('forbidden',403,'Source access revoked');})).toEqual([]);
- const completed=tasks.moveTask(p,task.id,task.revision,'completed',null,'complete-task');
+ const review=tasks.userCommand(p,task.id,task.revision,'complete');
+ expect(conversationResults(store,tasks,p,destination.id,()=>{})[0]).toMatchObject({awaitingReview:true,taskRevision:review.revision});
+ store.database.prepare("INSERT INTO task_runs(id,task_id,execution_id,attempt,state,created_at) VALUES (?,?,?,2,'failed',?)").run('newer-run',task.id,membership.id,at);
+ expect(conversationResults(store,tasks,p,destination.id,()=>{})[0].awaitingReview).toBe(false);
+ expect(()=>tasks.userCommand(p,task.id,review.revision,'accept',null,undefined,'old-result','exact-run')).toThrow();
+ store.database.prepare("DELETE FROM task_runs WHERE id='newer-run'").run();
+ store.database.prepare('UPDATE task_runs SET execution_snapshot=? WHERE id=?').run(JSON.stringify({goal:'Old goal',criteria:[],acceptance:task.acceptance}),'exact-run');
+ expect(conversationResults(store,tasks,p,destination.id,()=>{})[0].awaitingReview).toBe(false);
+ expect(()=>tasks.userCommand(p,task.id,review.revision,'accept',null,undefined,'old-goal','exact-run')).toThrow();
+ store.database.prepare('UPDATE task_runs SET execution_snapshot=NULL WHERE id=?').run('exact-run');
+ const completed=tasks.userCommand(p,task.id,review.revision,'accept',null,undefined,'result','exact-run');
  expect(conversationResults(store,tasks,p,destination.id,()=>{})[0]).toMatchObject({taskState:'completed',completion:{completedBy:'user'}});
  tasks.moveTask(p,task.id,completed.revision,'todo',null,'reopen-task');
  expect(conversationResults(store,tasks,p,destination.id,()=>{})[0]).toMatchObject({taskState:'todo',completion:null});

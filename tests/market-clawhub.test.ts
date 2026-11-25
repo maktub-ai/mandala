@@ -7,7 +7,7 @@ import { createMarket } from "../server/market";
 import { readConfig, writeConfig } from "../server/config";
 import { marketZip } from "./fixtures/market-zip";
 let home: string;
-const content = '---\nname: sample\ndescription: |-\n  A multiline skill description\n  for real catalog cards.\nmetadata:\n  openclaw:\n    requires:\n      bins: [gh]\n      env: [DEMO_TOKEN]\n---\n# Synthetic sample\nRead references/guide.md.';
+const content = '---\nname: sample\ndescription: |-\n  A multiline skill description\n  for real catalog cards.\nmetadata:\n  openclaw:\n    emoji: ✍️\n    requires:\n      bins: [gh]\n      env: [DEMO_TOKEN]\n---\n# Synthetic sample\nRead references/guide.md.';
 const files = [{ path: "SKILL.md", content }, { path: "references/guide.md", content: "Synthetic guide" }];
 const manifest = files.map(file => ({ path: file.path, size: Buffer.byteLength(file.content), sha256: createHash("sha256").update(file.content).digest("hex") }));
 const fetcher = vi.fn(async (input: string) => {
@@ -77,8 +77,9 @@ it("installs all pinned files with hashes, preserves requirements and removes th
   const market = createMarket(home, fetcher), detail = await market.detail("skill:clawhub/example/sample");
   expect(detail.description).toBe("A multiline skill description\nfor real catalog cards.");
   expect(detail.requirements).toEqual({ binaries: ["gh"], environment: ["DEMO_TOKEN"], platforms: [] });
+  expect(detail.skillIcon).toBe("✍️");
   const installed = await market.install({ catalogId: detail.catalogId, version: detail.version, revision: (await readConfig(home)).revision, targets: [{ kind: "agent", id: "a" }] });
-  const path = (await readConfig(home)).config.skillLibrary![0].path;
+  const path = join(home, "market", "packages", installed.packageId!);
   expect(await readFile(join(path, "references/guide.md"), "utf8")).toBe(files[1].content);
   expect(fetcher.mock.calls.filter(([url]) => /versions|file|download/.test(url)).every(([url]) => url.includes("owner=example"))).toBe(true);
   await market.unlink(installed.id, { kind: "agent", id: "a" }, (await readConfig(home)).revision);
@@ -96,6 +97,21 @@ it.each([
   await expect(market.install({ catalogId: detail.catalogId, version: detail.version, revision: (await readConfig(home)).revision, targets: [{ kind: "agent", id: "a" }] })).rejects.toThrow(/invalid/);
   expect((await readConfig(home)).config.marketInstallations).toBeUndefined();
   expect(await readdir(join(home, "market/packages"))).toEqual([]);
+});
+it('rejects an upgrade with a tampered attachment without changing the installed version or bindings', async () => {
+  const market = createMarket(home, fetcher), detail = await market.detail('skill:clawhub/example/sample');
+  const installed = await market.install({ catalogId: detail.catalogId, version: detail.version, revision: (await readConfig(home)).revision, targets: [{ kind: 'agent', id: 'a' }] });
+  const snapshot = await readConfig(home);
+  const changed = createMarket(home, async input => {
+    const url = new URL(input);
+    if (url.pathname.endsWith('/skills/sample')) return Response.json({ skill: { slug: 'sample', summary: 'New version' }, owner: { handle: 'example' }, latestVersion: { version: '2.0.0' } });
+    if (url.pathname.includes('/versions/')) return Response.json({ version: { version: '2.0.0', files: manifest, security: { status: 'clean' } } });
+    if (url.pathname.endsWith('/download')) return new Response(marketZip(files.map(file => file.path === 'SKILL.md' ? file : { ...file, content: 'Tampered guide' })));
+    return fetcher(input);
+  });
+  await expect(changed.upgrade({ id: installed.id, version: '2.0.0', revision: snapshot.revision })).rejects.toThrow(/invalid/);
+  expect((await readConfig(home)).config).toEqual(snapshot.config);
+  expect(await readdir(join(home, 'market/packages'))).toEqual([installed.packageId]);
 });
 it("never installs GitHub handoff descriptors or blocked versions as if they were skill archives", async () => {
   const market = createMarket(home, url => url.includes("/download?") ? Promise.resolve(Response.json({ kind: "public-github", url: "https://example.org" })) : fetcher(url));
@@ -137,7 +153,7 @@ it("accepts a listed _meta.json that the registry replaces with generated downlo
   const detail = await market.detail("skill:clawhub/example/sample");
   expect(detail.fileCount).toBe(2);
   const installed = await market.install({ catalogId: detail.catalogId, version: detail.version, revision: (await readConfig(home)).revision, targets: [{ kind: "agent", id: "a" }] });
-  const path = (await readConfig(home)).config.skillLibrary![0].path;
+  const path = join(home, "market", "packages", installed.packageId!);
   expect(await readFile(join(path, "references/guide.md"), "utf8")).toBe(files[1].content);
   expect(await readdir(path)).toEqual(["SKILL.md", "references"]);
   await market.unlink(installed.id, { kind: "agent", id: "a" }, (await readConfig(home)).revision);
@@ -214,4 +230,22 @@ it("does not cache a cancelled catalog read and lets a later retry populate the 
   expect((await market.search("skill", "", "", "clawhub")).items).toHaveLength(1);
   await market.search("skill", "", "", "clawhub");
   expect(attempts).toBe(2);
+});
+
+it("exposes ClawHub-hosted author icons without extra catalog requests", async () => {
+  const icon = "/api/v1/skill-icons/" + "a".repeat(64);
+  const entry = { slug: "sample", ownerHandle: "example", summary: "Synthetic sample", icon };
+  const source = vi.fn(async (url: string) => {
+    if (url.includes("/skills?")) return Response.json({ items: [entry, { ...entry, slug: "untrusted", icon: "https://untrusted.example/icon.png" }] });
+    if (url.includes("/search?")) return Response.json({ results: [entry] });
+    if (url.endsWith("/skills/sample?owner=example")) return Response.json({ skill: entry, owner: { handle: "example" }, latestVersion: { version: "1.0.0" } });
+    return fetcher(url);
+  });
+  const market = createMarket(home, source);
+  const { items } = await market.search("skill", "", "", "clawhub");
+  expect(source).toHaveBeenCalledTimes(1);
+  expect(items[0].skillIcon).toBe("https://clawhub.ai" + icon);
+  expect(items[1].skillIcon).toBeUndefined();
+  expect((await market.search("skill", "sample", "", "clawhub")).items[0].skillIcon).toBe(items[0].skillIcon);
+  expect((await market.detail("skill:clawhub/example/sample")).skillIcon).toBe(items[0].skillIcon);
 });

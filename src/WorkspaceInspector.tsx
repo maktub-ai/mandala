@@ -5,11 +5,12 @@ import Icon from './ui/Icon';
 import { useLanguage } from './i18n';
 import './workspace-inspector.css';
 
-export default function WorkspaceInspector({ title, open, onClose, children, id, className = '', preserveContent = false, resizable = false, compact = false, returnFocusRef, overlay = false }: {
- title: string; open: boolean; onClose: () => void; children: ReactNode; id?: string; className?: string; preserveContent?: boolean; resizable?: boolean; compact?: boolean; returnFocusRef?: RefObject<HTMLElement|null>; overlay?: boolean;
+export default function WorkspaceInspector({ title, open, onClose, children, id, className = '', preserveContent = false, resizable = false, compact = false, returnFocusRef, closeLabel, heading = title, overlayBelow = 1100, overlay = false }: {
+ title: string; open: boolean; onClose: () => void; children: ReactNode; id?: string; className?: string; preserveContent?: boolean; resizable?: boolean; compact?: boolean; returnFocusRef?: RefObject<HTMLElement|null>; overlay?: boolean; closeLabel?: string; heading?: string; overlayBelow?: number;
 }) {
  const {t}=useLanguage(),panel=useRef<HTMLElement>(null),backdrop=useRef<HTMLButtonElement>(null),trigger=useRef<HTMLElement|null>(null);
- const [viewportNarrow,setViewportNarrow]=useState(()=>matchMedia('(max-width: 1100px)').matches);
+ const narrowQuery='(max-width: '+overlayBelow+'px)';
+ const [viewportNarrow,setViewportNarrow]=useState(()=>matchMedia(narrowQuery).matches);
  const narrow=viewportNarrow||overlay;
  const visited=useRef(false),drag=useRef<{x:number;width:number}|null>(null);
  if(open)visited.current=true;
@@ -19,9 +20,9 @@ export default function WorkspaceInspector({ title, open, onClose, children, id,
  const close=()=>{onClose();requestAnimationFrame(()=>{
   if(document.activeElement!==document.body&&!panel.current?.contains(document.activeElement))return;
   const opener=trigger.current;
-  (opener?.isConnected&&opener!==document.body&&!panel.current?.contains(opener)?opener:returnFocusRef?.current)?.focus();
+  (opener?.isConnected&&opener!==document.body&&!panel.current?.contains(opener)?opener:returnFocusRef?.current)?.focus({preventScroll:true});
  });};
- useEffect(()=>{const media=matchMedia('(max-width: 1100px)'),update=()=>setViewportNarrow(media.matches);media.addEventListener('change',update);return()=>media.removeEventListener('change',update);},[]);
+ useEffect(()=>{const media=matchMedia(narrowQuery),update=()=>setViewportNarrow(media.matches);media.addEventListener('change',update);return()=>media.removeEventListener('change',update);},[narrowQuery]);
  useLayoutEffect(()=>{
   if(!open)return;
   if(!panel.current?.contains(document.activeElement))trigger.current=document.activeElement as HTMLElement;
@@ -65,7 +66,7 @@ export default function WorkspaceInspector({ title, open, onClose, children, id,
     onPointerMove={event=>{if(drag.current)resize(drag.current.width+drag.current.x-event.clientX);}}
     onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}
     onDoubleClick={()=>resize(440)} onKeyDown={event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();resize(event.key==='Home'?360:event.key==='End'?800:width+(event.key==='ArrowLeft'?24:-24));}}/>}
-   <header className="inspector-heading">{!compact&&<h2>{title}</h2>}<Button type="button" className="icon-button" aria-label={t(compact?'收起右侧栏':'收起信息')} title={t(compact?'收起右侧栏':'收起信息')} onClick={close}><Icon name={compact?"panel":"close"} size={18}/></Button></header>
+   <header className="inspector-heading">{!compact&&<h2 title={heading}>{heading}</h2>}<Button type="button" className="icon-button" aria-label={closeLabel??t(compact?'收起右侧栏':'收起信息')} title={closeLabel??t(compact?'收起右侧栏':'收起信息')} onClick={close}><Icon name={compact?"panel":"close"} size={18}/></Button></header>
    <div className="inspector-content">{children}</div>
   </aside>
  </>;

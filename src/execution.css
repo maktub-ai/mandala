@@ -45,6 +45,8 @@
   .operation-preview { flex-basis: 40px; }
   .execution-trace .operation-content { padding-left: 8px; }
 }
-.recalled-records { list-style: none; padding: 0; }
-.recalled-records li { display: flex; gap: 8px; padding: 8px 0; font-size: var(--type-ui); }
-.recalled-records small { color: var(--muted); }
+.recalled-records { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 8px; list-style: none; padding: 0; }
+.recalled-records li { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: start; row-gap: 4px; padding: 8px 0; font-size: var(--type-ui); }
+.recalled-records small { color: var(--muted); white-space: nowrap; }
+.recalled-records :is(span, code) { min-width: 0; overflow-wrap: anywhere; }
+.recalled-records code { grid-column: 2; }

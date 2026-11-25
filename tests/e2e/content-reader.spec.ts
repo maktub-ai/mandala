@@ -15,7 +15,6 @@ test('reads documents in a dedicated content view, returns to search and retains
  const draft=page.getByRole('textbox',{name:'消息',exact:true});await draft.fill('Continue discussing the plan');
  const trigger=page.getByRole('button',{name:'展开右侧栏',exact:true});await trigger.click();
  const panel=page.locator('#chat-environment-panel');
- await expect.poll(() => configReads).toBe(1);
  await panel.getByRole('tab',{name:'文件',exact:true}).click();
  await expect(panel.getByRole('tab',{name:'配置',exact:true})).toHaveCount(0);
  await panel.getByRole('searchbox',{name:'筛选文件',exact:true}).fill('plan');
@@ -23,11 +22,12 @@ test('reads documents in a dedicated content view, returns to search and retains
  await expect(panel.getByRole('heading',{name:'Reading plan',exact:true})).toBeVisible();
  await expect(panel.getByRole('searchbox')).toHaveCount(0);
  await expect(panel.locator('.conversation-workspace-preview strong')).toHaveText('clear emphasis');
+ const configReadsBeforeSwitch = configReads;
  await panel.getByRole('button',{name:'返回文件',exact:true}).click();
  await expect(panel.getByRole('searchbox')).toHaveValue('plan');
  await panel.getByRole('button',{name:'docs/plan.md',exact:true}).click();
  await expect(panel.getByRole('heading',{name:'Reading plan',exact:true})).toBeVisible();
- expect(configReads).toBe(1);
+ expect(configReads).toBe(configReadsBeforeSwitch);
  const divider=panel.getByRole('separator',{name:'调整右侧栏宽度',exact:true});
  const before=(await panel.boundingBox())!.width;await divider.focus();await page.keyboard.press('ArrowLeft');
  expect((await panel.boundingBox())!.width).toBeGreaterThan(before);
@@ -39,9 +39,10 @@ test('reads documents in a dedicated content view, returns to search and retains
  await expect(draft).toHaveValue('Continue discussing the plan');
 });
 
-test('opens chat file links directly in content and preserves the unsent draft', async ({ page }) => {
+test('opens chat file links directly in content and preserves the unsent draft', async ({ page, request }) => {
  await page.route('**/local-file',route=>route.fulfill({json:{name:'report.md',path:'/tmp/report.md',text:'# Inspection report\n\nReadable next to this conversation.'}}));
- await page.goto('/?project=&agent=');
+ const chat = await (await request.post('/api/conversations',{data:{workspaceId:null}})).json();
+ await page.goto('/?conversation='+chat.id);
  await page.getByRole('textbox',{name:'消息',exact:true}).fill('[排查记录](/tmp/report.md)');
  await page.getByRole('button',{name:'发送消息',exact:true}).click();
  await expect(page.getByTestId('chat-status')).toHaveText('就绪');

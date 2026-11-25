@@ -34,3 +34,5 @@
 .mandala-welcome-loop > svg { color:var(--muted); }
 .mandala-welcome-loop small { flex-basis:100%; color:var(--muted); font-size:var(--type-meta); line-height:1.6; }
 .cli-notice code { font-size:var(--type-meta); font-family:var(--font-mono); padding:0 4px; border-radius:4px; background:var(--raised); }
+.mandala-details-setting { display:flex; align-items:center; gap:8px; }
+.mandala-handoff-hint { display:block; padding:0 8px 4px; color:var(--muted); font-size:var(--type-meta); }

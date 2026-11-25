@@ -38,6 +38,15 @@ test('unchanged progress polls do not rescan transcript activity, while edits in
   expect(reads).toHaveBeenCalledTimes(4);
  }finally{spy.mockRestore();}
 });
+
+test('exposes the project inferred from a readable chat separately from its execution route',()=>{
+ const c=chat('Worktree session');
+ store.updateConversation(c.id,{attributedProjectId:'source'});
+ const progress=createConversationProgress(store,manager);
+ expect(progress.list({now})).toContainEqual(expect.objectContaining({id:c.id,projectId:'',attributedProjectId:'source'}));
+ vi.spyOn(manager,'authorizeConversationRead').mockImplementation(()=>{throw Error('unavailable');});
+ expect(progress.list({now})).toEqual([]);
+});
 test.each(['idle','running','approval','interrupted'] as const)('primary coordination chat is absent from task progress even when %s',status=>{
  const primary=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null,purpose:'mandala-main'}),execution=chat('Mandala execution','running');
  store.updateConversation(primary.id,{status});
@@ -306,4 +315,38 @@ test('never projects reasoning or analysis-only text as a public current update'
  expect(p.list({now})[0].latestProgress).toBeNull();
  store.appendEvent(c.id,'text',{text:'Public update',itemId:'public',runId:'r'},now);
  expect(p.list({now})[0].latestProgress).toMatchObject({text:'Public update',source:'output'});
+});
+
+
+test('unchanged history is not rescanned, while edits, superseding, deletion and rollback refresh statistics',()=>{
+ const c=chat('History'),prepare=store.database.prepare.bind(store.database),scans=vi.fn();
+ const spy=vi.spyOn(store.database,'prepare').mockImplementation((sql)=>{
+  const statement=prepare(sql);
+  if(sql.startsWith('SELECT MAX(id) AS cursor')){const get=statement.get.bind(statement);vi.spyOn(statement,'get').mockImplementation((...args)=>{scans();return get(...args);});}
+  return statement;
+ });
+ try{
+  const progress=createConversationProgress(store,manager);
+  progress.list({now});progress.list({now});expect(scans).toHaveBeenCalledTimes(1);
+  const reply=store.appendEvent(c.id,'text',{text:'Reply'},now);
+  expect(progress.list({now})[0].activityAt).toBe(now);expect(scans).toHaveBeenCalledTimes(2);
+  store.database.prepare('UPDATE events SET createdAt=? WHERE id=?').run(old,reply.id);
+  expect(progress.list({now})[0].activityAt).toBe(old);
+  store.database.prepare('UPDATE events SET superseded=1 WHERE id=?').run(reply.id);progress.list({now});
+  store.database.prepare('DELETE FROM events WHERE id=?').run(reply.id);progress.list({now});expect(scans).toHaveBeenCalledTimes(5);
+  store.database.exec('BEGIN');store.appendEvent(c.id,'text',{text:'Rolled back'},now);expect(progress.list({now})[0].activityAt).toBe(now);store.database.exec('ROLLBACK');
+  store.appendEvent(c.id,'text',{text:'Real reply'},old);expect(progress.list({now})[0].activityAt).toBe(old);
+ }finally{spy.mockRestore();}
+});
+test('marks only handoffs from a Mandala primary chat and when the user last wrote in the chat directly',()=>{
+ const primary=store.createConversation({projectId:'',agentId:'',cli:'codex',model:null,purpose:'mandala-main'}),peer=chat('Peer'),helper=chat('Helper');
+ const insert=store.database.prepare("INSERT INTO agent_messages VALUES (?,?,?,1,'inv','Question','resume',?,?,?,1,?,NULL,?,?)");
+ insert.run('peer-ask',peer.id,helper.id,'succeeded','Answer','pending','peer-input','peer-key',now);
+ insert.run('first',primary.id,helper.id,'succeeded','Answer','consumed','first-input','first-key',old);
+ insert.run('second',primary.id,helper.id,'running',null,'pending','second-input','second-key',now);
+ store.appendEvent(helper.id,'user',{text:'Handed over',agentMessage:{id:'second',direction:'request'}},now);
+ const rows=createConversationProgress(store,manager).list({now}),row=(id:string)=>rows.find(item=>item.id===id)!;
+ expect(row(helper.id).handoff).toEqual({sourceConversationId:primary.id,state:'running',replyState:'pending',createdAt:now});
+ expect(row(helper.id).directUserAt).toBe(old);
+ expect(row(peer.id).handoff).toBeNull();
 });

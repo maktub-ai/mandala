@@ -1,3 +1,4 @@
+import WorkspaceFirstUse from './ui/WorkspaceFirstUse';
 import { isSystemAgent } from '../shared/chat-context';
 import BrandMark from './ui/BrandMark';
 import type { ReactNode } from 'react';
@@ -35,9 +36,11 @@ export default function WorkspaceDirectory({ kind, config, disabled, loading, qu
   const systemMatches = !!system && (system.name+' '+capability+' '+(localize('系统智能体', 'System Agent'))).toLocaleLowerCase().includes(search);
   const searchField = <Input type="search" aria-label={title} placeholder={localize(`搜索${title}`, `Search ${projects ? 'projects' : 'agents'}`)} value={query} disabled={disabled} onChange={event => onQuery(event.target.value)}/>;
   const rows = projects ? config.projects.filter(item => (item.name + ' ' + item.background).toLocaleLowerCase().includes(search)) : agents.filter(item => (item.name + ' ' + item.instructions).toLocaleLowerCase().includes(search));
+  const firstUse = !loading && !search && !rows.length;
+  const createButton = <Button variant="primary" disabled={disabled} onClick={onCreate}><Icon name="plus" size={15}/>{t(projects ? '添加项目' : '添加智能体')}</Button>;
   return <WorkspacePage className="workspace-directory">
-    <PageHeader onMobileNav={onMobileNav} title={title} icon={projects ? 'project' : 'agent'} context={loading ? undefined : String(projects ? config.projects.length : agents.length + (system ? 1 : 0))} actions={<>{status}<Button className="primary" disabled={disabled} onClick={onCreate}><Icon name="plus" size={15}/>{t(projects ? '添加项目' : '添加智能体')}</Button></>}>
-      {searchField}
+    <PageHeader onMobileNav={onMobileNav} title={title} icon={projects ? 'project' : 'agent'} context={loading ? undefined : String(projects ? config.projects.length : agents.length + (system ? 1 : 0))} actions={<>{status}{!firstUse && createButton}</>}>
+      {(!firstUse || !!system) && searchField}
     </PageHeader>
     {!loading && system && systemMatches && <section className="system-agent-section" aria-label={localize('系统智能体', 'System Agent')}>
       <span className="system-agent-avatar" aria-hidden="true"><BrandMark/></span>
@@ -50,6 +53,12 @@ export default function WorkspaceDirectory({ kind, config, disabled, loading, qu
       {projects ? <span className="workspace-directory-context"><span className="workspace-directory-members" aria-hidden="true">{members(item.id).slice(0, 4).map(agent => <IdentityAvatar key={agent.id} identity={agent} kind="agent" size={20}/>)}</span>{`${memberCount(item.id)} ${localize('智能体', (memberCount(item.id) === 1 ? 'Agent' : 'Agents'))}`}</span>
         : <span className="workspace-directory-context">{agentProjects(item.id).length ? <span className="workspace-directory-members is-projects" title={agentProjects(item.id).map(project => project.name).join('、')}>{agentProjects(item.id).slice(0, 4).map(project => <IdentityAvatar key={project.id} identity={project} kind="project" size={20}/>)}<span className="sr-only">{agentProjects(item.id).map(project => project.name).join('、')}</span></span> : <span>{localize('未加入项目', 'No project')}</span>}<span className="workspace-directory-runtime" title={runtimeLabel((item as Agent).defaultCli)}><RuntimeIcon cli={(item as Agent).defaultCli} size={18}/><span className="sr-only">{runtimeLabel((item as Agent).defaultCli)}</span></span></span>}
       <Icon name="chevronRight" size={15}/>
-    </DirectoryLink>)}</div> : search && systemMatches ? null : <EmptyState>{t(query ? '没有匹配选项' : projects ? '添加项目以组织相关工作。' : '添加智能体以开始配置。')}</EmptyState>}
+    </DirectoryLink>)}</div> : search ? !systemMatches && <EmptyState>{t('没有匹配选项')}</EmptyState> :
+      <WorkspaceFirstUse icon={projects ? 'project' : 'agent'}
+        title={projects ? localize('从一个项目开始', 'Start with a project') : localize('组建你的智能体团队', 'Build your Agent team')}
+        action={createButton}>
+        {projects ? localize('把相关任务、资料和智能体放在同一个项目中。', 'Keep related tasks, resources, and Agents together in one project.') :
+          localize('为智能体设定职责，让它在对话和项目中负责一项工作。', 'Give an Agent a role and put it to work in chats and projects.')}
+      </WorkspaceFirstUse>}
   </WorkspacePage>;
 }

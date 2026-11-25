@@ -37,10 +37,11 @@ test('owned goal schedule keeps its goal link and appears in Task and Mandala pa
  expect((await(await request.get('/api/automations')).json()).automations.find((a:{id:string})=>a.id===rule.id)).toMatchObject({goalId:fixture.goalId,agentId:config.mandala.agentId});
  await page.goto('/tasks/'+fixture.goalId);await page.locator('summary').filter({hasText:/^Schedule$/}).click();await expect(page.locator('.task-rule-schedule').getByText('Every 30 minutes',{exact:true})).toBeVisible();
  await page.goto('/mandala');
- const panels=page.locator('.mandala-panels'),scheduled=panels.getByRole('tab',{name:'Scheduled',exact:true}),tasks=panels.getByRole('tab',{name:'Tasks',exact:true});
- await scheduled.click();await expect(panels.getByText('Goal interval monitor',{exact:true})).toBeVisible();
+ const panels=page.locator('.mandala-panels'),scheduled=panels.getByRole('tab',{name:'Agents',exact:true}),tasks=panels.getByRole('tab',{name:'Collaboration',exact:true});
+ // Schedules now live with the Agents that run them.
+ await scheduled.click();await expect(panels.locator('.mandala-team-schedules').getByText('Goal interval monitor',{exact:true})).toBeVisible();
  await expect(scheduled).toHaveAttribute('aria-selected','true');await expect(tasks).toHaveAttribute('aria-selected','false');
- await expect(panels.getByRole('tabpanel')).toHaveAttribute('aria-labelledby','mandala-panel-scheduled');
+ await expect(panels.getByRole('tabpanel')).toHaveAttribute('aria-labelledby','mandala-panel-teams');
  await expect(scheduled).toBeFocused();
  // Selected semantics update before the shared tabs' box-shadow transition finishes.
  await panels.evaluate(async root=>{await Promise.all(Array.from(root.querySelectorAll('[role="tab"]')).flatMap(tab=>tab.getAnimations()).map(animation=>animation.finished));});

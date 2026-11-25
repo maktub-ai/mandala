@@ -1,4 +1,4 @@
-import { parsePluginCatalog, parsePluginManifest, pluginContributions, pluginIdentity, pluginLimit, pluginRepository, type InstalledPlugin, type PluginEntry } from '../shared/data-plugins';
+import { retiredBlueprintPlugin, parsePluginCatalog, parsePluginManifest, parsePluginContributionData, readStoredContribution, pluginContributions, pluginIdentity, pluginLimit, pluginRepository, type InstalledPlugin, type PluginEntry } from '../shared/data-plugins';
 import { createMarketSources } from './market-sources';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
@@ -8,6 +8,10 @@ import { extensionRepositories, localPetRepository, isUiExtension, parseExtensio
 import type { MarketDetail } from '../shared/market';
 import { marketBytes, type MarketFetcher } from './market-source';
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+function contributionName(payload: UiExtension['data']) {
+  if (payload.format === 'mandala-library-section') return payload.label.en;
+  return payload.format === 'mandala-theme' ? payload.theme.name : payload.name;
+}
 const maxStoreBytes = 20 * 1024 * 1024;
 export function createUiExtensions(home: string, fetcher: MarketFetcher) {
   const directory = join(home, 'market'), path = join(directory, 'ui-extensions.json');
@@ -21,8 +25,9 @@ export function createUiExtensions(home: string, fetcher: MarketFetcher) {
   const pluginCatalog = async (repository = pluginRepository, signal?: AbortSignal): Promise<MarketDetail[]> => {
     const sources = await createMarketSources(home).read();
     if (!sources.sources.some(source => source.kind === 'plugin' && source.url === `https://github.com/${repository}`)) throw Error('invalid plugin source');
-    const raw = await marketBytes(await fetcher(`https://raw.githubusercontent.com/${repository}/main/catalog.json`, signal), 2 * 1024 * 1024);
-    return parsePluginCatalog(JSON.parse(raw.toString('utf8'))).map(entry => ({ ...entry, kind: 'plugin', catalogId: `plugin:${repository}:${entry.id}`, sourceUrl: `https://github.com/${entry.package.repository}/blob/${entry.package.revision}/${entry.package.path}`, plugin: entry,
+    const path = repository === pluginRepository ? 'catalogs/v2/catalog.json' : 'catalog.json';
+    const raw = await marketBytes(await fetcher(`https://raw.githubusercontent.com/${repository}/main/${path}`, signal), 2 * 1024 * 1024);
+    return parsePluginCatalog(JSON.parse(raw.toString('utf8'))).filter(entry => 'plugin:' + repository + ':' + entry.id !== retiredBlueprintPlugin).map(entry => ({ ...entry, kind: 'plugin', catalogId: `plugin:${repository}:${entry.id}`, sourceUrl: `https://github.com/${entry.package.repository}/blob/${entry.package.revision}/${entry.package.path}`, plugin: entry,
       ...(!supportsExtension(entry.minAppVersion, appVersion) ? { unsupported: `unsupported plugin: requires Mandala ${entry.minAppVersion}` } : {}) }));
   };
   // Keep the saved language source ID, but browse the unified catalog without duplicate releases.
@@ -72,8 +77,8 @@ export function createUiExtensions(home: string, fetcher: MarketFetcher) {
       const content = contributions.map((contribution, index): UiExtension => {
         const item = plugin.items[index], catalogId = `${plugin.catalogId}/${contribution.kind}:${contribution.id}`;
         if (!item || item.catalogId !== catalogId || item.kind !== contribution.kind) throw Error('invalid plugin store');
-        const payload = parseExtensionData(JSON.stringify(item.data), contribution.kind);
-        const name = payload.format === 'mandala-theme' ? payload.theme.name : payload.name;
+        const payload = readStoredContribution(JSON.stringify(item.data), contribution.kind);
+        const name = contributionName(payload);
         return { ...entry, id: contribution.id, name, kind: contribution.kind, catalogId, pluginId: plugin.catalogId, sourceUrl, installedAt: plugin.installedAt,
           package: { ...entry.package, path: contribution.path, sha256: contribution.sha256 }, data: payload };
       });
@@ -110,8 +115,8 @@ export function createUiExtensions(home: string, fetcher: MarketFetcher) {
     validateManifest(manifest, entry);
     const installedAt = new Date().toISOString(), content: UiExtension[] = [];
     for (const contribution of pluginContributions(manifest)) {
-      const data = parseExtensionData(await download(contribution.path, contribution.sha256), contribution.kind);
-      const name = data.format === 'mandala-theme' ? data.theme.name : data.name;
+      const data = parsePluginContributionData(await download(contribution.path, contribution.sha256), contribution.kind);
+      const name = contributionName(data);
       content.push({ ...entry, id: contribution.id, name, kind: contribution.kind, catalogId: `${item.catalogId}/${contribution.kind}:${contribution.id}`, pluginId: item.catalogId, sourceUrl: item.sourceUrl, installedAt,
         package: { ...p, path: contribution.path, sha256: contribution.sha256 }, data });
     }

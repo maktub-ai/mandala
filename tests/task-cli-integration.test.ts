@@ -35,9 +35,39 @@ test('HTTP independently creates edits associates and manually accepts a Task wi
  const review=await request('/api/v2/tasks/'+task.id+'/complete',{expectedRevision:task.revision});expect(review.status).toBe(200);task=await review.json();expect(task.state).toBe('review');
  const accepted=await request('/api/v2/tasks/'+task.id+'/accept',{expectedRevision:task.revision});expect(accepted.status).toBe(200);expect(await accepted.json()).toMatchObject({state:'completed',completion:{completedBy:'user',sourceRunId:null}});
 });
+test('promotes the current chat through the bound CLI without enqueueing another turn',async()=>{
+ const source=await manager.create('p','a');await manager.send(source.id,'Investigate these figures');
+ native.onEvent({method:'turn/completed',params:{threadId:'s',turn:{id:'t1',status:'completed'}}});
+ expect(manager.taskService.listTasks({userId:'local'})).toEqual([]);
+ await manager.send(source.id,'Track this investigation');
+ const args={goal:'Investigation',projectId:'p',assigneeAgentId:'a'};
+ const task=await manager.callBoundTool(token,'task_create',args,'track') as import('../shared/tasks').Task;
+ expect(task).toMatchObject({originConversationId:source.id,conversationIds:[source.id]});
+ expect(await manager.callBoundTool(token,'task_create',args,'track')).toEqual(task);
+ expect(manager.taskService.listRuns({userId:'local'},task.id)).toEqual([]);
+ expect(store.listConversations()).toHaveLength(1);
+ expect(turn).toBe(2);
+});
+test('explicit delegation of work tracked in the source chat uses its existing Task',async()=>{
+ const source=await manager.create('p','a');await manager.send(source.id,'Track my work and delegate the review');
+ const task=await manager.callBoundTool(token,'task_create',{goal:'Review the analysis',projectId:'p'},'track') as import('../shared/tasks').Task;
+ const args={targetAgentId:'b',request:'Review the evidence',policy:'notify'};
+ const delegated=await manager.callBoundTool(token,'delegate',args,'delegate') as {id:string;targetConversationId:string};
+ expect(delegated.id).toBe(task.id);
+ expect(await manager.callBoundTool(token,'delegate',args,'delegate')).toMatchObject({id:task.id,targetConversationId:delegated.targetConversationId});
+ expect(manager.taskService.listTasks({userId:'local'})).toHaveLength(1);
+ expect(manager.taskService.listRuns({userId:'local'},task.id)).toHaveLength(1);
+});
+test.each([undefined,null])('chooses the tracking chat on implicit start and honors an explicit new chat (%s)',async(choice)=>{
+ const source=await manager.create('p','a'),p={userId:'local'};
+ const task=createTaskWithExecutions(store,manager.taskService,p,{goal:'Tracked work',assigneeAgentId:'a',projectId:'p',originConversationId:source.id},[source.id],'tracked');
+ const run=await manager.startDurableTask(task.id,task.revision,'start-tracked',choice);
+ if(choice===undefined)expect(run.routing).toMatchObject({mode:'existing',executionConversationId:source.id});
+ else {expect(run.routing?.mode).toBe('dedicated');expect(run.routing?.executionConversationId).not.toBe(source.id);}
+});
 test('Agent CLI uses bound identity explicit null/empty links and cannot bypass state transitions or transcript ACL',async()=>{
  const source=await manager.create('p','a',undefined,undefined,{workspaceId:null});await manager.send(source.id,'Work');
- const created=await manager.callBoundTool(token,'task_create',{goal:'Independent',projectId:null,participantAgentIds:[]},'create');expect(created).toMatchObject({creatorAgentId:'a',projectId:null});
+ const created=await manager.callBoundTool(token,'task_create',{goal:'Independent',projectId:null,participantAgentIds:[],originConversationId:null},'create');expect(created).toMatchObject({creatorAgentId:'a',projectId:null});
  await expect(manager.callBoundTool(token,'task_create',{goal:'Implicit'},'implicit')).rejects.toMatchObject({status:422});
  await expect(manager.callBoundTool(token,'task_create',{goal:'Legacy field',projectId:null,conversationIds:[]},'legacy')).rejects.toMatchObject({code:'invalid_tool_arguments',status:422});
  const task=created as any;await expect(manager.callBoundTool(token,'task_update',{taskId:task.id,expectedRevision:task.revision,state:'completed'},'force')).rejects.toMatchObject({status:422});
@@ -46,6 +76,36 @@ test('Agent CLI uses bound identity explicit null/empty links and cannot bypass 
  await expect(manager.callBoundTool(token,'conversation_read',{conversationId:foreign.id},'read-foreign')).rejects.toMatchObject({status:403});
  const linked=await manager.callBoundTool(token,'task_execution_add',{taskId:task.id,expectedRevision:task.revision,conversationId:source.id},'link');expect(linked).toMatchObject({conversationIds:[source.id]});
  expect(await manager.callBoundTool(token,'task_context',{},'context')).toMatchObject({conversationId:source.id,project:{id:'p'},agent:{id:'a'}});
+});
+test('bound Agent lists a task by its execution project while workspace users control manual groups',async()=>{
+ const chat=await manager.create('p','a',undefined,undefined,{workspaceId:null});
+ const task=createTaskWithExecutions(store,manager.taskService,{userId:store.ownerUserId},{goal:'Integration',projectId:null},[chat.id],'task-project');
+ await manager.send(chat.id,'Check this project');
+ expect(await manager.callBoundTool(token,'task_list',{projectId:'p'},'list-project')).toEqual([expect.objectContaining({id:task.id,projectId:null,projectIds:['p']})]);
+ await expect(manager.callBoundTool(token,'task_update',{taskId:task.id,expectedRevision:task.revision,projectIds:[]},'override')).rejects.toMatchObject({status:422});
+});
+
+test('a worker in an inferred project sees its labels and lane only during current project membership',async()=>{
+ const setMembership=async(agentIds:string[])=>{
+  const {config,revision}=await readConfig(home);
+  const restricted={...config.projects[0],id:'restricted',name:'Restricted',cwd:home,workspaces:[{id:'repo',name:'Repository',cwd:home,resources:[]}],agentIds};
+  await writeConfig(home,{...config,projects:[config.projects[0],restricted]},revision);
+ };
+ await setMembership(['b']);
+ const chat=await manager.create('','a',undefined,'codex',{cwd:home});
+ expect(chat).toMatchObject({projectId:'',attributedProjectId:'restricted'});
+ const owner={userId:store.ownerUserId}, moduleRef={projectId:'restricted',lane:'Private lane'};
+ const attached=createTaskWithExecutions(store,manager.taskService,owner,{goal:'Own task',projectId:null},[chat.id],'infer-scope');
+ const task=manager.taskService.updateTask(owner,attached.id,attached.revision,{moduleRef},'select-module');
+ await manager.send(chat.id,'Inspect my task');
+ const read=()=>manager.callBoundTool(token,'task_read',{taskId:task.id},'read');
+ expect(await read()).toMatchObject({projectIds:[],moduleRef:null,executions:[{conversationId:chat.id}]});
+ expect(JSON.stringify(await read())).not.toContain('restricted');
+ expect(await manager.callBoundTool(token,'task_update',{taskId:task.id,expectedRevision:task.revision,goal:'Updated'},'write')).toMatchObject({projectIds:[],moduleRef:null});
+ await setMembership(['a','b']);
+ expect(await read()).toMatchObject({projectIds:['restricted'],moduleRef});
+ await setMembership(['b']);
+ expect(JSON.stringify(await read())).not.toContain('restricted');
 });
 test('ordinary successful native final turn actually schedules linked Task assessment with exact final answer',async()=>{
  const chat=await manager.create('p','a',undefined,undefined,{workspaceId:null});const task=createTaskWithExecutions(store,manager.taskService,{userId:'local'},{goal:'Goal',criteria:[],acceptance:'human',projectId:null,assigneeAgentId:null},[chat.id],'goal');
@@ -76,7 +136,7 @@ test('Agent conversation history includes completed native final snapshots even 
 });
 test('HTTP and bound Agent execution commands replay after later edits and reject historical removal',async()=>{
  const source=await manager.create('p','a',undefined,undefined,{workspaceId:null}),other=await manager.create('p','a',undefined,undefined,{workspaceId:null});await manager.send(source.id,'Execution sample');
- const task=await manager.callBoundTool(token,'task_create',{goal:'Executions',projectId:null},'task') as any;
+ const task=await manager.callBoundTool(token,'task_create',{goal:'Executions',projectId:null,originConversationId:null},'task') as any;
  const first=await manager.callBoundTool(token,'task_execution_add',{taskId:task.id,expectedRevision:1,conversationId:source.id},'first') as any;
  const second=await request(`/api/v2/tasks/${task.id}/executions`,{expectedRevision:first.revision,conversationId:other.id},'POST','second');expect(second.status).toBe(201);const both=await second.json();
  await expect(manager.callBoundTool(token,'task_execution_add',{taskId:task.id,expectedRevision:1,conversationId:source.id},'first')).resolves.toMatchObject({revision:both.revision});

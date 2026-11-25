@@ -33,6 +33,7 @@ test('managed models persist per runtime and status follows idle configuration v
   await expect(model).toHaveAttribute('data-value','model-second');
   await chooseRuntime('OMP');await save();
   await expect(status).toHaveText('OMP');
+  await expect(page.getByText('下一条消息将由 OMP 接续。',{exact:true})).toBeVisible();
   await expect.poll(()=>probes.at(-1)).toBe('omp');
   await expect(page.locator('.cli-notice')).toContainText('OMP');
   await expect(composer).toHaveValue('未发送的设置草稿');
@@ -46,7 +47,8 @@ test('managed models persist per runtime and status follows idle configuration v
   await open();await expect(model).toHaveAttribute('data-value','provider/custom-model');
   await chooseRuntime('Codex');await expect(model).toHaveAttribute('data-value','model-second');await save();
   await composer.fill('Prepare selected model');await page.getByRole('button',{name:'发送消息',exact:true}).click();
-  await expect(page.getByText(/^Fixture reply:/).last()).toContainText('Prepare selected model');
+  const preparedTurn=page.locator('.chat-turn').filter({has:page.locator('.message.user').getByText('Prepare selected model',{exact:true})});
+  await expect(preparedTurn.locator('.chat-reply-bubble')).toContainText('Prepare selected model');
   await expect.poll(async()=>(await(await request.get('/api/mandala')).json()).conversation.status).toBe('idle');
   await composer.fill('hold');await page.getByRole('button',{name:'发送消息',exact:true}).click();
   await expect.poll(async()=>(await(await request.get('/api/mandala')).json()).conversation.status).toBe('running');
@@ -65,6 +67,7 @@ test('managed models persist per runtime and status follows idle configuration v
   await page.reload();await expect(status).toContainText('Codex');await expect(status).toContainText('下轮：OMP');
   expect((await request.post('/api/conversations/'+initial.conversation.id+'/stop',{data:{}})).ok()).toBe(true);
   await expect(status).toHaveText('OMP');
+  await expect(page.getByText('下一条消息将由 OMP 接续。',{exact:true})).toBeVisible();
   await expect.poll(()=>probes.at(-1)).toBe('omp');
   await open();await chooseRuntime('Codex');await model.click();
   await page.getByRole('option',{name:'留空，沿用原生默认模型',exact:true}).click();await save();

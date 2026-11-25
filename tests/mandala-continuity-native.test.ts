@@ -12,6 +12,12 @@ vi.mock('../server/native-spawn', () => ({
  spawn: vi.fn(() => { throw new Error('Test blocked an unexpected native CLI spawn'); }),
 }));
 
+it('uses the Codex configured context window only for its selected model',async()=>{
+ const rpc={request:async(method:string)=>method==='config/read'?{config:{model:'small',model_context_window:8192}}:{},notify(){},close(){}} as unknown as RpcClient;
+ const client=await connectCodex(rpc);
+ expect(await client.getContextWindow!('small')).toBe(8192);
+ expect(await client.getContextWindow!('another')).toBeUndefined();
+});
 it('Codex accepts compaction asynchronously and requires exact idle and background-terminal evidence',async()=>{
  let active=false,background=false;
  const requests:{method:string;params:unknown}[]=[];

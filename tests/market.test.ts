@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readConfig, writeConfig } from "../server/config";
 import { createMarket } from "../server/market";
+import { createSkillCatalog } from "../server/skill-catalog";
+import { openStore } from "../server/store";
 import { conversationContext } from "../server/conversation-context";
 import { prepareCapabilityRuntime } from "../server/omp";
 
@@ -38,11 +40,13 @@ it("downloads the pinned Skill and all resources, links Agent/Project, and reloa
   const current = await readConfig(home);
   const installed = await market.install({ catalogId: detail.catalogId, version: detail.version, revision: current.revision, targets: [{ kind: "agent", id: "a" }, { kind: "project", id: "p" }] });
   const saved = await readConfig(home);
-  const context = conversationContext(saved.config, { projectId: "p", agentId: "a" }, home);
+  const store = openStore(home);
+  const resolved = createSkillCatalog(home, store).resolve(saved.config, "a", "p"); store.close();
+  const context = conversationContext(resolved, { projectId: "p", agentId: "a" }, home);
   expect(context.agent.skills[0].name).toBe("sample");
   expect(context.project.skills[0]).toEqual(context.agent.skills[0]);
-  expect(await readFile(join(context.agent.skills[0].path, "SKILL.md"), "utf8")).toBe(text);
-  expect(await readFile(join(context.agent.skills[0].path, "references/guide.md"), "utf8")).toBe("Synthetic resource");
+  expect(context.agent.skills[0].content).toBe(text);
+  expect(saved.config.skillLibrary![0].versionRef).toBeTruthy();
   const runtime = await prepareCapabilityRuntime(home, "synthetic-chat", [], context.agent.skills);
   expect(await readFile(join(runtime, "skills/sample/SKILL.md"), "utf8")).toBe(text);
   expect(await readFile(join(runtime, "skills/sample/references/guide.md"), "utf8")).toBe("Synthetic resource");

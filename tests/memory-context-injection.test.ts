@@ -1,5 +1,6 @@
+import {summarizeOperations} from '../shared/execution';
 import {readConfiguredRuntime} from './configured-runtime';
-import {afterEach,expect,test} from 'vitest';
+import {afterEach,expect,test,vi} from 'vitest';
 import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -33,9 +34,36 @@ async function setup(){
  return {runtime,store,config,manager,chat,queries,add,fact,scene,profile,get instructions(){return instructions;},get token(){return token;},finish(){options.onEvent({method:'turn/completed',params:{threadId:'native',turn:{id:`turn-${turn}`,status:'completed'}}});}};
 }
 
+function searchHooks(s:Awaited<ReturnType<typeof setup>>){
+ return summarizeOperations(s.store.listEvents(s.chat.id,0)).filter(op=>op.item.hook?.source==='platform'&&op.item.hook.task==='search');
+}
+test('actual pre-reply searches keep zero hits and count retrieved facts and scenes separately from injected context',async()=>{
+ const s=await setup(),search=vi.spyOn(s.runtime.recall,'turnContextSearch');
+ search.mockResolvedValueOnce([{items:[],degraded:false,indexLag:0},undefined]);
+ await s.manager.send(s.chat.id,'No matching history');s.finish();
+ expect(searchHooks(s)).toMatchObject([{status:'completed',item:{result:{count:0},hook:{event:'beforeTurn'}}}]);
+ await s.manager.send(s.chat.id,'Deployment');
+ const [facts,scenes]=await search.mock.results[1].value;
+ const count=facts.items.length+(scenes?.items.length??0);
+ expect(count).toBeGreaterThan(0);
+ expect(searchHooks(s).map(op=>op.item.result)).toEqual([{count:0},{count}]);
+});
+test('a failed pre-reply search stays visible without claiming zero hits or blocking the reply',async()=>{
+ const s=await setup();vi.spyOn(s.runtime.recall,'turnContextSearch').mockRejectedValueOnce(new Error('lookup failed'));
+ await s.manager.send(s.chat.id,'Deployment');
+ expect(searchHooks(s)).toMatchObject([{status:'failed'}]);
+ expect(searchHooks(s)[0].item.result).not.toHaveProperty('count');
+});
+test('disabled reading skips the pre-reply search and its Hook',async()=>{
+ const s=await setup();s.config.system={...s.config.system,cli:'codex',memory:{request:{read:false,generate:true}}};
+ const search=vi.spyOn(s.runtime.recall,'turnContextSearch');
+ await s.manager.send(s.chat.id,'Deployment');
+ expect(search).not.toHaveBeenCalled();expect(searchHooks(s)).toEqual([]);
+});
+
 test('a pure acknowledgment keeps stable principles without searching historical facts',async()=>{
  const s=await setup();await s.manager.send(s.chat.id,'谢谢！');
- expect(s.queries).toEqual([]);
+ expect(s.queries).toEqual([]);expect(searchHooks(s)).toEqual([]);
  expect(s.instructions).toContain(s.profile.text);
  expect(s.instructions).not.toContain(s.fact.text);
 });

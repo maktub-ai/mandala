@@ -88,3 +88,12 @@ export function systemRuntime(cli: Cli, defaults?: RuntimeConfig) {
   return { safeSystem: true, ...(connection?.env ? { env: resolved.env } : {}),
     ...(resolved.gateway !== undefined ? { gateway: resolved.gateway } : {}) };
 }
+
+
+// OMP and Pi expose the same model identities through their native JSON-line RPC.
+export async function rpcModelContextWindow(request:(command:string)=>Promise<any>, selected?:string):Promise<number|undefined> {
+  const model=selected
+    ? (await request('get_available_models')).models?.find((item:{provider:string;id:string})=>item.provider+'/'+item.id===selected)
+    : (await request('get_state')).model;
+  return Number.isSafeInteger(model?.contextWindow)&&model.contextWindow>0 ? model.contextWindow : undefined;
+}

@@ -34,8 +34,26 @@ test('lost create and run acknowledgements reuse their exact keys without duplic
  await row.getByRole('button',{name:'Run once',exact:true}).click();await expect(page.getByRole('alert')).toBeVisible();await page.reload();await page.getByRole('button',{name:'Lost receipt schedule',exact:true}).click();await expect(row.getByRole('button',{name:'Check previous run',exact:true})).toBeVisible();await row.getByRole('button',{name:'Check previous run',exact:true}).click();await expect.poll(()=>deliveries.length).toBe(2);expect(deliveries[0].key).toBeTruthy();expect(deliveries[1]).toEqual(deliveries[0]);await expect.poll(async()=>(await state(request)).runs.filter((r:{automationId:string})=>r.automationId===schedules[0].id).length).toBe(1);const run=page.locator('.schedule-detail-history .automation-run').filter({hasText:'Lost receipt schedule'}).first();await expect(run).toContainText('Running',{timeout:15000});await run.getByRole('button',{name:'Stop this run',exact:true}).click();await expect(run).toContainText('Interrupted');
 });
 
+test('standalone schedules are managed from Schedules and omitted from both task overview layouts',async({page,request})=>{
+ await setup(request);
+ const name='Standalone overview check';
+ const response=await request.post('/api/automations',{data:{name,instructions:'Check schedule placement',projectId:'compact-schedules',agentId:'compact-scheduler',cli:'codex',enabled:false,schedule:{kind:'daily',time:'09:00',timeZone:'Asia/Singapore'}}});
+ expect(response.ok()).toBe(true);
+ const rule=await response.json();
+ for(const view of ['list','board']){
+  const rules=page.waitForResponse(response=>response.url().endsWith('/api/automations')&&response.ok());
+  await page.goto('/tasks?view='+view);
+  expect((await(await rules).json()).automations).toContainEqual(expect.objectContaining({id:rule.id}));
+  await expect(page.getByRole('heading',{name:'Tasks',exact:true})).toBeVisible();
+  await expect(page.getByText(/^Execution rules · \d+$/)).toHaveCount(0);
+ }
+ await page.goto('/schedules?project=compact-schedules');
+ await page.getByRole('button',{name,exact:true}).click();
+ await expect(page.getByRole('article',{name,exact:true})).toContainText('Paused');
+});
+
 test('legacy schedule entry points preserve Project scope in the canonical Schedules route',async({page,request})=>{
- await setup(request);for(const path of ['/tasks?rules=1&project=compact-schedules','/mana?tab=automation&project=compact-schedules']){await page.goto(path);await expect(page.getByRole('heading',{name:'Schedules',exact:true})).toBeVisible();expect(new URL(page.url()).pathname).toBe('/schedules');expect(new URL(page.url()).searchParams.get('project')).toBe('compact-schedules');await expect(page.getByRole('combobox',{name:'Filter by project',exact:true})).toHaveAttribute('data-value','compact-schedules');}
+ await setup(request);for(const path of ['/tasks?rules=1&project=compact-schedules','/mana?tab=automation&project=compact-schedules']){await page.goto(path);await expect(page.getByRole('heading',{name:'Automations',exact:true})).toBeVisible();expect(new URL(page.url()).pathname).toBe('/schedules');expect(new URL(page.url()).searchParams.get('project')).toBe('compact-schedules');await expect(page.getByRole('combobox',{name:'Filter by project',exact:true})).toHaveAttribute('data-value','compact-schedules');}
 });
 
 test('changing Project clears an explicitly selected conversation even when the Agent belongs to both Projects',async({page,request})=>{

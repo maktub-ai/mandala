@@ -6,10 +6,11 @@ import { createClawHub } from "./market-clawhub";
 import { marketBytes as bytes, safeMarketPath as safePath, skillHeader } from "./market-source";
 import { marketSorts, sortMarketItems, type MarketSort, type MarketSourceUpdate } from "../shared/market";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { readConfig, writeConfig } from "./config";
 import type { Config } from "../shared/types";
+import { validateManagedSkillContent } from "../shared/skills";
 import type { InstalledMarketItem, MarketDetail, MarketItem, MarketKind, MarketTarget } from "../shared/market";
 
 type Fetcher = (url: string, signal?: AbortSignal) => Promise<Response>;
@@ -70,7 +71,7 @@ export function createMarket(home: string, fetcher: Fetcher = marketFetch) {
     if (clawCache.size > 100) clawCache.delete(clawCache.keys().next().value!);
     clawCache.set(url, { data, expires: Date.now() + 60000 }); return data;
   });
-  const skillDescriptions = new Map<string, string>();
+  const skillSummaries = new Map<string, Pick<MarketItem, "description" | "skillIcon">>();
   const skillTree = async (repository = "anthropics/skills", signal?: AbortSignal) => {
     const cache = cachedTrees.get(repository);
     if (cache && cache.expires > Date.now()) return cache.value;
@@ -141,9 +142,10 @@ export function createMarket(home: string, fetcher: Fetcher = marketFetch) {
       for (let offset = 0; offset < entries.length; offset += 4) {
         if (descriptionSignal.aborted) { if (!warnings.length) warnings.push("Some Skill descriptions timed out; retry to load remaining descriptions."); break; }
         const manifests = await Promise.allSettled(entries.slice(offset, offset + 4).map(async file => {
-          const key = repository + tree.sha + file.path; if (skillDescriptions.has(key)) return;
+          const key = repository + tree.sha + file.path; if (skillSummaries.has(key)) return;
           const header = skillHeader((await bytes(await fetcher(`${repositoryRaw(repository)}/${tree.sha}/${file.path}`, descriptionSignal))).toString("utf8"));
-          skillDescriptions.set(key, header.description);
+          const { description, skillIcon } = header;
+          skillSummaries.set(key, { description, ...(skillIcon ? { skillIcon } : {}) });
         }));
         if (signal?.aborted) throw signal.reason;
         manifests.forEach(result => { if (result.status === "rejected" && warnings.length < 1) warnings.push(descriptionSignal.aborted ? "Some Skill descriptions timed out; retry to load remaining descriptions." : `Some Skill descriptions could not load: ${result.reason.message}`); });
@@ -151,7 +153,7 @@ export function createMarket(home: string, fetcher: Fetcher = marketFetch) {
       }
       return { ...(warnings.length ? { warnings } : {}), items: entries.map(file => {
         const name = file.path.split("/")[1];
-        return { catalogId: source === "anthropic" ? `skill:anthropics/${name}` : `skill:${source}/${name}`, name, kind, description: skillDescriptions.get(repository + tree.sha + file.path) ?? "", version: tree.sha, publisher: selected.name,
+        return { catalogId: source === "anthropic" ? `skill:anthropics/${name}` : `skill:${source}/${name}`, name, kind, description: "", ...skillSummaries.get(repository + tree.sha + file.path), version: tree.sha, publisher: selected.name,
           sourceUrl: `https://github.com/${repository}/tree/${tree.sha}/skills/${name}` };
       }).filter(item => (item.name + " " + item.description).toLowerCase().includes(query.toLowerCase())) };
     }
@@ -171,7 +173,8 @@ export function createMarket(home: string, fetcher: Fetcher = marketFetch) {
     }
     return { items: sortMarketItems(items, sort as MarketSort), ...(invalidEntries ? { warnings: [`Skipped ${invalidEntries} invalid MCP directory entries; retry or inspect the registry.`] } : {}), ...(typeof result.metadata?.nextCursor === "string" && result.metadata.nextCursor.length <= 1000 ? { nextCursor: result.metadata.nextCursor } : {}) };
   };
-  const detail = async (catalogId: string, signal?: AbortSignal): Promise<MarketDetail> => {
+  const detail = async (catalogId: string, signal?: AbortSignal, refresh = false): Promise<MarketDetail> => {
+    if (refresh) { cachedTrees.clear(); clawCache.clear(); }
     if (typeof catalogId !== "string") throw new Error("invalid market item");
     if (catalogId.startsWith("plugin:") || catalogId.startsWith("theme:") || catalogId.startsWith("language:") || catalogId.startsWith("pet:")) return extensions.detail(catalogId, signal);
     if (catalogId.startsWith("skill:clawhub/")) return claw.detail(catalogId, signal);
@@ -186,7 +189,7 @@ export function createMarket(home: string, fetcher: Fetcher = marketFetch) {
       const header = skillHeader(readme);
       if (header.name !== name) throw new Error("invalid Skill name");
       const description = header.description;      return { catalogId, kind: "skill", name, description, version: tree.sha, sourceUrl: `https://github.com/${repository}/tree/${tree.sha}/skills/${name}`,
-        readme, fileCount: files.length, publisher: source.name, requirements: header.requirements };
+        readme, fileCount: files.length, publisher: source.name, requirements: header.requirements, ...(header.skillIcon ? { skillIcon: header.skillIcon } : {}) };
     }
     if (!/^mcp:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(catalogId)) throw new Error("invalid market item");
     if (!details.has(catalogId)) await search("mcp", catalogId.slice(4), "", "mcp-registry", "default", signal);
@@ -200,6 +203,32 @@ export function createMarket(home: string, fetcher: Fetcher = marketFetch) {
         .filter(({ owner }) => owner[field]?.includes(item.id)).map(({ owner, kind }) => ({ kind, id: owner.id, name: owner.name }));
       return { ...item, targets, missing: !(item.kind === "skill" ? config.skillLibrary : config.connections)?.some(entry => entry.id === item.id) };
     });
+  };
+  const downloadSkill = async (info: MarketDetail, directory: string) => {
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    if (info.catalogId.startsWith("skill:clawhub/")) {
+      for (const file of await claw.download(info)) {
+        const destination = join(directory, file.path);
+        await mkdir(dirname(destination), { recursive: true });
+        await writeFile(destination, file.data, { flag: "wx", mode: file.executable ? 0o700 : 0o600 });
+      }
+    } else {
+      const repository = info.catalogId.startsWith("skill:github:") ? info.catalogId.slice("skill:github:".length).split("/").slice(0, 2).join("/") : "anthropics/skills";
+      const tree = await skillTree(repository); if (tree.sha !== info.version) throw new Error("market version changed; reopen details");
+      const files = skillFiles(tree, info.name);
+      let size = 0;
+      for (const file of files) {
+        const data = await bytes(await fetcher(`${repositoryRaw(repository)}/${tree.sha}/${file.path}`)); size += data.length;
+        if (size > 32 * 1024 * 1024) throw new Error("invalid Skill package size");
+        const destination = join(directory, file.path.slice(`skills/${info.name}/`.length));
+        await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, data, { flag: "wx", mode: file.mode === "100755" ? 0o700 : 0o600 });
+      }
+      const license = tree.tree.find(file => file.path === "LICENSE" && file.type === "blob" && file.mode === "100644");
+      if (license) await writeFile(join(directory, "REPOSITORY-LICENSE.txt"), await bytes(await fetcher(`${repositoryRaw(repository)}/${tree.sha}/LICENSE`)), { mode: 0o600 });
+    }
+    const content = await readFile(join(directory, "SKILL.md"), "utf8");
+    if (validateManagedSkillContent(info.name, content)) throw new Error("invalid Skill metadata");
+    return content;
   };
   const install = (input: { catalogId: string; version: string; revision: string; targets: MarketTarget[]; environment?: Record<string, string> }) => exclusive(async () => {
     const { config, revision } = await readConfig(home);
@@ -220,29 +249,8 @@ export function createMarket(home: string, fetcher: Fetcher = marketFetch) {
         const capabilityName = value.kind === "skill" ? value.name : value.catalogId.slice(4).replace(/[^A-Za-z0-9_-]/g, "-");
         if ((value.kind === "skill" ? config.skillLibrary : config.connections)?.some(entry => entry.name === capabilityName || entry.id === id)) throw new Error("market capability name conflict");
         if (value.kind === "skill") {
-          await mkdir(directory!, { recursive: true, mode: 0o700 });
-          if (value.catalogId.startsWith("skill:clawhub/")) {
-            for (const file of await claw.download(info)) {
-              const destination = join(directory!, file.path);
-              await mkdir(dirname(destination), { recursive: true });
-              await writeFile(destination, file.data, { flag: "wx", mode: file.executable ? 0o700 : 0o600 });
-            }
-          } else {
-          const repository = value.catalogId.startsWith("skill:github:") ? value.catalogId.slice("skill:github:".length).split("/").slice(0, 2).join("/") : "anthropics/skills";
-          const tree = await skillTree(repository); if (tree.sha !== value.version) throw new Error("market version changed; reopen details");
-          const files = skillFiles(tree, value.name);
-          await mkdir(directory!, { recursive: true, mode: 0o700 });
-          let size = 0;
-          for (const file of files) {
-            const data = await bytes(await fetcher(`${repositoryRaw(repository)}/${tree.sha}/${file.path}`)); size += data.length;
-            if (size > 32 * 1024 * 1024) throw new Error("invalid Skill package size");
-            const destination = join(directory!, file.path.slice(`skills/${value.name}/`.length));
-            await mkdir(dirname(destination), { recursive: true }); await writeFile(destination, data, { flag: "wx", mode: file.mode === "100755" ? 0o700 : 0o600 });
-          }
-          const license = tree.tree.find(file => file.path === "LICENSE" && file.type === "blob" && file.mode === "100644");
-          if (license) await writeFile(join(directory!, "REPOSITORY-LICENSE.txt"), await bytes(await fetcher(`${repositoryRaw(repository)}/${tree.sha}/LICENSE`)), { mode: 0o600 });
-          }
-          config.skillLibrary = [...(config.skillLibrary ?? []), { id, name: value.name, path: directory! }];
+          const content = await downloadSkill(info, directory!);
+          config.skillLibrary = [...(config.skillLibrary ?? []), { id, name: value.name, path: '', content, humanMaintained: false }];
         } else {
           if (!info.connection) throw new Error("unsupported MCP connection");
           const env = input.environment ?? {};
@@ -252,14 +260,37 @@ export function createMarket(home: string, fetcher: Fetcher = marketFetch) {
           config.connections = [...(config.connections ?? []), { id, ...info.connection, ...(Object.keys(env).length ? { env } : {}) }];
         }
         config.marketInstallations = [...(config.marketInstallations ?? []), { id, catalogId: value.catalogId, kind: value.kind, name: value.name,
-          description: value.description, version: value.version, sourceUrl: value.sourceUrl, installedAt: new Date().toISOString(), ...(packageId ? { packageId } : {}) }];
+          description: value.description, version: value.version, sourceUrl: value.sourceUrl, installedAt: new Date().toISOString(), ...(value.skillIcon ? { skillIcon: value.skillIcon } : {}), ...(packageId ? { packageId } : {}) }];
       } else if (!(value.kind === "skill" ? config.skillLibrary : config.connections)?.some(entry => entry.id === id)) throw new Error("market capability not found");
       for (const target of input.targets) {
         const owner = targetOwner(config, target); owner[field] = [...new Set([...(owner[field] ?? []), id])];
       }
-      await writeConfig(home, config, revision);
+      await writeConfig(home, config, revision, undefined, undefined, directory ? new Map([[id, directory]]) : undefined);
       return (await installed()).find(item => item.id === id)!;
     } catch (error) { if (directory) await rm(directory, { recursive: true, force: true }); throw error; }
+  });
+  const upgrade = (input: { id: string; version: string; revision: string }) => exclusive(async () => {
+    const { config, revision } = await readConfig(home);
+    if (revision !== input.revision) throw new Error("configuration changed");
+    const current = config.marketInstallations?.find(item => item.id === input.id);
+    if (!current || current.kind !== "skill") throw new Error("invalid installed Skill");
+    const skill = config.skillLibrary?.find(item => item.id === current.id);
+    if (!skill) throw new Error("market capability not found");
+    if (current.version === input.version) return (await installed()).find(item => item.id === current.id)!;
+    const info = await detail(current.catalogId, undefined, true);
+    if (info.version !== input.version) throw new Error("market version changed; reopen details");
+    if (info.unsupported) throw new Error(info.unsupported);
+    if (info.kind !== "skill" || info.name !== skill.name) throw new Error("invalid Skill name");
+    const packageId = randomUUID(), directory = join(home, "market", "packages", packageId);
+    try {
+      const content = await downloadSkill(info, directory);
+      config.skillLibrary = config.skillLibrary!.map(item => item.id === skill.id ? { ...item, path: '', content, humanMaintained: false, externalSource: undefined, source: undefined } : item);
+      config.marketInstallations = config.marketInstallations!.map(item => item.id === current.id ? { ...item, version: info.version, description: info.description, sourceUrl: info.sourceUrl, skillIcon: info.skillIcon, packageId } : item);
+      await writeConfig(home, config, revision, undefined, undefined, new Map([[skill.id, directory]]));
+    } catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
+    // Managed versions read blobs. Legacy preparations may still be copying the selected directory.
+    if (current.packageId && skill.versionRef) await rm(join(home, "market", "packages", current.packageId), { recursive: true, force: true }).catch(() => {});
+    return (await installed()).find(item => item.id === current.id)!;
   });
   const unlink = (id: string, target: MarketTarget, expectedRevision: string) => exclusive(async () => {
     const { config, revision } = await readConfig(home);
@@ -282,6 +313,6 @@ export function createMarket(home: string, fetcher: Fetcher = marketFetch) {
     await writeConfig(home, config, revision);
     if (item.packageId) await rm(join(home, "market", "packages", item.packageId), { recursive: true, force: true });
   });
-  return { extensions, search, detail, installed, install, unlink, uninstall, sources: sourceStore.read, saveSources: (input: MarketSourceUpdate) => exclusive(() => sourceStore.write(input)) };
+  return { extensions, search, detail, installed, install, upgrade, unlink, uninstall, sources: sourceStore.read, saveSources: (input: MarketSourceUpdate) => exclusive(() => sourceStore.write(input)) };
 }
 export type Market = ReturnType<typeof createMarket>;

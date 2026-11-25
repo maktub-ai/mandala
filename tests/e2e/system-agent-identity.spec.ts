@@ -112,10 +112,10 @@ test('long system name wraps at narrow width and empty/search/error states remai
  const snapshot=await(await request.get('/api/config')).json();const name='长期协调智能体 Long-lived workspace coordinator '.repeat(2);
  expect((await request.put('/api/mandala',{data:{revision:snapshot.revision,settings:{name,soul:'',cli:'codex',maxParallel:3}}})).ok()).toBe(true);
  const current=await(await request.get('/api/config')).json();current.config.agents=current.config.agents.filter((a:any)=>a.id===systemId);current.config.projects.forEach((p:any)=>p.agentIds=[]);expect((await request.put('/api/config',{data:current})).ok()).toBe(true);await page.setViewportSize({width:390,height:844});await page.goto('/agents');
- await expect(page.getByRole('region',{name:'系统智能体',exact:true})).toContainText(name.trim());await expect(page.getByText('添加智能体以开始配置。',{exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await expect(page.getByRole('region',{name:'系统智能体',exact:true})).toContainText(name.trim());await expect(page.getByRole('button',{name:'添加智能体',exact:true})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await page.getByRole('searchbox',{name:'智能体',exact:true}).fill('unmatched identity');await expect(page.getByText('没有匹配选项',{exact:true})).toBeVisible();await page.getByRole('searchbox',{name:'智能体',exact:true}).fill('');
- let requests=0;await page.route('**/api/config',route=>++requests===2?route.fulfill({status:503,json:{error:'Synthetic settings unavailable'}}):route.continue());await page.getByRole('region',{name:'系统智能体',exact:true}).getByRole('link',{name:'设置',exact:true}).click();
- const dialog=page.getByRole('dialog',{name:'Mandala 设置'});await expect(dialog.getByRole('alert')).toContainText('Synthetic settings unavailable');await dialog.getByRole('button',{name:'重新读取',exact:true}).click();await expect(dialog.getByRole('textbox',{name:'名字',exact:true})).toHaveValue(name.trim());
+ let failSettings=true;await page.route('**/api/config',route=>failSettings?route.fulfill({status:503,json:{error:'Synthetic settings unavailable'}}):route.continue());await page.getByRole('region',{name:'系统智能体',exact:true}).getByRole('link',{name:'设置',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Mandala 设置'});await expect(dialog.getByRole('alert')).toContainText('Synthetic settings unavailable');failSettings=false;await dialog.getByRole('button',{name:'重新读取',exact:true}).click();await expect(dialog.getByRole('textbox',{name:'名字',exact:true})).toHaveValue(name.trim());
 });
 
 

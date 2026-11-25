@@ -1,0 +1,40 @@
+{
+  "format": "omino-summary",
+  "version": 1,
+  "omino": "0.5.6",
+  "generatedAt": "2026-11-19T16:46:54.023Z",
+  "id": "todo-app",
+  "title": "个人 Todo App",
+  "status": "active",
+  "stage": {
+    "id": "s2",
+    "title": "分类与整理",
+    "done": 2,
+    "total": 10
+  },
+  "work": {
+    "done": 6,
+    "total": 15
+  },
+  "waiting": [
+    {
+      "id": "s3",
+      "title": "同步",
+      "type": "flagged",
+      "reason": "与项目意图里“个人使用、本地版、不涉及同步”的边界冲突，需要用户决定保留还是取消"
+    },
+    {
+      "id": "filter",
+      "title": "只看未完成",
+      "type": "drift",
+      "reason": "its Requirements changed after it was completed"
+    },
+    {
+      "id": "migrate",
+      "title": "旧数据迁移",
+      "type": "unconfirmed",
+      "reason": "reported done by an agent; not yet confirmed by the user or a tool"
+    }
+  ],
+  "view": "view.html"
+}

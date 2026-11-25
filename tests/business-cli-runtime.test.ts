@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises";
 import { join, isAbsolute } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
-import { createBusinessCliRuntime } from "../server/business-cli-runtime";
+import { businessCliInstructions, createBusinessCliRuntime } from "../server/business-cli-runtime";
 import { createSessionManager } from "../server/sessions";
 import { openStore } from "../server/store";
 import type { Config } from "../shared/types";
@@ -34,6 +34,22 @@ test("creates a private launcher with shell-safe paths and keeps its credential 
   child.stderr.on("data", chunk => { error += chunk; });
   const code = await new Promise<number | null>((resolve, reject) => { child.on("error", reject); child.on("close", resolve); });
   expect(error).toBe(""); expect(code).toBe(0); expect(output).toContain("mandala");
+});
+
+test("keeps one-off results in the source chat and describes the bound collaboration commands", () => {
+  const runtime = { command: "mandala", launcher: "mandala", contextFile: "", dispose() {} };
+  const base = { project: false, assets: false, memory: false, tasks: true };
+  const primary = businessCliInstructions(runtime, { ...base, primaryCoordinator: true, coordinator: true });
+  const project = businessCliInstructions(runtime, { ...base, project: true });
+  for (const instructions of [primary, project]) {
+    expect(instructions).toContain("Return one-off results in this chat");
+    expect(instructions).not.toContain("Complete one-off work in this chat");
+  }
+  expect(primary).toContain("targetProjectId (null for no Project)");
+  expect(primary).toContain("messages ask defaults to resume");
+  expect(primary).not.toContain("tasks delegate");
+  expect(project).toContain("messages ask and tasks delegate default to resume");
+  expect(project).not.toContain("targetProjectId");
 });
 
 test.each(["codex", "omp"] as const)("%s refreshes CLI bindings on resume and deletes credentials on completion, stop, and close", async cli => {

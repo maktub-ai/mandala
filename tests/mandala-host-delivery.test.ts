@@ -43,6 +43,8 @@ it.each(['codex','omp','claude','gemini','opencode'] as const)('%s receives curr
  await manager.send(chat.id,'接着说');
  expect(received).toHaveLength(3);
  for(const text of received){expect(text).toContain("user's system coordinator");expect(text).toContain('MANDALA_DIRECTORY_SUMMARY_JSON');expect(text).toContain('Available commands: mandala directory;');expect(text).not.toContain('PRIVATE');
+  expect(text).toMatch(/follow-up[^.]*messages ask[^.]*targetConversationId/i);
+  expect(text).not.toContain('this opens a fresh inquiry chat');
   const command=text.match(/^Mandala CLI command: (.+)$/m)![1];
   expect(text).toContain(command+' mandala planning-guide');expect(text).toContain(command+' mandala discover-work --data');
   expect(text).not.toContain('name: mandala-work-team-planning');
@@ -52,4 +54,34 @@ it.each(['codex','omp','claude','gemini','opencode'] as const)('%s receives curr
  }
  expect(received[0]).not.toContain('New researcher');expect(received[1]).toContain('New researcher');expect(received[2]).toContain('New researcher');
  expect(entries.at(-1)!.prompt).toContain('bounded visible-history excerpt');
+});
+
+it.each(['compact','switch'])('%s uses correlated terminal evidence after a user stops an ACP turn',async operation=>{
+ const home=await mkdtemp(join(tmpdir(),'mandala-acp-handoff-')),store=openStore(home);
+ cleanup.push(async()=>{store.close();await rm(home,{recursive:true,force:true});});
+ const initial=await ensureConfiguredMandala(home);
+ await writeConfig(home,{...initial.config,runtimes:['claude','codex']},initial.revision);
+ const settings={name:'Mandala',soul:'',maxParallel:3};
+ const configured=await updateMandalaSettings(home,{...settings,cli:'claude'},(await readConfig(home)).revision);
+ let prompt='';
+ const factory=async(options:CodexOptions):Promise<CodexClient>=>({
+  getStatus:async()=>({status:'ready',version:'fixture'}),listModels:async()=>[],startThread:async()=>'native',resumeThread:async()=>{},
+  startTurn:async(threadId,text)=>{prompt=text;options.onEvent({method:'turn/started',params:{threadId,turn:{id:'turn'}}});return 'turn';},
+  interrupt:async(threadId,turnId)=>{options.onEvent({method:'turn/completed',params:{threadId,turn:{id:turnId,status:'interrupted'}}});},
+  replyApproval(){},close(){},
+ });
+ vi.mocked(startAcp).mockImplementation(async(_cli,options)=>factory(options));
+ const manager=createSessionManager(store,async()=>(await readConfig(home)).config,factory,undefined,home);
+ cleanup.push(()=>manager.close());const chat=ensureMandalaConversation(store,configured.config);
+ await manager.send(chat.id,'Keep our original goal');
+ expect(await manager.stop(chat.id)).toBe(true);
+ expect(store.getConversation(chat.id)?.status).toBe('interrupted');
+ if(operation==='compact'){
+  await expect(manager.compactMandalaContext(chat.id)).resolves.toEqual({status:'fallback'});
+ }else{
+  await updateMandalaSettings(home,{...settings,cli:'codex'},configured.revision);
+  await manager.continue(chat.id,'Use the revised plan');
+  expect(store.getConversation(chat.id)?.cli).toBe('codex');
+  expect(prompt).toContain('Keep our original goal');expect(prompt).toContain('Use the revised plan');
+ }
 });

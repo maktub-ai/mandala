@@ -1,7 +1,7 @@
 import type { Attachment } from '../shared/chat-input';
 import { submitChatInput, type SubmissionRecovery } from './chat-send';
 import type { PendingComposerSubmission } from './composer-drafts';
-export type ComposerSubmission = {conversationId:string;commandKey:string;draftFingerprint?:string;text:string;attachments:Attachment[];references:{id:string}[];action:'queue'|'continue'|'interrupt';recovery:SubmissionRecovery};
+export type ComposerSubmission = {steer?:boolean;conversationId:string;commandKey:string;draftFingerprint?:string;text:string;attachments:Attachment[];references:{id:string}[];action:'queue'|'continue'|'interrupt';recovery:SubmissionRecovery};
 export const pendingSubmission = (request:ComposerSubmission):PendingComposerSubmission => ({conversationId:request.conversationId,commandKey:request.commandKey,...request.draftFingerprint?{draftFingerprint:request.draftFingerprint}:{},action:request.action,body:{text:request.text,attachments:request.attachments.map(item=>item.id),references:request.references.map(item=>item.id)},recovery:{attempted:!!request.recovery.attempted,stopAttempted:!!request.recovery.stopAttempted,stopConfirmed:!!request.recovery.stopConfirmed,...request.recovery.expectedExecutionId?{expectedExecutionId:request.recovery.expectedExecutionId}:{},...request.recovery.rejection?{rejectionMessage:request.recovery.rejection.message}:{}}});
 export const restoreSubmission = (pending:PendingComposerSubmission):ComposerSubmission => ({conversationId:pending.conversationId,commandKey:pending.commandKey,...pending.draftFingerprint?{draftFingerprint:pending.draftFingerprint}:{},text:pending.body.text,attachments:pending.body.attachments.map(id=>({id,name:'',size:0,mimeType:''})),references:pending.body.references.map(id=>({id})),action:pending.action,recovery:{attempted:pending.recovery.attempted,stopAttempted:pending.recovery.stopAttempted,stopConfirmed:pending.recovery.stopConfirmed,expectedExecutionId:pending.recovery.expectedExecutionId,...pending.recovery.rejectionMessage?{rejection:new Error(pending.recovery.rejectionMessage)}:{}}});
 export async function uploadComposerFiles(fetcher:typeof fetch,conversationId:string,files:File[],uploaded:Attachment[]=[]) {
@@ -15,7 +15,7 @@ export async function uploadComposerFiles(fetcher:typeof fetch,conversationId:st
 export async function submitComposerInput(call:(path:string,method:'POST'|'GET',body?:unknown)=>Promise<unknown>,request:ComposerSubmission,persist:(pending:PendingComposerSubmission|null)=>Promise<void>,onAccepted:()=>Promise<void>) {
  await persist(pendingSubmission(request));
  try {
-  const result=await submitChatInput(async(path,method,body)=>{if(method==='POST')await persist(pendingSubmission(request));return call(path,method,body);},request.conversationId,{text:request.text,attachments:request.attachments.map(item=>item.id),references:request.references,commandKey:request.commandKey},request.action,request.recovery);
+  const result=await submitChatInput(async(path,method,body)=>{if(method==='POST')await persist(pendingSubmission(request));return call(path,method,body);},request.conversationId,{text:request.text,attachments:request.attachments.map(item=>item.id),references:request.references,commandKey:request.commandKey,...(request.steer?{steer:true}:{})},request.action,request.recovery);
   await onAccepted();
   await persist(null);return result;
  }catch(reason){

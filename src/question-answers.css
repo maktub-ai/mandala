@@ -1,0 +1,20 @@
+.question-answers {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.question-answers dt {
+  padding-inline-start: 8px;
+  border-inline-start: 2px solid var(--muted);
+  color: var(--muted);
+  font-size: var(--type-meta);
+  line-height: 1.5;
+}
+.question-answers dd {
+  margin: 5px 0 0;
+  color: var(--text);
+  font-size: var(--type-body);
+  line-height: 1.57;
+}

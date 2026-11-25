@@ -23,6 +23,14 @@ const fail = message => { console.error(`✗ ${message}`); process.exit(1); };
 function context(cwd = process.cwd()) {
   const top = tryGit(['rev-parse', '--show-toplevel'], cwd);
   if (!top) fail('当前目录不是 git 工作树。');
+  const originUrls = [
+    tryGit(['remote', 'get-url', '--all', 'origin'], top),
+    tryGit(['remote', 'get-url', '--push', '--all', 'origin'], top),
+  ].filter(Boolean).join('\n').split('\n');
+  const retired = /^(?:(?:https?|ssh|git):\/\/(?:[^/@]+@)?github\.com(?::\d+)?\/|(?:git@)?github\.com:)(?:maktub-ai\/mandala-archive|MaktubCN\/open-mana)(?:\.git)?\/?$/i;
+  if (originUrls.some(url => retired.test(url))) {
+    fail('当前 origin 指向归档库。请在 maktub-ai/mandala 的工作树执行任务。');
+  }
   const gitDir = git(['rev-parse', '--path-format=absolute', '--git-dir'], top);
   const common = git(['rev-parse', '--path-format=absolute', '--git-common-dir'], top);
   return { top, isPrimary: gitDir === common, primaryRoot: dirname(common), branch: git(['branch', '--show-current'], top) };

@@ -8,16 +8,16 @@ import { openStore } from '../server/store';
 import { createAssets } from '../server/assets';
 import { createAssetFiles } from '../server/asset-files';
 import { createTasks, type TaskResolver } from '../server/tasks';
-import type { TaskInput, TerminalRunEvent } from '../shared/tasks';
+import type { Task, TaskInput, TerminalRunEvent } from '../shared/tasks';
 const p = { userId: 'u' };
 const input: TaskInput = { goal: 'Prepare report', criteria: [], acceptance: 'delivery', projectId: null, assigneeAgentId: 'a' };
 const homes: string[] = [];
 const stores: ReturnType<typeof openStore>[] = [];
 afterEach(() => { for (const s of stores.splice(0)) s.close(); for (const h of homes.splice(0)) rmSync(h, { recursive: true, force: true }); });
-function setup(resolve: TaskResolver = (_p, task) => ({ agentId: task.assigneeAgentId!, projectId: task.projectId, hostId: 'local', input: task.goal, sourceVersions: [], requiredOutputAssetIds: [], effectiveCapabilities: [], nativeVisibility: 'partial' })) {
+function setup(resolve: TaskResolver = (_p, task) => ({ agentId: task.assigneeAgentId!, projectId: task.projectId, hostId: 'local', input: task.goal, sourceVersions: [], requiredOutputAssetIds: [], effectiveCapabilities: [], nativeVisibility: 'partial' }), onCompleted?:(task:Task)=>void) {
  const home = mkdtempSync(join(tmpdir(), 'durable-tasks-')); homes.push(home);
  const store = openStore(home); stores.push(store);
- const files = createAssetFiles(home), assets = createAssets(store, files), tasks = createTasks(store, { resolve, assets });
+ const files = createAssetFiles(home), assets = createAssets(store, files), tasks = createTasks(store, { resolve, assets,onCompleted });
  return { home, store, files, assets, tasks };
 }
 function running(tasks: ReturnType<typeof createTasks>, acceptance: TaskInput['acceptance'] = 'delivery') {
@@ -499,7 +499,8 @@ test('task and execution projections never expose a peer private execution instr
 });
 
 test.each([false,true])('all contributing checks retain evidence and notify origin after automatic completion (reverse=%s)',async reverse=>{
- const {store,tasks,assets,files,home}=setup(),owner={userId:store.ownerUserId},origin=store.createConversation({agentId:'coordinator',projectId:'',cli:'codex',model:null}),task=tasks.createTask(owner,{goal:'Verified files',criteria:[{id:'integrity',text:'Verify bytes',checkRef:'artifact:integrity'}],acceptance:'checks',originConversationId:origin.id,participantAgentIds:['coordinator']},'checked-task');
+ const accepted=vi.fn();
+ const {store,tasks,assets,files,home}=setup(undefined,accepted),owner={userId:store.ownerUserId},origin=store.createConversation({agentId:'coordinator',projectId:'',cli:'codex',model:null}),task=tasks.createTask(owner,{goal:'Verified files',criteria:[{id:'integrity',text:'Verify bytes',checkRef:'artifact:integrity'}],acceptance:'checks',originConversationId:origin.id,participantAgentIds:['coordinator']},'checked-task');
  const runs=['first','second'].map(key=>{const chat=store.createConversation({agentId:'a',projectId:'',cli:'codex',model:null}),execution=tasks.createExecution(owner,task.id,{conversationId:chat.id,agentId:'a',projectId:null,request:key},key),prepared=tasks.prepareStart(owner,task.id,tasks.getTask(owner,task.id).revision,'start-'+key,undefined,{executionId:execution.id}),run=store.transaction(()=>prepared.commit({executionConversationId:chat.id,mode:'dedicated',destinationConversationId:origin.id}));tasks.bindRunIdentity({runId:run.id,hostId:'local',nativeSessionId:run.id,nativeTurnId:'turn'});return run;});
  const finishing=reverse?[...runs].reverse():runs,outputs:{assetId:string;versionId:string}[]=[];
  for(const [index,run] of finishing.entries()){
@@ -508,6 +509,7 @@ test.each([false,true])('all contributing checks retain evidence and notify orig
   vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-11-04T00:00:0'+index+'Z'));
   try{tasks.applyRunEvent({runId:run.id,hostId:'local',nativeSessionId:run.id,nativeTurnId:'turn',eventKey:'done-'+index,outcome:'succeeded',summary:'Checked result '+index,artifactVersions:[output]});}finally{vi.useRealTimers();}
  }
+ expect(accepted).toHaveBeenCalledTimes(1);expect(accepted.mock.calls[0][0]).toMatchObject({id:task.id,state:'completed',completion:{completedBy:'checks'}});
  const completed=tasks.getTask(owner,task.id);
  expect(completed).toMatchObject({state:'completed',completion:{completedBy:'checks',acceptedAt:'2026-11-04T00:00:01.000Z',sourceRunId:finishing.at(-1)!.id}});
  expect(completed.completion!.artifactVersions).toHaveLength(2);expect(completed.completion!.artifactVersions).toEqual(expect.arrayContaining(outputs));

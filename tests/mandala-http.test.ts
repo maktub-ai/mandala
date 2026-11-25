@@ -21,12 +21,13 @@ const request=(path:string,method='GET',body?:unknown,headers={})=>fetch(url+pat
 it('binds one primary conversation on concurrent requests and protects settings and primary archive endpoints',async()=>{
   const copies=await Promise.all(Array.from({length:6},async()=>await(await request('/api/mandala')).json()));
   expect(new Set(copies.map(item=>item.conversation.id)).size).toBe(1);
-  const first=copies[0],settings={name:'Manbo',cli:'omp',soul:'Calm and concise',maxParallel:5};
+  const first=copies[0],settings={name:'Manbo',cli:'omp',soul:'Calm and concise',maxParallel:5,showExecutionDetails:true};
   expect((await request('/api/mandala','PUT',{revision:first.revision,settings})).status).toBe(200);
   expect((await request('/api/mandala','PUT',{revision:first.revision,settings})).status).toBe(409);
   const current=await(await request('/api/mandala')).json();
   expect(current.conversation.id).toBe(first.conversation.id);
-  for(const patch of [{workspace:'/tmp'},{tools:[]},{maxParallel:0},{soul:42}])
+  expect(current.config.mandala.showExecutionDetails).toBe(true);
+  for(const patch of [{workspace:'/tmp'},{tools:[]},{maxParallel:0},{soul:42},{showExecutionDetails:'yes'}])
     expect((await request('/api/mandala','PUT',{revision:current.revision,settings:{...settings,...patch}})).ok).toBe(false);
   for(const [action,body] of [['archive',{archived:true}],['model',{model:'injected'}],['approval-mode',{approvalMode:'auto'}]] as const)
     expect((await request(`/api/conversations/${first.conversation.id}/${action}`,'POST',body)).ok).toBe(false);
@@ -96,4 +97,14 @@ it('returns an unselected Mandala entry and manual draft when no runtime is regi
  const draft=await(await request('/api/v2/tasks/draft','POST',{description:'Review the application'})).json();
  expect(draft.goal).toBe('Review the application');expect(draft.unresolved.join(' ')).toContain('系统任务执行端');
  expect((await readConfig(home)).config.system).toBeUndefined();
+});
+
+it('organizes only the primary chat from the authenticated desktop context',async()=>{
+ const primary=(await(await request('/api/mandala')).json()).conversation;
+ const path='/api/conversations/'+primary.id+'/compact';
+ expect(await(await request(path,'POST',{})).json()).toEqual({status:'noop'});
+ expect((await request(path,'POST',{force:true})).status).toBe(400);
+ expect((await request(path,'POST',{}, {Authorization:'Bearer invocation-token'})).status).toBe(403);
+ const background=await manager.create('',primary.agentId);
+ expect((await request('/api/conversations/'+background.id+'/compact','POST',{})).status).toBe(422);
 });

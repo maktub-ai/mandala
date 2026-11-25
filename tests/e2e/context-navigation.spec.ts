@@ -14,7 +14,7 @@ test('context popover and capabilities tab keep the message and do not mislabel 
  await expect(context).toContainText('Available preference');await expect(context).toContainText('尚未提供');await expect(context).toContainText('1 个 MCP');
  await context.getByRole('button',{name:/1 个 MCP/}).click();
  const panel=page.locator('#chat-environment-panel');
- await expect(panel.getByRole('tab')).toHaveText(['能力','文件','改动','终端']);
+ await expect(panel.getByRole('tab')).toHaveText(['能力','文件','改动','终端','子代理']);
  const before=await panel.boundingBox();
  await expect(panel).toContainText('discovered-tool');
  await expect(panel).toContainText('已发现');

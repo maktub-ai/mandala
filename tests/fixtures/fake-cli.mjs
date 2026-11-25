@@ -73,8 +73,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
   if (r.method === "thread/read" && persistent) {
     const threadId = r.params.threadId;
+    const turns = readThreads()[threadId] || [];
+    const type = turns.some(turn => turn.status === "inProgress") ? "active" : "notLoaded";
     result = { thread: { id: threadId, name: readNames()[threadId] ?? null, ephemeral: false,
-      status: { type: "notLoaded" }, turns: readThreads()[threadId] || [] } };
+      status: { type }, turns } };
   }
   if (r.method === "thread/fork" && persistent) {
     const threads = readThreads();
@@ -90,7 +92,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     activeTurn = persistent ? "turn-" + randomUUID() : "turn-1";
     if (persistent) {
       const threads = readThreads();
-      (threads[activeThread] ||= []).push({ id: activeTurn, items: [{ type: "userMessage", content: r.params.input }] });
+      (threads[activeThread] ||= []).push({ id: activeTurn, status: "inProgress", items: [{ type: "userMessage", content: r.params.input }] });
       saveThreads(threads);
     }
     result = { turn: { id: activeTurn, status: "inProgress" } };
@@ -112,6 +114,11 @@ if (process.argv.includes("--chat")) {
   let active;
   const complete = (status) => {
     if (active) {
+      if (persistent) {
+        const threads = readThreads();
+        const turn = threads[activeThread]?.find(turn => turn.id === activeTurn);
+        if (turn) { turn.status = status; saveThreads(threads); }
+      }
       send({
         method: "turn/completed",
         params: { threadId: activeThread, turn: { id: activeTurn, status } },
@@ -157,6 +164,20 @@ if (process.argv.includes("--chat")) {
           turn: { id: activeTurn, status: "inProgress" },
         },
       });
+      if (text === "请确认使用的 Codex 界面。") {
+        send({ method: "item/completed", params: { threadId: activeThread, turnId: activeTurn,
+          item: { id: "fixture-choice", type: "agentMessage", delivery: "async",
+            questions: [{ title: "你说的是哪个 Codex 界面？", options: ["Codex 独立桌面 App", "终端"] }] } } });
+        complete("completed");
+        return;
+      }
+      if (text.startsWith("<send_user_message_question_reply>") && text.includes("fixture-choice")) {
+        const [reply] = JSON.parse(text.split("\n")[1]);
+        send({ method: "item/agentMessage/delta", params: { threadId: activeThread, turnId: activeTurn,
+          itemId: "fixture-choice-received", delta: "明白，我们讨论的是" + reply.answer + "。" } });
+        complete("completed");
+        return;
+      }
       if ((text === "native-question" || text === "native-question-nonblocking"))
         send({id:64,method:"item/tool/requestUserInput",params:{threadId:activeThread,turnId:activeTurn,itemId:"preview-question",isBlocking:text !== "native-question-nonblocking",questions:[{id:"preview",header:"Preview",question:"Where should the content open?",options:[{label:"In app",description:"Preview inside OpenMana"},{label:"Copy path",description:"Copy the local path"}]}]}});
       else if (text.startsWith("mcp-approval-"))

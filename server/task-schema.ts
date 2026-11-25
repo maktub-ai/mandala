@@ -59,7 +59,7 @@ export function initializeTaskSchema(store:Store){
 
    const tables=['task_receipt_inputs','task_run_observations','task_progress_evaluations','task_progress_heads','mandala_ownership','mandala_delegations','task_completion_intents','task_inquiry_waits','task_plan_commands','task_plan_steps','task_creation_sources','task_participants','task_conversation_links','conversation_task_provenance','task_event_diagnostics','task_legacy_sources','task_command_dedup','task_dependencies','task_context_versions','task_output_versions','context_snapshots','task_receipts','task_runs','task_executions','work_tasks'];
    for(const table of tables)db.exec(`DROP TABLE IF EXISTS ${table}`);
-   db.exec("DELETE FROM schema_migrations WHERE key IN ('durable_tasks_001_schema','durable_tasks_001_legacy','durable_tasks_002_scheduler','durable_tasks_005_native_uncertainty','durable_tasks_006_conversation_provenance','durable_tasks_007_explicit_links','durable_tasks_008_participants','task_execution_001_snapshots','task_progress_002_preference','flat_tasks_001_schema','flat_tasks_002_schema')");
+   db.exec("DELETE FROM schema_migrations WHERE key IN ('durable_tasks_001_schema','durable_tasks_001_legacy','durable_tasks_002_scheduler','durable_tasks_005_native_uncertainty','durable_tasks_006_conversation_provenance','durable_tasks_007_explicit_links','durable_tasks_008_participants','task_execution_001_snapshots','task_progress_002_preference','task_project_attribution_001','flat_tasks_001_schema','flat_tasks_002_schema')");
   });}finally{db.exec('PRAGMA foreign_keys=ON');}
  }
  store.transaction(() => {
@@ -111,7 +111,9 @@ export function initializeTaskSchema(store:Store){
    ALTER TABLE task_receipts ADD COLUMN claim_epoch INTEGER;`);
   db.prepare('INSERT INTO schema_migrations VALUES (?,?)').run(key, new Date().toISOString());
  });
- db.exec(`CREATE INDEX IF NOT EXISTS task_runs_execution_chat ON task_runs(json_extract(routing,'$.executionConversationId'));
+ db.exec(`CREATE INDEX IF NOT EXISTS task_receipts_destination_chat ON task_receipts(destination_conversation_id);
+  CREATE INDEX IF NOT EXISTS task_review_source_chat ON work_tasks(origin_conversation_id) WHERE state='review';
+  CREATE INDEX IF NOT EXISTS task_runs_execution_chat ON task_runs(json_extract(routing,'$.executionConversationId'));
   CREATE INDEX IF NOT EXISTS task_runs_continuation_chat ON task_runs(json_extract(continuation,'$.conversationId'));`);
  store.transaction(() => {
   const key='durable_tasks_005_native_uncertainty';
@@ -150,6 +152,15 @@ export function initializeTaskSchema(store:Store){
  store.transaction(() => {
   const key='task_progress_002_preference';if(db.prepare('SELECT key FROM schema_migrations WHERE key=?').get(key))return;
   db.exec('ALTER TABLE work_tasks ADD COLUMN automatic_progress INTEGER NOT NULL DEFAULT 1 CHECK(automatic_progress IN (0,1))');
+  db.prepare('INSERT INTO schema_migrations VALUES (?,?)').run(key,new Date().toISOString());
+ });
+ store.transaction(()=>{
+  const key='task_project_attribution_001';
+  if(db.prepare('SELECT key FROM schema_migrations WHERE key=?').get(key))return;
+  // NULL means infer from current executions; a stored [] explicitly clears the labels.
+  const columns=new Set(db.prepare('PRAGMA table_info(work_tasks)').all().map(row=>row.name));
+  if(!columns.has('project_ids_override'))db.exec('ALTER TABLE work_tasks ADD COLUMN project_ids_override TEXT');
+  if(!columns.has('module_ref'))db.exec('ALTER TABLE work_tasks ADD COLUMN module_ref TEXT');
   db.prepare('INSERT INTO schema_migrations VALUES (?,?)').run(key,new Date().toISOString());
  });
  store.transaction(()=>{db.exec("CREATE TABLE IF NOT EXISTS task_creation_sources(task_id TEXT PRIMARY KEY REFERENCES work_tasks(id),source TEXT NOT NULL CHECK(source IN ('user','agent','system'))); CREATE TABLE IF NOT EXISTS task_completion_intents(run_id TEXT PRIMARY KEY REFERENCES task_runs(id),task_revision INTEGER NOT NULL,agent_id TEXT NOT NULL); CREATE TABLE IF NOT EXISTS task_inquiry_waits(run_id TEXT PRIMARY KEY REFERENCES task_runs(id),task_revision INTEGER NOT NULL,continuation_epoch INTEGER NOT NULL,completion_agent_id TEXT,resumed_by_run_id TEXT REFERENCES task_runs(id))");});

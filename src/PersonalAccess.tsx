@@ -1,5 +1,7 @@
 import {partitionRemoteApprovals,remoteApprovalActions} from './remote-approval-presentation';
 import { AccountAvatar, AvatarEditor, accountInitial } from './AccountAvatar';
+import { createRemoteStorage } from './remote-storage';
+import { clearPendingApiReads } from './api';
 import { CloudSignIn, DesktopSignIn, DesktopApproval, desktopAccount } from './AccountSignIn';
 import Input from './ui/Input';
 import Button from './ui/Button';
@@ -70,23 +72,41 @@ export default function PersonalAccess() {
   const errorNotice = useRef<HTMLParagraphElement>(null);
   const accountReturnFocus=useRef<HTMLElement|null>(null);
   const sessionGeneration = useRef(0);
+  const apiIdentity = useRef('');
   const [browserKey, setBrowserKey] = useState<{ publicKey: string; secretKey: string }>();
-  const [pinnedHost, setPinnedHost] = useState(''), [pairingCode, setPairingCode] = useState('');
+  const [pin, setPin] = useState({deviceId:'',key:''}), [pairingCode, setPairingCode] = useState('');
+  const pinnedHost = pin.deviceId===session?.selectedDeviceId ? pin.key : '';
   const pinName = (id: string) => `mandala-host-key:${location.origin}:${id}`;
   useEffect(() => {
     if (session?.mode !== 'control' || !session.user) return;
     void getRemoteBrowserKey().then(setBrowserKey).catch(reason => setError(String(reason)));
   }, [session?.mode, session?.user?.id]);
   useEffect(() => {
-    setPinnedHost(session?.selectedDeviceId ? localStorage.getItem(pinName(session.selectedDeviceId)) ?? '' : '');
+    const deviceId=session?.selectedDeviceId??'';
+    setPin({deviceId,key:deviceId ? localStorage.getItem(pinName(deviceId))??'' : ''});
     setPairingCode('');
   }, [session?.selectedDeviceId]);
+  const revokedDevices=JSON.stringify(session?.mode==='control'?session.devices?.filter(device=>device.grant==='revoked'||device.grant==='denied').map(device=>device.id)??[]:[]);
+  useEffect(()=>{
+    if(!browserKey||!session?.user||revokedDevices==='[]')return;
+    for(const id of JSON.parse(revokedDevices) as string[]){
+      try{
+        const host=localStorage.getItem(pinName(id));if(!host)continue;
+        const storage=createRemoteStorage(localStorage,[location.origin,session.user.id,id,host],browserKey);
+        if(storage.cacheEnabled())storage.setCacheEnabled(false);
+      }catch(reason){setError(String(reason));}
+    }
+  },[revokedDevices,browserKey,session?.user?.id]);
   const refresh = async (signal?: AbortSignal) => {
     const generation = ++sessionGeneration.current;
     const response = await fetch('/auth/session', { signal });
     if (!response.ok) throw new Error(l('无法读取账号状态，请确认 Mandala 正在运行后重试。', 'Cannot read account status. Check that Mandala is running, then retry.'));
     const value = await response.json();
-    if (!signal?.aborted && generation === sessionGeneration.current) setSession(value);
+    if (!signal?.aborted && generation === sessionGeneration.current) {
+      const identity = JSON.stringify([value.mode, value.user?.id, value.selectedDeviceId, value.partition]);
+      if (identity !== apiIdentity.current) { clearPendingApiReads(); apiIdentity.current = identity; }
+      setSession(value);
+    }
   };
   const errorMessage = (reason: unknown) => {
     const message = reason instanceof Error ? reason.message : String(reason);
@@ -111,6 +131,7 @@ export default function PersonalAccess() {
   };
   const action = async (path: string, body?: unknown) => {
     sessionGeneration.current++;
+    clearPendingApiReads();
     const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': session?.csrfToken ?? '', ...(path === '/auth/setup' ? { 'X-Setup-Token': session?.setup?.token ?? '' } : {}) }, body: JSON.stringify(body ?? {}) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error ?? l('服务未完成请求，请稍后重试。', 'The service could not complete the request. Try again.'));
@@ -201,11 +222,11 @@ export default function PersonalAccess() {
     {browserKey && <p className="personal-caption">{l('本浏览器指纹（请在电脑上核对）', 'Browser fingerprint (verify on the computer)')}<br /><code>{remoteKeyFingerprint(browserKey.publicKey)}</code></p>}
     {notice}<div className="personal-actions"><Button disabled={busy} onClick={() => void perform(refresh, l('刷新电脑失败', 'Computer refresh failed'))}>{l('刷新', 'Refresh')}</Button><Button disabled={busy} onClick={() => void signOut()}>{l('退出登录', 'Sign out')}</Button>{choose && session.selectedDeviceId && <Button onClick={() => setChoose(false)}>{l('返回', 'Back')}</Button>}</div>
   </section>;
-  if (session.mode === 'control' && (!session.selectedDeviceId || choose)) return <main className="personal-access">{devices}</main>;
+  if (session.mode === 'control' && (!session.selectedDeviceId || !session.devices?.some(device=>device.id===session.selectedDeviceId&&device.grant==='approved') || choose)) return <main className="personal-access">{devices}</main>;
   if (session.mode === 'control' && (!pinnedHost || !browserKey)) return <main className="personal-access"><section className="personal-card">{brand}{previewNotice}{heading(l('配对这台电脑', 'Pair this computer'),'link')}<p>{l('在电脑的“账号与连接”中复制配对码，直接粘贴到这里。请通过你信任的本地屏幕取得配对码。', 'Copy the pairing code from “Account and connection” on your computer and paste it here. Get it directly from the trusted local screen.')}</p><form onSubmit={event => { event.preventDefault(); void perform(async () => {
     const code = pairingCode.trim();
     if (!/^[A-Za-z0-9+/]{43}=$/.test(code) || atob(code).length !== 32 || !session.selectedDeviceId) throw new Error(l('配对码无效，请从电脑重新复制。', 'Invalid pairing code. Copy it again from the computer.'));
-    localStorage.setItem(pinName(session.selectedDeviceId), code); setPinnedHost(code);
+    localStorage.setItem(pinName(session.selectedDeviceId), code); setPin({deviceId:session.selectedDeviceId,key:code});
   }, l('配对失败', 'Pairing failed')); }}><label>{l('电脑配对码', 'Computer pairing code')}<Input value={pairingCode} onChange={event => setPairingCode(event.target.value)} autoComplete="off" spellCheck={false} autoCapitalize="none" required /></label>{notice}<Button type="submit" className="primary" disabled={busy || !browserKey}>{l('确认配对', 'Confirm pairing')}</Button></form><Button onClick={() => setChoose(true)}>{l('选择其他电脑', 'Choose another computer')}</Button></section></main>;
   const {pending:pendingGrants,olderPending:olderPendingGrants,history:grantHistory}=partitionRemoteApprovals(grants,grantClock);
   const decideGrant=(grant:Grant,state:'approved'|'denied'|'revoked')=>{
@@ -226,14 +247,14 @@ export default function PersonalAccess() {
     <div className="personal-actions">{remoteApprovalActions(grant).map(state=><Button key={state} disabled={busy} onClick={()=>decideGrant(grant,state)}>{state==='approved'?l('批准','Approve'):state==='denied'?l('拒绝','Deny'):l('撤销','Revoke')}</Button>)}</div>
   </div>);
   const userInitial = accountInitial(session.user.username);
-  return <div className="personal-shell">{session.mode === 'control' && browserKey ? <RemoteWorkspace userId={session.user.id} deviceId={session.selectedDeviceId!} key={session.selectedDeviceId} hostOnline={session.devices?.find(device=>device.id===session.selectedDeviceId)?.online} hostPublicKey={pinnedHost} keyPair={browserKey} computerName={(session.devices?.find(device => device.id === session.selectedDeviceId)?.name ?? 'Mandala') + (session.preview ? l(' · 隔离验收', ' · Acceptance preview') : '')} onAccount={() => { setError(''); setPanel(true); }} /> : <App draftIdentity={session.user.id} key={session.mode === 'control' ? session.selectedDeviceId : session.user.id} userInitial={userInitial} account={{username:session.user.username,status:session.preview ? l('隔离验收 · 合成数据', 'Acceptance preview · Synthetic data') : session.mode === 'control' ? session.devices?.find(device => device.id === session.selectedDeviceId)?.name ?? l('离线','Offline') : l('本机','This computer'),avatar:customAvatar || session.user.avatarUrl,onOpen:()=>{setError('');setPanel(true);}}} />}
+  return <div className="personal-shell">{session.mode === 'control' && browserKey ? <RemoteWorkspace userId={session.user.id} deviceId={session.selectedDeviceId!} key={JSON.stringify([session.user.id,session.selectedDeviceId,pinnedHost,browserKey.publicKey])} hostOnline={session.devices?.find(device=>device.id===session.selectedDeviceId)?.online} hostPublicKey={pinnedHost} keyPair={browserKey} computerName={(session.devices?.find(device => device.id === session.selectedDeviceId)?.name ?? 'Mandala') + (session.preview ? l(' · 隔离验收', ' · Acceptance preview') : '')} onAccount={() => { setError(''); setPanel(true); }} /> : <App draftIdentity={session.user.id} key={session.mode === 'control' ? session.selectedDeviceId : session.user.id} userInitial={userInitial} account={{username:session.user.username,status:session.preview ? l('隔离验收 · 合成数据', 'Acceptance preview · Synthetic data') : session.mode === 'control' ? session.devices?.find(device => device.id === session.selectedDeviceId)?.name ?? l('离线','Offline') : l('本机','This computer'),avatar:customAvatar || session.user.avatarUrl,onOpen:()=>{setError('');setPanel(true);}}} />}
     {!panel&&['local','desktop'].includes(session.mode)&&session.connection&&pendingGrants.length>0&&
       <div role="status" className="personal-pending-banner"><span>{l('有新的远程连接申请','New remote access request')}</span><Button onClick={()=>setPanel(true)}>{l('查看申请','Review request')}</Button></div>}
     {panel && <Dialog label={l('账号与连接', 'Account and connection')} className="personal-account-panel" returnFocusRef={accountReturnFocus} onClose={closePanel} locked={busy}>
       <div className="personal-heading"><h1>{l('账号与连接', 'Account and connection')}</h1><Button type="button" className="icon-button" aria-label={l('关闭', 'Close')} onClick={closePanel} disabled={busy}><Icon name="close" size={18} /></Button></div>
       {previewNotice}<p className="personal-identity"><AccountAvatar name={session.user.username} source={customAvatar || session.user.avatarUrl} className="sidebar-account-avatar" />{session.user.username}<span>{session.mode === 'desktop' ? l('Mandala 账号','Mandala account') : session.mode === 'local' ? l('本地身份', 'Local identity') : l('服务账号', 'Service account')}</span></p>
       {session.mode === 'desktop' && <AvatarEditor key={session.user.id} name={session.user.username} providerUrl={session.user.avatarUrl} custom={customAvatar} save={saveAvatar} />}
-      {session.mode === 'control' ? <><Button onClick={() => { setChoose(true); setPanel(false); }}>{l('选择电脑', 'Choose computer')}</Button><Button onClick={() => { if (session.selectedDeviceId) localStorage.removeItem(pinName(session.selectedDeviceId)); setPinnedHost(''); setPanel(false); }}>{l('重新配对电脑', 'Pair computer again')}</Button></> : session.connection ? <>
+      {session.mode === 'control' ? <><Button onClick={() => { setChoose(true); setPanel(false); }}>{l('选择电脑', 'Choose computer')}</Button><Button onClick={() => { if (session.selectedDeviceId) localStorage.removeItem(pinName(session.selectedDeviceId)); setPin({deviceId:'',key:''}); setPanel(false); }}>{l('重新配对电脑', 'Pair computer again')}</Button></> : session.connection ? <>
         <div><h2>{session.connection.device.name}</h2><p>{connectionLabel(session.connection.status?.state)}</p><p className="personal-service-url"><code>{session.connection.controlUrl}</code></p><a className="personal-link" href={session.connection.controlUrl} target="_blank" rel="noreferrer">{l('打开手机连接地址', 'Open phone connection address')}<Icon name="external-link" size={16} /></a></div>
         <Disclosure title={l('重命名电脑', 'Rename computer')}><form onSubmit={event => {
           event.preventDefault();

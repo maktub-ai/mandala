@@ -8,15 +8,16 @@ import { readConfig } from './config';
 import { createAssets } from './assets';
 import { createAssetFiles } from './asset-files';
 import { DomainError } from '../shared/workspace-contracts';
-import type {Task} from '../shared/tasks';
+import {projectTaskExecutions, type Task} from '../shared/tasks';
 const invalid=()=>{throw new DomainError('invalid_task_request',422,'Invalid task request');};
 const fields=(data:any,allowed:string[])=>{if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).some(k=>!allowed.includes(k)))invalid();};
 export function createTaskHttp(home:string,manager:SessionManager,store:Store,draftGenerate?:TaskDraftGenerator,readScope:<T>(read:()=>T)=>T=read=>read()){
  const tasks=manager.taskService,p=workspacePrincipal(store),assets=createAssets(store,createAssetFiles(home));
- const readableTask=(task:Task):Task=>{const executions=task.executions.filter(execution=>{
-  try{manager.authorizeConversationRead(execution.conversationId);return true;}
+ const readableChat=(id:string)=>{
+  try{manager.authorizeConversationRead(id);return true;}
   catch(error){if(error instanceof DomainError&&[403,404].includes(error.status))return false;throw error;}
- });return {...task,executions,conversationIds:executions.filter(execution=>!execution.supersededByExecutionId).map(execution=>execution.conversationId)};};
+ };
+ const readableTask=(task:Task):Task=>projectTaskExecutions(task,task.executions.filter(execution=>readableChat(execution.conversationId)));
  return async(req:IncomingMessage,res:ServerResponse,url:URL,body:(req:IncomingMessage)=>Promise<any>)=>{
   if(!url.pathname.startsWith('/api/v2/tasks'))return false;
   const parts=url.pathname.slice('/api/v2/tasks'.length).split('/').filter(Boolean).map(decodeURIComponent),[id,action]=parts;
@@ -24,6 +25,16 @@ export function createTaskHttp(home:string,manager:SessionManager,store:Store,dr
   const key=()=>{const value=req.headers['idempotency-key'];if(typeof value!=='string'||!value||value.length>200)return invalid();return value;};
   const configured=async(projectId:string|null,agentId:string|null)=>{const {config}=await readConfig(home);if(projectId!==null&&!config.projects.some(p=>p.id===projectId)||agentId!==null&&!config.agents.some(a=>a.id===agentId))invalid();};
   if(req.method==='POST'&&id==='draft'&&parts.length===1){result=await draftTask(await body(req),draftGenerate);}
+  else if(req.method==='POST'&&id==='route-preview'&&parts.length===1){
+   const data=await body(req);fields(data,['goal','criteria','acceptance','projectId','assigneeAgentId','participantAgentIds','originConversationId','automaticProgress']);
+   result=await manager.coordination.routes.preview(data,key());
+  }else if(id==='route-reviews'&&parts.length===2&&req.method==='GET'){
+   result=manager.coordination.routes.read(action);
+  }else if(id==='route-reviews'&&parts.length===2&&req.method==='POST'){
+   const data=await body(req);fields(data,['selection']);if(!Object.hasOwn(data,'selection'))invalid();
+   if(data.selection!==null)fields(data.selection,['projectId','lane','assigneeAgentId']);
+   result=await manager.coordination.routes.decide(action,data.selection);
+  }
   else if(req.method==='GET'&&id==='context'&&parts.length===1){
    if([...url.searchParams.keys()].some(k=>k!=='conversationId'))invalid();
    const conversationId=url.searchParams.get('conversationId');if(!conversationId)invalid();
@@ -47,7 +58,8 @@ export function createTaskHttp(home:string,manager:SessionManager,store:Store,dr
    }
   } else if(req.method==='GET'&&!parts.length){
    if([...url.searchParams.keys()].some(k=>!['projectId','conversationId'].includes(k)))invalid();
-   result=readScope(()=>tasks.listTasks(p).map(readableTask).filter(t=>(!url.searchParams.has('projectId')||t.projectId===url.searchParams.get('projectId'))&&(!url.searchParams.has('conversationId')||t.conversationIds.includes(url.searchParams.get('conversationId')!))).map(task=>{
+   const source=url.searchParams.get('conversationId'),project=url.searchParams.get('projectId');
+   result=readScope(()=>source!==null&&!readableChat(source)?[]:tasks.listTasks(p).map(readableTask).filter(t=>(project===null||t.projectIds.includes(project))&&(source===null||t.originConversationId===source||t.conversationIds.includes(source))).map(task=>{
     const conversationId=tasks.listRunControls(p,task.id).at(-1)?.routing?.executionConversationId;
     let executionTitle:string|null=null;
     if(conversationId)try{manager.authorizeConversationRead(conversationId);executionTitle=store.getConversation(conversationId)?.title?.trim()||null;}
@@ -65,12 +77,12 @@ export function createTaskHttp(home:string,manager:SessionManager,store:Store,dr
    });
    result={task,runs,contexts,readableAssociatedChats,receipts:tasks.listReceipts(p,id),executions:task.executions,planVersions:tasks.planVersions(p,id)};
   } else if(req.method==='PATCH'&&parts.length===1){
-   const data=await body(req);fields(data,['expectedRevision','goal','criteria','projectId','assigneeAgentId','participantAgentIds','originConversationId','automaticProgress','state']);
+   const data=await body(req);fields(data,['expectedRevision','goal','criteria','projectId','projectIds','moduleRef','assigneeAgentId','participantAgentIds','originConversationId','automaticProgress','state']);
    const {expectedRevision,...patch}=data;validateTaskConfiguration((await readConfig(home)).config,patch);
    result=tasks.updateTask(p,id,expectedRevision,patch,key());
   } else if(req.method==='POST'){
    const data=await body(req);
-   if(!parts.length){fields(data,['goal','criteria','acceptance','projectId','assigneeAgentId','participantAgentIds','originConversationId','automaticProgress']);validateTaskConfiguration((await readConfig(home)).config,data);result=tasks.createTask(p,data,key());status=201;}
+   if(!parts.length){fields(data,['goal','criteria','acceptance','projectId','projectIds','moduleRef','assigneeAgentId','participantAgentIds','originConversationId','automaticProgress']);validateTaskConfiguration((await readConfig(home)).config,data);result=tasks.createTask(p,data,key());status=201;}
    else if(parts.length===2&&action==='executions'){
     fields(data,['conversationId','expectedRevision']);if(typeof data.conversationId!=='string'||!data.conversationId.trim()||!Number.isSafeInteger(data.expectedRevision)||data.expectedRevision<1)invalid();manager.authorizeConversationRead(data.conversationId);result=readableTask(tasks.attachExecution(p,id,data.expectedRevision,data.conversationId,key()));status=201;
    } else if(parts.length===4&&action==='executions'&&parts[3]==='remove'){
@@ -80,14 +92,15 @@ export function createTaskHttp(home:string,manager:SessionManager,store:Store,dr
    else if(parts.length===2&&action==='mark-completed'){fields(data,['expectedRevision']);result=tasks.moveTask(p,id,data.expectedRevision,'completed',null,key());}
    else if(parts.length===2&&action==='move'){fields(data,['expectedRevision','state','reason']);if(data.reason!==undefined&&data.reason!==null&&typeof data.reason!=='string')invalid();result=tasks.moveTask(p,id,data.expectedRevision,data.state,data.reason??null,key());}
    else if(parts.length===2){
-    fields(data,['expectedRevision',...(action==='start'?['conversationId']:action==='assign'?['agentId']:action==='reopen'||action==='request_changes'?['reason','expectedOutput']:[])]);
+    fields(data,['expectedRevision',...(action==='start'?['conversationId']:action==='assign'?['agentId']:action==='accept'?['expectedRunId']:action==='reopen'||action==='request_changes'?['reason','expectedOutput']:[])]);
+    if(data.expectedRunId!==undefined&&data.expectedRunId!==null&&(typeof data.expectedRunId!=='string'||!data.expectedRunId.trim()))invalid();
     if(data.expectedOutput!==undefined){fields(data.expectedOutput,['assetId','versionId','runId']);if(['assetId','versionId','runId'].some(k=>typeof data.expectedOutput[k]!=='string'||!data.expectedOutput[k].trim()))invalid();}
     if(!Number.isSafeInteger(data.expectedRevision)||data.expectedRevision<1)invalid();
     if(action==='stop'||action==='cancel')result=await manager.stopDurableTask(id,data.expectedRevision,action==='cancel');
     else if(action==='start'){result=await manager.startDurableTask(id,data.expectedRevision,key(),data.conversationId);status=202;}
     else if(['complete','accept','reopen','request_changes','assign'].includes(action)){
      if(action==='assign')await configured(tasks.getTask(p,id).projectId,data.agentId);
-     result=tasks.userCommand(p,id,data.expectedRevision,action as 'complete',action==='assign'?data.agentId:data.reason??null,data.expectedOutput,data.expectedOutput?key():undefined);
+     result=tasks.userCommand(p,id,data.expectedRevision,action as 'complete',action==='assign'?data.agentId:data.reason??null,data.expectedOutput,data.expectedOutput||action==='accept'&&req.headers['idempotency-key']!==undefined?key():undefined,data.expectedRunId);
     } else invalid();
    } else invalid();
    if(parts.length===2&&['move','mark-completed','accept','cancel'].includes(action))manager.presentTaskDecision(id);

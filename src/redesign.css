@@ -52,7 +52,9 @@
 .product-frame .send-button { border-radius: var(--control-radius); width: 30px; height: 30px; background: var(--button); color: var(--button-text); }
 .product-frame .send-button:disabled { opacity: .3; }
 .product-frame .composer-meta { padding-top: 8px; font-size: var(--type-meta); color: var(--muted); }
-.product-frame .messages { width: 100%; max-width: calc(var(--content-width) + 2 * var(--gutter)); margin: 0 auto; padding: 24px var(--gutter) 12px; }
+.product-frame .messages,
+.product-frame .conversation > .ui-loading { width: 100%; max-width: calc(var(--content-width) + 2 * var(--gutter)); margin: 0 auto; padding: 24px var(--gutter) 12px; }
+.product-frame .conversation > .ui-loading .ui-loading-row { padding-inline: 0; }
 .product-frame .is-new .messages { display: none; }
 .product-frame .message { width: 100%; max-width: none; margin: 0 0 32px; padding: 0; gap: 12px; }
 .product-frame .message.user .message-content { background: var(--surface); padding: 12px 16px; border: 0; border-radius: var(--panel-radius); }

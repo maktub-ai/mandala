@@ -1,7 +1,9 @@
+import type { ReactNode } from 'react';
 import {useEffect,useState} from 'react';
-import {api} from './api';
+import {api,requestJson} from './api';
+import Button from './ui/Button';
 import {useLanguage} from './i18n';
-import {executionResultHref,type ConversationResult} from '../shared/conversation-results';
+import {executionResultHref,type ChatDeliveries,type ChatTaskReview,type ConversationResult} from '../shared/conversation-results';
 import Icon,{type IconName} from './ui/Icon';
 import StatusLabel from './ui/StatusLabel';
 import MarkdownMessage from './MarkdownMessage';
@@ -11,7 +13,7 @@ import type {Task} from '../shared/tasks';
 import './execution-results.css';
 
 export function useExecutionResults(conversationId:string){
- const [value,setValue]=useState<{id:string;items:ConversationResult[];error:string}>({id:'',items:[],error:''});
+ const [value,setValue]=useState<ChatDeliveries & {id:string;error:string}>({id:'',items:[],reviews:[],error:''});
  const [revision,setRevision]=useState(0);
  useEffect(()=>{
   if(!conversationId)return;
@@ -19,21 +21,50 @@ export function useExecutionResults(conversationId:string){
   let active=true,inFlight=false;
   const load=async()=>{
    if(inFlight||document.hidden)return;inFlight=true;
-   try{const items=await api<ConversationResult[]>('/conversations/'+conversationId+'/results','GET',undefined,controller.signal);if(active)setValue({id:conversationId,items,error:''});}
-   catch(error){if(active)setValue({id:conversationId,items:[],error:(error as Error).message});}
+   try{const data=await api<ChatDeliveries>('/conversations/'+conversationId+'/results?view=chat','GET',undefined,controller.signal);if(active)setValue({id:conversationId,...data,error:''});}
+   catch(error){if(active)setValue({id:conversationId,items:[],reviews:[],error:(error as Error).message});}
    finally{inFlight=false;}
   };
   void load();const timer=setInterval(load,3000);document.addEventListener('visibilitychange',load);
   return()=>{active=false;controller.abort();clearInterval(timer);document.removeEventListener('visibilitychange',load);};
  },[conversationId,revision]);
- return {...(value.id===conversationId?value:{items:[],error:''}),retry:()=>setRevision(v=>v+1)};
+ return {...(value.id===conversationId?value:{items:[],reviews:[],error:''}),retry:()=>setRevision(v=>v+1)};
 }
 
-export default function ExecutionResults({items,config,onOpen,tasks=[]}:{items:ConversationResult[];config:Config;onOpen:(path:string)=>void;tasks?:readonly Task[]}){
- return <>{items.map(item=><ExecutionResult key={item.id} item={item} config={config} onOpen={onOpen} tasks={tasks}/>)}</>;
+function AcceptTask({taskId,revision,runId,onRefresh}:{taskId:string;revision:number;runId:string|null;onRefresh:()=>void}){
+ const {text:t}=useLanguage(),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ async function accept(){
+  setBusy(true);setError('');
+  try{
+   await requestJson<Task>('/api/v2/tasks/'+encodeURIComponent(taskId)+'/accept',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':`chat-accept:${taskId}:${revision}`},body:JSON.stringify({expectedRevision:revision,expectedRunId:runId})});
+  }catch(failure){
+   setBusy(false);
+   setError((failure as {status?:number}).status===409?t('交付已更新，请查看最新状态。','The delivery changed. Review its current state.'):(failure as Error).message);
+  }finally{onRefresh();}
+ }
+ return <><Button type="button" disabled={busy} onClick={()=>void accept()}><Icon name="check" size={14}/>{t('确认完成','Confirm completion')}</Button>{error&&<span role="alert">{error}</span>}</>;
 }
 
-function ExecutionResult({item,config,onOpen,tasks}:{item:ConversationResult;config:Config;onOpen:(path:string)=>void;tasks:readonly Task[]}){
+export function ChatReviewRequests({reviews,onRefresh,onOpen}:{reviews:ChatTaskReview[];onRefresh:()=>void;onOpen:(path:string)=>void}){
+ const {text:t}=useLanguage();
+ return <>{reviews.map(review=>{
+  const href='/tasks/'+encodeURIComponent(review.taskId);
+  return <article key={review.taskId} className="execution-result" aria-label={t('待验收任务','Task awaiting review')}>
+   <div className="execution-result-heading"><Icon name="approval" size={14}/><strong>{review.goal.split('\n')[0]}</strong></div>
+   <div className="execution-result-footer"><StatusLabel icon="approval" tone="warning">{t('待验收','Awaiting review')}</StatusLabel><div className="execution-result-actions">
+    <a href={href} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();onOpen(href);}}>{t('查看任务','View task')}</a><AcceptTask key={review.revision} {...review} onRefresh={onRefresh}/>
+   </div></div>
+  </article>;
+ })}</>;
+}
+
+type BubbleActions = { onRefresh:()=>void; renderCopy?: (key: string, text: string) => ReactNode };
+
+export default function ExecutionResults({items,config,onOpen,tasks=[],renderCopy,onRefresh}:BubbleActions & {items:ConversationResult[];config:Config;onOpen:(path:string)=>void;tasks?:readonly Task[]}){
+ return <>{items.map(item=><ExecutionResult onRefresh={onRefresh} renderCopy={renderCopy} key={item.id} item={item} config={config} onOpen={onOpen} tasks={tasks}/>)}</>;
+}
+
+function ExecutionResult({item,config,onOpen,tasks,renderCopy,onRefresh}:BubbleActions & {item:ConversationResult;config:Config;onOpen:(path:string)=>void;tasks:readonly Task[]}){
  const {text: localize, language}=useLanguage(),en=language !== 'zh-CN';
  const sender=config.agents.find(agent=>agent.id===item.agentId);
  const labels:Record<ConversationResult['state'],string>=en
@@ -50,10 +81,11 @@ function ExecutionResult({item,config,onOpen,tasks}:{item:ConversationResult;con
   <div className="execution-result-heading"><Icon name="message" size={14}/><strong title={item.title}>{item.title}</strong></div>
   {item.reportAccessBlocked&&<p className="field-hint">{localize('Mandala 缺少读取交付物或来源资料的权限。授权后会使用本次执行结果补报。','Mandala needs access to the deliverables or source material. Once access is granted, it will report on this execution.')}</p>}
   {summary&&<div className="execution-result-body"><MarkdownMessage text={summary}/></div>}
+  {renderCopy && <span className="message-actions bubble-copy">{renderCopy(item.id, summary || item.title)}</span>}
   </div>
   <div className="execution-result-footer">
-   <div className="execution-result-meta"><StatusLabel icon={icon} tone={item.state==='failed'?'danger':'neutral'}>{labels[item.state]}</StatusLabel>{item.awaitingReview&&<StatusLabel icon="approval" tone="warning">{localize('待验收', 'Awaiting review')}</StatusLabel>}{item.taskState==='completed'&&item.completion&&<StatusLabel icon="check" tone="success">{item.completion.completedBy==='user'?localize('用户已验收','Accepted by user'):item.completion.completedBy==='checks'?localize('检查通过，任务完成','Checks passed; task completed'):item.completion.completedBy==='agent'?localize('智能体确认完成','Marked completed by Agent'):localize('已交付，任务完成','Delivered; task completed')}</StatusLabel>}{item.taskState==='cancelled'&&<StatusLabel icon="stop">{localize('任务已取消','Task cancelled')}</StatusLabel>}<time dateTime={item.createdAt} title={date.toLocaleString(language)}>{stamp}</time></div>
-   <div className="execution-result-actions">{item.conversationId&&link(executionResultHref(item.conversationId,item.runId),localize('查看执行详情', 'View execution details'),'arrowRight')}{item.artifactCount>0&&link('/tasks/'+encodeURIComponent(item.taskId),localize(`查看产物（${item.artifactCount}）`, `Deliverables (${item.artifactCount})`),'files')}</div>
+   <div className="execution-result-meta"><StatusLabel icon={icon} tone={item.state==='failed'?'danger':'neutral'}>{labels[item.state]}</StatusLabel>{item.awaitingReview&&<StatusLabel icon="approval" tone="warning">{localize('待验收', 'Awaiting review')}</StatusLabel>}{item.taskState==='completed'&&item.completion&&<StatusLabel icon="check" tone="success">{item.completion.sourceRunId!==item.runId?localize('任务已完成','Task completed'):item.completion.completedBy==='user'?localize('用户已验收','Accepted by user'):item.completion.completedBy==='checks'?localize('检查通过，任务完成','Checks passed; task completed'):item.completion.completedBy==='agent'?localize('智能体确认完成','Marked completed by Agent'):localize('已交付，任务完成','Delivered; task completed')}</StatusLabel>}{item.taskState==='cancelled'&&<StatusLabel icon="stop">{localize('任务已取消','Task cancelled')}</StatusLabel>}<time dateTime={item.createdAt} title={date.toLocaleString(language)}>{stamp}</time></div>
+   <div className="execution-result-actions">{item.awaitingReview&&<AcceptTask key={item.taskRevision} taskId={item.taskId} revision={item.taskRevision} runId={item.runId} onRefresh={onRefresh}/>} {item.conversationId&&link(executionResultHref(item.conversationId,item.runId),localize('查看执行详情', 'View execution details'),'arrowRight')}{item.artifactCount>0&&link('/tasks/'+encodeURIComponent(item.taskId),localize(`查看产物（${item.artifactCount}）`, `Deliverables (${item.artifactCount})`),'files')}</div>
   </div>
  </article>;
 }

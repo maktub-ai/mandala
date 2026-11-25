@@ -26,6 +26,7 @@ export interface ExecutionClient {
   requiresRuntimeReload?(runtimeMailboxPath?:string):Promise<boolean>;
   assertReloadable?(nativeId:string):Promise<void>;
   inspectInvocation?(identity: RunIdentity): Promise<"running" | "succeeded" | "failed" | "unknown">;
+  getContextWindow?(model?: string): Promise<number | undefined>;
   listModels(): Promise<ModelChoice[]>;
   startThread(options: {
     cwd: string;

@@ -162,13 +162,13 @@ async function canonical(path:string):Promise<string> {
   if(dirname(current)===current)return normalize(path);suffix.push(basename(current));current=dirname(current);
  }
 }
-async function repository(path:string):Promise<string|null> {
+export async function gitWorkspaceRoots(path:string):Promise<{checkoutRoot:string;commonDir:string;repositoryRoot:string}|null> {
  const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('GIT_')));
  try {
   const {stdout}=await runFile('git',['-C',path,'rev-parse','--path-format=absolute','--show-toplevel','--git-common-dir'],{timeout:750,maxBuffer:16384,encoding:'utf8',windowsHide:true,env:{...env,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',GIT_OPTIONAL_LOCKS:'0'}});
   const [top,common]=stdout.trim().split('\n');if(!validPath(top)||!validPath(common))return null;
   // A standard linked worktree shares the original repository's .git directory.
-  return canonical(basename(common)==='.git'?dirname(common):top);
+  return {checkoutRoot:await canonical(top),commonDir:await canonical(common),repositoryRoot:await canonical(basename(common)==='.git'?dirname(common):top)};
  }catch{return null;}
 }
 function internal(path:string,userHome:string,managedRoots:string[],temporary:string[]) {
@@ -214,7 +214,7 @@ export async function discoverWorkDirectories(config:Pick<Config,'runtimes'>,inp
   while(next<pending.length) {
    const [raw,items]=pending[next++],path=await canonical(raw);
    if(internal(path,userHome,managedRoots,temporary)||excluded.some(root=>within(path,root))){for(const item of items){const source=sources.find(s=>s.runtime===item.runtime);if(source)source.skipped++;}continue;}
-   const exists=await stat(path).then(s=>s.isDirectory(),()=>false),root=exists?await repository(path):null;
+   const exists=await stat(path).then(s=>s.isDirectory(),()=>false),root=exists?(await gitWorkspaceRoots(path))?.repositoryRoot??null:null;
    resolved.push({path,root,exists,items});
   }
  }));

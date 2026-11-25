@@ -19,7 +19,7 @@ function fixture() {
   const requests: string[] = [];
   const market = createMarket(home, async url => {
     requests.push(url);
-    if (url === 'https://raw.githubusercontent.com/maktub-ai/mandala-plugins/main/catalog.json') return Response.json({ format: 'mandala-plugin-catalog', version: 1, items: [entry] });
+    if (url === 'https://raw.githubusercontent.com/maktub-ai/mandala-plugins/main/catalogs/v2/catalog.json') return Response.json({ format: 'mandala-plugin-catalog', version: 1, items: [entry] });
     const prefix = `https://raw.githubusercontent.com/${entry.package.repository}/${entry.package.revision}/`;
     if (url.startsWith(prefix) && files[url.slice(prefix.length)]) return new Response(files[url.slice(prefix.length)]);
     throw Error('unexpected request');
@@ -151,4 +151,85 @@ it('updates an existing plugin without duplicating contributions or changing the
   expect(updated.plugins).toHaveLength(1);
   expect(updated.plugins![0].version).toBe('1.1.0');
   expect(await market.extensions.read()).toEqual(updated);
+});
+
+it('validates a declarative plan section and makes it available only while installed', async () => {
+  const { planEntry, planFiles, planSection } = await import('./fixtures/data-plugin');
+  const { librarySections } = await import('../shared/data-plugins');
+  const { validateDataPlugin } = await import('../scripts/validate-data-plugin');
+  const { writeFile } = await import('node:fs/promises');
+  for (const [path, contents] of Object.entries(planFiles)) await writeFile(join(home, path), contents);
+  expect(await validateDataPlugin(home)).toMatchObject({ id: planEntry.id, contributions: 1 });
+  const market = createMarket(home, async url => url.endsWith('catalog.json')
+    ? Response.json({ format: 'mandala-plugin-catalog', version: 1, items: [planEntry] })
+    : new Response(planFiles[url.split('/').at(-1)!]));
+  const catalogId = 'plugin:maktub-ai/mandala-plugins:todo-plans';
+  const before = await market.extensions.read();
+  expect(librarySections(before)).toEqual([]);
+  const installed = await market.extensions.install({ catalogId, version: planEntry.version, digest: planEntry.package.sha256, revision: before.revision });
+  expect(librarySections(await market.extensions.read())).toEqual([{ ...planSection, id: 'plan', pluginId: catalogId }]);
+  const [item] = installed.items;
+  const another = { ...item, pluginId: 'plugin:example/tools:todo-plans', catalogId: 'plugin:example/tools:todo-plans/library-section:plan' };
+  const reserved = { ...another, id: 'wiki', pluginId: 'plugin:example/tools:reference', catalogId: 'plugin:example/tools:reference/library-section:wiki' };
+  const overlapping = { ...installed, items: [item, another, reserved] };
+  const ids = librarySections(overlapping).map(section => section.id);
+  expect(ids).toEqual([reserved.catalogId, 'plan', item.catalogId]);
+  expect(librarySections({ ...overlapping, items: [...overlapping.items].reverse() }).map(section => section.id)).toEqual(ids);
+  expect(librarySections(await market.extensions.uninstall(catalogId, installed.revision))).toEqual([]);
+});
+
+it('validates library section references and limits each plugin to one tab', async () => {
+  const { planManifest } = await import('./fixtures/data-plugin');
+  const [entry] = planManifest.contributes.librarySections;
+  for (const refs of [[{ ...entry, id: '/secret' }], [{ ...entry, path: '../section.json' }], [{ ...entry, sha256: 'bad' }], [{ ...entry, command: 'run' }], [entry, { ...entry, id: 'more', path: 'more.json' }]]) {
+    expect(() => parsePluginManifest({ ...planManifest, contributes: { librarySections: refs } })).toThrow('invalid');
+  }
+});
+
+it('rejects unknown fields and unsupported library section types', async () => {
+  const { parsePluginContributionData } = await import('../shared/data-plugins');
+  const { planSection } = await import('./fixtures/data-plugin');
+  for (const invalid of [{ ...planSection, url: 'https://example.org' }, { ...planSection, type: 'external-page' }, { ...planSection, icon: 'script' }, { ...planSection, label: { ...planSection.label, script: 'run' } }]) {
+    expect(() => parsePluginContributionData(JSON.stringify(invalid), 'library-section')).toThrow('invalid');
+  }
+});
+
+it('validates workspace documents and scoped collection descriptors', async () => {
+  const { parsePluginContributionData } = await import('../shared/data-plugins');
+  const section = { format: 'mandala-library-section', version: 1, type: 'project-files', label: { zh: '手册', en: 'Handbook' }, icon: 'book' };
+  const read = (source: unknown) => parsePluginContributionData(JSON.stringify({ ...section, source }), 'library-section');
+  expect(read({ kind: 'workspace', file: 'handbook/index.html' })).toMatchObject(section);
+  const collection = { kind: 'collection', namespace: 'handbooks', file: 'read.html' };
+  expect(read(collection)).toMatchObject({ source: collection });
+  for (const file of ['../file.html', '/file.html', '.git/file.html', 'file.txt', 'ab\\file.html', 'https://example.com/read.html'])
+    expect(() => read({ kind: 'workspace', file })).toThrow('invalid');
+  for (const source of [
+    { ...collection, namespace: '../home' }, { ...collection, namespace: 'PATH' }, { ...collection, file: 'sub/file.html' },
+    { ...collection, summary: { file: '.serve.json', format: 'index', version: 1, title: 'name' } },
+    { ...collection, summary: { file: 'index.json', format: 'index', version: 1, title: 'constructor' } },
+    { ...collection, summary: { file: 'index.json', format: 'index', version: 1, title: 'name', closedField: 'status' } },
+    { ...collection, root: '/tmp' },
+  ]) expect(() => read(source)).toThrow('invalid');
+});
+
+it('keeps obsolete locally installed sections removable without activating them', async () => {
+  const { planEntry, planFiles, planSection } = await import('./fixtures/data-plugin');
+  const { librarySections, parsePluginContributionData } = await import('../shared/data-plugins');
+  const { writeFile } = await import('node:fs/promises');
+  const market = createMarket(home, async url => url.endsWith('catalog.json')
+    ? Response.json({ format: 'mandala-plugin-catalog', version: 1, items: [planEntry] })
+    : new Response(planFiles[url.split('/').at(-1)!]));
+  const catalogId = 'plugin:maktub-ai/mandala-plugins:todo-plans';
+  const revision = (await market.extensions.read()).revision;
+  await market.extensions.install({ catalogId, version: planEntry.version, digest: planEntry.package.sha256, revision });
+  const path = join(home, 'market', 'ui-extensions.json');
+  const stored = JSON.parse(await readFile(path, 'utf8'));
+  const obsolete = { format: planSection.format, version: 1, type: 'omino-plan', label: planSection.label, icon: 'target' };
+  stored.plugins[0].items[0].data = obsolete;
+  await writeFile(path, JSON.stringify(stored));
+  expect(() => parsePluginContributionData(JSON.stringify(obsolete), 'library-section')).toThrow('invalid');
+  const current = await market.extensions.read();
+  expect(current.plugins?.[0].catalogId).toBe(catalogId);
+  expect(librarySections(current)).toEqual([]);
+  expect((await market.extensions.uninstall(catalogId, current.revision)).items).toEqual([]);
 });

@@ -218,6 +218,16 @@ export function createAssets(store: Store, files: ReturnType<typeof createAssetF
   },
   getAuthorizedVersion:(p:Principal,ref:VersionRef)=>read(p,ref),
   getAuthorizedAsset(p:Principal,id:string):Asset {const a=load(id);authorize(p,a);return a;},
+  setFeatured(p:Principal,id:string,scope:string,featured:boolean):string|null {
+   return store.transaction(()=>{
+    const asset=load(id);authorize(p,asset);
+    if(p.agentId!==undefined||asset.kind!=='wiki'||asset.lifecycle!=='active')return fail('invalid_wiki_feature',422);
+    const entries={...asset.featured};
+    if(featured)entries[scope]??=new Date().toISOString();else delete entries[scope];
+    write({...asset,featured:Object.keys(entries).length?entries:undefined});
+    return entries[scope]??null;
+   });
+  },
   recordView(p:Principal,ref:VersionRef):void {read(p,ref);db.prepare('INSERT INTO asset_activity(user_id,asset_id,last_viewed_at) VALUES (?,?,?) ON CONFLICT(user_id,asset_id) DO UPDATE SET last_viewed_at=excluded.last_viewed_at').run(p.userId,ref.assetId,new Date().toISOString());},
   activity(p:Principal,id:string):{lastViewedAt:string|null;lastEditedAt:string|null} {authorize(p,load(id));const row=db.prepare('SELECT * FROM asset_activity WHERE user_id=? AND asset_id=?').get(p.userId,id);return {lastViewedAt:row?.last_viewed_at as string??null,lastEditedAt:row?.last_edited_at as string??null};},
   listAssets(p:Principal):Asset[]{return db.prepare('SELECT data FROM assets').all().map(row=>JSON.parse(row.data as string) as Asset).filter(a=>{try{authorize(p,a);return a.lifecycle!=='archived';}catch{return false;}});},

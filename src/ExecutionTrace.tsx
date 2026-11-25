@@ -4,7 +4,7 @@ import type { Approval, DisplayEvent } from "../shared/types";
 import { isMcpToolApproval } from "../shared/approvals";
 import {describeOperation} from './activity-presentation';
 import { useState, type ReactNode } from "react";
-import { summarizeOperations, type Operation } from "./execution";
+import { platformHookLabel, summarizeOperations, type Operation } from "./execution";
 import { useLanguage, type Message } from "./i18n";
 import Icon, { type IconName } from "./ui/Icon";
 import "./execution.css";
@@ -171,10 +171,11 @@ export default function ExecutionTrace({ events, lazy = false, label }: { events
         const presentation=describeOperation(item);
         const kind=operationKinds[presentation.category==='change'?'fileChange':presentation.category==='command'?'commandExecution':presentation.category==='collaboration'?'collabAgentToolCall':presentation.category==='context'?'contextCompaction':presentation.category]??operationKinds.dynamicToolCall;
         const platformHook = item.hook?.source === "platform" ? item.hook : undefined;
-        const title =
-          item.hook
-            ? platformHook ? t(platformHook.task === "title" ? "生成标题" : platformHook.task === "recall" ? ((item.result as { entries?: {kind: string}[] })?.entries?.some(entry => entry.kind === "document") ? "资料加载" : "记忆加载") : "提炼记忆") : item.hook.name
-            : presentation.category==='tool'?item.tool||t("工具操作"):t(kind.label);
+        const hookLabel = platformHookLabel(item);
+        const hitCount = platformHook?.task === "search" ? (item.result as {count?: number})?.count : undefined;
+        const hookTitle = hitCount !== undefined ? t("记忆检索 · 命中 {count} 条", { count: hitCount }) :
+          hookLabel ? t(hookLabel) : item.hook?.name;
+        const title = hookTitle ?? (presentation.category==='tool'?item.tool||t("工具操作"):t(kind.label));
         const result = item.result as { content?: { type?: string; text?: string }[] } | undefined;
         const resultText = typeof item.result === "string" ? item.result :
           result?.content?.filter(part => part.type === "text").map(part => part.text ?? "").join("\n");
@@ -191,7 +192,7 @@ export default function ExecutionTrace({ events, lazy = false, label }: { events
             <summary aria-label={`${title} · ${kindLabel} · ${t(statusLabels[operation.status] ?? "状态未提供")}`}>
               <Icon name={kind.icon} size={16} className="operation-icon" />
               <span className="operation-title" title={title}><strong>{title}</strong></span>
-              {item.hook && <span className="operation-trigger" title={item.hook.event}>{platformHook ? t(platformHook.task === "recall" ? "回复前" : platformHook.task === "memory" ? "回复后" : "后台") : item.hook.event}</span>}
+              {item.hook && <span className="operation-trigger" title={item.hook.event}>{platformHook ? t(platformHook.event === "beforeTurn" ? "回复前" : platformHook.task === "memory" || platformHook.task === "capture" ? "回复后" : "后台") : item.hook.event}</span>}
               {preview && preview.trim()!==title.trim() && (!platformHook || !["completed","updated"].includes(operation.status)) && <span className="operation-preview" title={preview} aria-label={t("最新输出")}>{preview}</span>}
               <span className={"operation-state " + operation.status}>
                 <Icon name={stateIcon} size={13} />

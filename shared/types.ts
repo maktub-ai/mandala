@@ -43,6 +43,8 @@ export type ExecutionMachine = { id: string; name: string; host: string };
 export type ExecutionLocation = { machineId: string; machineName: string; host: string; cwd: string };
 export type Workspace = { id: string; name: string; cwd: string; machineId?: string; resources: Resource[]; codeGraph?: import("./code-graph").CodeGraphSettings };
 export type Project = {
+  blueprintEnabled?: boolean;
+  planId?: string;
   archivedAt?: string;
   id: string;
   name: string;
@@ -98,7 +100,7 @@ export type MandalaSettings = {
   /** Retained for compatibility with profiles written by older desktop builds. */
   showExecutionDetails?: boolean;
 };
-export type Config = { version: 2; mandala?: MandalaSettings; responseStyle?: ResponseStyle; projects: Project[]; agents: Agent[]; executionMachines?: ExecutionMachine[]; system?: SystemConfig; runtimes?: Cli[]; runtimeDefaults?: RuntimeConfig; connections?: McpConnection[]; skillLibrary?: SkillDefinition[]; chatDefaults?: ChatDefaults; marketInstallations?: MarketInstallation[] };
+export type Config = { version: 2; blueprintDefaultEnabled?: boolean; mandala?: MandalaSettings; responseStyle?: ResponseStyle; projects: Project[]; agents: Agent[]; executionMachines?: ExecutionMachine[]; system?: SystemConfig; runtimes?: Cli[]; runtimeDefaults?: RuntimeConfig; connections?: McpConnection[]; skillLibrary?: SkillDefinition[]; chatDefaults?: ChatDefaults; marketInstallations?: MarketInstallation[] };
 export type LegacyConfig = {
   version: 1;
   projects: Pick<Project, "id" | "name" | "cwd">[];
@@ -122,6 +124,8 @@ export type Conversation = {
   cwd?: string;
   workspaceName?: string;
   executionLocation?: ExecutionLocation;
+  /** Repository attribution for project views. Execution authority stays with projectId. */
+  attributedProjectId?: string;
   projectId: string;
   agentId: string;
   title: string | null;
@@ -196,7 +200,7 @@ export type CliStatus = {
 };
 
 export type MandalaContextMaintenance = {
-  status:'pending'|'unknown'|'completed'|'noop'|'fallback'|'failed'; reason:'idle'|'context-limit'|'native-auto';
+  status:'pending'|'unknown'|'completed'|'noop'|'fallback'|'failed'; reason:'idle'|'context-limit'|'native-auto'|'manual';
   nativeId:string; turnId?:string; nativeCompleted?:boolean; watermark:number; limitEventId:number;
   afterEventId:number; throughEventId:number; goalIds:string[]; handoff:string;
 };

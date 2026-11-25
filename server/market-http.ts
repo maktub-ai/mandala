@@ -7,7 +7,7 @@ export async function handleMarketRequest(req: IncomingMessage, res: ServerRespo
   readBody: (req: IncomingMessage) => Promise<unknown>): Promise<boolean> {
   if (!url.pathname.startsWith("/api/market/")) return false;
   const path = url.pathname.slice("/api/market".length);
-  const match = path.match(/^\/installed\/(market-[a-f0-9]{20})\/(unlink|uninstall)$/);
+  const match = path.match(/^\/installed\/(market-[a-f0-9]{20})\/(unlink|uninstall|upgrade)$/);
   const read = async <T>(operation: (signal: AbortSignal) => Promise<T>) => {
     const controller = new AbortController();
     const cancel = () => controller.abort();
@@ -40,7 +40,7 @@ export async function handleMarketRequest(req: IncomingMessage, res: ServerRespo
   }
   else if (path === "/search" && req.method === "GET") data = await read(signal => market.search(url.searchParams.get("kind") as MarketKind,
     url.searchParams.get("query") ?? "", url.searchParams.get("cursor") ?? "", url.searchParams.get("source") ?? undefined, url.searchParams.get("sort") ?? undefined, signal));
-  else if (path === "/detail" && req.method === "GET") data = await read(signal => market.detail(url.searchParams.get("catalogId") ?? "", signal));
+  else if (path === "/detail" && req.method === "GET") data = await read(signal => market.detail(url.searchParams.get("catalogId") ?? "", signal, url.searchParams.get("refresh") === "true"));
   else if (path === "/installed" && req.method === "GET") data = await market.installed();
   else if (req.method === "POST" && (path === "/install" || match)) {
     const body = await readBody(req);
@@ -50,6 +50,9 @@ export async function handleMarketRequest(req: IncomingMessage, res: ServerRespo
     if (path === "/install") {
       if (typeof b.catalogId !== "string" || typeof b.version !== "string") throw new Error("invalid market install");
       data = await market.install({ catalogId: b.catalogId, version: b.version, revision: b.revision, targets: b.targets, environment: b.environment }); status = 201;
+    } else if (match![2] === "upgrade") {
+      if (typeof b.version !== "string" || !b.version) throw new Error("invalid Skill version");
+      data = await market.upgrade({ id: match![1], version: b.version, revision: b.revision });
     } else {
       if (match![2] === "unlink") await market.unlink(match![1], b.target, b.revision);
       else await market.uninstall(match![1], b.revision);

@@ -1,4 +1,4 @@
-import type { InstalledPlugin } from './data-plugins';
+import type { InstalledPlugin, LibrarySection, RetiredSection, PluginContributionKind } from './data-plugins';
 import { parseThemePackage } from './themes';
 import { parsePetPack, type PetPack } from './mandala-pet';
 export type UiExtensionKind = 'theme' | 'language' | 'pet';
@@ -11,7 +11,7 @@ export type ExtensionEntry = {
 };
 export type LanguagePack = { format: 'mandala-language'; version: 1; locale: string; name: string; direction: 'ltr' | 'rtl'; messages: Record<string, string> };
 export type ThemePack = ReturnType<typeof parseThemePackage> & { format: 'mandala-theme'; version: 1 };
-export type UiExtension = ExtensionEntry & { pluginId?: string; kind: UiExtensionKind; catalogId: string; sourceUrl: string; installedAt: string; data: ThemePack | LanguagePack | PetPack };
+export type UiExtension = ExtensionEntry & { pluginId?: string; kind: PluginContributionKind; catalogId: string; sourceUrl: string; installedAt: string; data: ThemePack | LanguagePack | PetPack | LibrarySection | RetiredSection };
 export type ExtensionSnapshot = { revision: string; items: UiExtension[]; plugins?: InstalledPlugin[] };
 export const isUiExtension = (kind: string): kind is UiExtensionKind => kind === 'theme' || kind === 'language' || kind === 'pet';
 const record = (value: unknown): value is Record<string, any> => !!value && typeof value === 'object' && !Array.isArray(value);

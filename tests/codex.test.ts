@@ -395,3 +395,38 @@ it('the fixture reports an authoritative empty background-terminal list for safe
 it('a malformed native background response still blocks reload without closing its client',async()=>{
  let closed=0;const rpc={request:async(method:string)=>method==='initialize'?{}:{threadId:'thread'},notify(){},reply(){},close(){closed++;}};const cli=await connectCodex(rpc);await expect(cli.assertReloadable!('thread')).rejects.toMatchObject({code:'native_background_check_failed'});expect(closed).toBe(0);
 });
+
+it.each(['reload','context'] as const)('recovers an unloaded persisted thread before %s inspection',async operation=>{
+ let loaded=false;const calls:RpcMessage[]=[];
+ const thread=()=>({id:'persisted',status:{type:loaded?'idle':'notLoaded'},turns:[{id:'done',status:'completed',items:[{type:'contextCompaction'}]}]});
+ const rpc={async request(method:string,params:any){calls.push({method,params});
+  if(method==='initialize')return {};
+  if(method==='thread/read')return {thread:thread()};
+  if(method==='thread/backgroundTerminals/list'){if(!loaded)throw Error('thread not found: persisted');return {data:[],nextCursor:null};}
+  if(method==='thread/resume'){loaded=true;return {thread:thread()};}
+  throw Error('Unexpected RPC: '+method);
+ },notify(){},reply(){},close(){}};
+ const cli=await connectCodex(rpc);
+ if(operation==='reload')await expect(cli.assertReloadable!('persisted')).resolves.toBeUndefined();
+ else expect(await cli.inspectContext!('persisted')).toEqual({settled:true,completedCompactions:['done']});
+ expect(calls.filter(call=>call.method==='thread/resume')).toEqual([{method:'thread/resume',params:{threadId:'persisted'}}]);
+ expect(calls.some(call=>call.method==='turn/start'||call.method==='thread/start')).toBe(false);
+});
+
+it.each(['background','active','unfinished','wrong-id','missing-turns','writer-conflict','resumed-active','timeout'] as const)('cold inspection preserves uncertain or occupied native work: %s',async mode=>{
+ let loaded=false,resumes=0,closed=0;
+ const rpc={async request(method:string){
+  if(method==='initialize')return {};
+  if(method==='thread/backgroundTerminals/list'){
+   if(mode==='timeout')throw Error('CLI request timed out: thread/backgroundTerminals/list');
+   if(!loaded)throw Error('thread not found: persisted');
+   return {data:[{processId:'still-running'}],nextCursor:null};
+  }
+  if(method==='thread/read')return {thread:{id:mode==='wrong-id'?'other':'persisted',status:{type:mode==='active'?'active':'notLoaded'},...(mode==='missing-turns'?{}:{turns:[{id:'old',status:mode==='unfinished'?'inProgress':'completed'}]})}};
+  if(method==='thread/resume'){resumes++;if(mode==='writer-conflict')throw Error('thread persisted already has an active writer');loaded=true;return {thread:{id:'persisted',status:{type:mode==='resumed-active'?'active':'idle'},turns:[{id:'old',status:'completed'}]}};}
+  throw Error('Unexpected RPC: '+method);
+ },notify(){},reply(){},close(){closed++;}};
+ const cli=await connectCodex(rpc);
+ await expect(cli.assertReloadable!('persisted')).rejects.toMatchObject({code:mode==='background'?'native_background_active':'native_background_check_failed'});
+ expect(resumes).toBe(['background','writer-conflict','resumed-active'].includes(mode)?1:0);expect(closed).toBe(0);
+});
