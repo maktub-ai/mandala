@@ -13,15 +13,14 @@ for(const mode of ['light','dark'] as const)for(const width of [1440,390])test(`
  const fixture=await(await request.post('/__test__/operation-cards')).json();
  await page.addInitScript(mode=>localStorage.setItem('mana-theme',mode),mode);await page.setViewportSize({width,height:1000});await page.goto('/mandala');
  const messages=page.getByRole('region',{name:'消息委派与回报',exact:true}).last();
- await expect(messages.getByText('查看原始委派',{exact:true})).toHaveCount(1);await expect(messages).toContainText('已收到 2/3 个回复');await expect(messages).toContainText('Billing Domain');await expect(messages).toContainText('排队中');
+ await expect(messages.getByText('查看原始委派',{exact:true})).toHaveCount(0);await expect(messages).toContainText('已收到 2/3 个回复');await expect(messages).toContainText('Billing Domain');await expect(messages).toContainText('排队中');
  const config=page.getByRole('region',{name:'配置操作结果',exact:true}).last();
  await expect(config).toContainText('已创建 3 个智能体');await expect(config).toContainText('资料整理助手 1');
- const summary=messages.locator(':scope > details > summary');const avatarCount=await summary.locator('[data-identity-kind=agent]').count();await summary.click();await expect(summary.locator('[data-identity-kind=agent]')).toHaveCount(avatarCount);
- const reply=messages.getByText('查看回复',{exact:true}).first();await reply.focus();await page.keyboard.press('Enter');await expect(messages).toContainText('检查已返回；来源覆盖仍需确认。');
+ await expect(messages.locator(':scope details')).toHaveCount(0);await expect(messages.locator('.operation-row')).toHaveCount(3);await expect(messages.locator('.operation-row').first()).toContainText('排队中');
+ await expect(messages.locator('.operation-row-preview').first()).toContainText('检查已返回；来源覆盖仍需确认。');
  await request.post('/__test__/operation-card-reply',{data:fixture});
  await expect(messages).toContainText('已收到 3/3 个回复');await expect(messages).not.toContainText('任务已完成');
  await page.reload();await expect(messages).toContainText('已收到 3/3 个回复');await expect(config).toContainText('已创建 3 个智能体');
- await messages.locator(':scope > details > summary').click();
  const link=messages.getByRole('link',{name:'查看接收对话',exact:true}).last();await expect(link).toHaveAttribute('href','/?conversation='+fixture.message.targetConversationId);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  await messages.scrollIntoViewIfNeeded();await page.screenshot({path:info.outputPath(`operation-cards-${mode}-${width}.png`),fullPage:true});
@@ -99,4 +98,24 @@ test('shows sanitized delegate rejection and unknown in the original turn withou
  await check();
  await page.reload();
  await check();
+});
+
+for(const mode of ['light','dark'] as const)for(const width of [1440,390])test(`a summarized reply folds its original under Mandala's summary ${mode} ${width}`,async({page,request},info)=>{
+ await page.addInitScript(mode=>localStorage.setItem('mana-theme',mode),mode);await page.setViewportSize({width,height:1000});
+ const fixture=await(await request.post('/__test__/reply-summary')).json();await page.goto('/mandala');
+ const delegation=page.getByRole('region',{name:'消息委派与回报',exact:true}).last();
+ await expect(delegation).toContainText('已收到 2/2 个回复');
+ await expect(delegation.getByRole('button',{name:'看总结'})).toHaveCount(2);
+ await expect(delegation).not.toContainText('卡顿来自滚动时重算 Markdown 高度');
+ await expect(page.getByRole('region',{name:/^(渲染研究员|性能测试) · 智能体回复$/})).toHaveCount(0);
+ const summary=page.locator(`.chat-turn[data-turn-key="${fixture.continuationEventId}"]`);
+ await expect(summary).toContainText('能这周修掉。');
+ const sources=summary.locator('.reply-source');await expect(sources).toHaveCount(2);
+ await expect(sources.locator('[open]')).toHaveCount(0);await expect(summary.locator('.reply-source[open]')).toHaveCount(0);
+ const order=await summary.evaluate(node=>{const text=node.querySelector('.message.text')!.getBoundingClientRect(),source=node.querySelector('.reply-source')!.getBoundingClientRect();return source.top>=text.bottom;});expect(order).toBe(true);
+ await delegation.getByRole('button',{name:'看总结'}).first().click();await expect(summary).toBeInViewport();
+ await sources.first().locator('summary').click();await expect(sources.first()).toContainText('火焰图');
+ await page.reload();await expect(summary.locator('.reply-source')).toHaveCount(2);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await delegation.scrollIntoViewIfNeeded();await page.screenshot({path:info.outputPath(`reply-summary-${mode}-${width}.png`),fullPage:true,animations:'disabled'});
 });

@@ -1,12 +1,12 @@
 /* Changes are objects, not speech: one bordered group under the reply, one line per Task or setting it changed. */
 .turn-changes { width:100%; min-width:0; margin:4px 0 12px; border:1px solid var(--border); border-radius:min(12px,calc(var(--panel-radius) * 2)); background:var(--surface); overflow:hidden; }
-.turn-changes > .turn-changes-head { margin:0; padding:7px 14px; border-bottom:1px solid var(--border-soft); color:var(--muted); font-size:var(--type-meta); font-weight:500; font-variant-numeric:tabular-nums; }
+.turn-changes > .turn-changes-head { display:flex; align-items:center; min-height:36px; margin:0; padding:6px 12px; border-bottom:1px solid var(--border-soft); color:var(--text); font-size:var(--type-ui); font-weight:500; font-variant-numeric:tabular-nums; }
 .turn-changes ul { margin:0; padding:0; list-style:none; }
 .turn-change + .turn-change { border-top:1px solid var(--border-soft); }
-.turn-change > :is(a,div) { display:flex; align-items:center; gap:10px; min-height:40px; padding:6px 14px; color:var(--text); text-decoration:none; font-size:var(--type-ui); }
+.turn-change > :is(a,div) { display:flex; align-items:center; gap:10px; min-height:40px; padding:6px 12px; color:var(--text); text-decoration:none; font-size:var(--type-ui); }
 .turn-change > a:hover { background:color-mix(in srgb,var(--raised) 55%,var(--surface)); }
 .turn-change > a:focus-visible { outline:2px solid var(--focus); outline-offset:-2px; }
-.turn-change-verb { flex:none; color:var(--muted); font-size:var(--type-meta); white-space:nowrap; }
+.turn-change-verb { flex:none; padding:1px 6px; border-radius:4px; background:var(--raised); color:var(--muted); font-size:var(--type-meta); white-space:nowrap; }
 .turn-change-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .turn-change .workspace-status { flex:none; white-space:nowrap; }
 .turn-change-go { flex:none; color:var(--muted); }

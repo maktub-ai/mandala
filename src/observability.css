@@ -39,7 +39,7 @@
 .run-commentary .markdown-text > :last-child { margin-bottom:0; }
 .run-event-error { display:flex; align-items:baseline; gap:8px; font-size:var(--type-ui); line-height:1.6; margin:8px 0; }
 .run-event-error svg { flex:none; align-self:flex-start; margin-top:3px; }
-.turn-process .approval-card { margin:12px 0; padding:16px; border-color:var(--border); color:var(--text); }
+.turn-process .approval-card { margin:12px 0; padding:0 12px 12px; color:var(--text); }
 .turn-process .approval-heading { display:flex; align-items:center; gap:8px; font-size:var(--type-ui); }
 .turn-process .approval-context-title { color:var(--muted); font-size:var(--type-meta); }
 .turn-process .approval-actions { justify-content:flex-start; margin-top:12px; }
@@ -80,7 +80,7 @@
   .run-commentary { padding-left:2px; padding-right:2px; }
   .turn-process-toggle { padding-left:2px; padding-right:2px; }
   .run-activity-disclosure > summary { min-height:40px; padding-left:2px; padding-right:2px; }
-  .turn-process .approval-card { padding:12px; }
+  .turn-process .approval-card { padding:0 12px 12px; }
   .product-frame .agent-reply > .message.text { width:100%; margin-left:0; }
   .agent-reply .turn-footer { margin-left:0; }
   .product-frame .agent-reply > .operation-card { margin-left:0; }

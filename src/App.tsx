@@ -7,7 +7,8 @@ import MandalaPanels,{referenceDragType} from "./MandalaPanels";
 import {collabFocusEvent} from "./mandala-collab";
 import { useDesktopPetBridge } from "./MandalaPet";
 import MandalaCoordinationCards from './MandalaCoordinationCards';
-import AgentMessageCards from './AgentMessageCards';
+import AgentMessageCards,{ReplySource} from './AgentMessageCards';
+import {replyThreads} from './agent-reply-threads';
 import OperationResults from './OperationResults';
 import {useOperationTasks} from './TaskOperationCards';
 import MandalaSettings from "./MandalaSettings";
@@ -1241,6 +1242,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const turns = useMemo(() => groupChatTurns(events, presentReply), [events, presentReply]);
   const visibleInputs = useMemo(() => queuedInputs.map(input => ({ ...input, ...presentReply(input.id, input.text) })), [queuedInputs, presentReply]);
   const requestedRun = new URLSearchParams(location.search).get('run');
+  const threads = useMemo(() => replyThreads(turns), [turns]);
   const presentedTurns = useMemo(() => turns.map(turn => {
     const run = presentRun(turn, activeChat?.cli);
     return { turn, run, replyText: run.answers.map(message => message.text).join("\n\n") };
@@ -1768,8 +1770,10 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
                 && !visibleReplies.some(message => message.text.trim());
               const onlyChildOutput = !run.answers.length && !run.progress.length && !errors.length && run.subagents.some(child => child.agentId && child.text?.trim());
               const waitingForParent = onlyChildOutput && run.status === 'running' && turn === turns.at(-1) && activeChat?.status === 'running' && !stopping && !approvals.length;
-              const operationCards = <><AgentMessageCards messages={turn.messages.filter(message=>message.agentMessage?.direction!=='reply')} config={config} onOpen={openWorkspacePath}/><MandalaCoordinationCards config={config} events={turn.events} allEvents={events} onOpen={openWorkspacePath}/><OperationResults taskState={operationTasks} events={turn.events} allEvents={events} onOpen={openWorkspacePath}/></>;
-              return <section className="chat-turn" key={turn.key} tabIndex={-1} data-run-id={chatTurnRunId(turn)}>
+              if (threads.hiddenTurn(turn) && !(resultGroups.get(turn.key)?.length)) return null;
+              const replySources = threads.sourcesOf(turn.key);
+              const operationCards = <><AgentMessageCards messages={turn.messages.filter(message=>message.agentMessage?.direction!=='reply')} summaryOf={threads.summaryOf} config={config} onOpen={openWorkspacePath}/><MandalaCoordinationCards config={config} events={turn.events} allEvents={events} onOpen={openWorkspacePath}/><OperationResults taskState={operationTasks} events={turn.events} allEvents={events} onOpen={openWorkspacePath}/></>;
+              return <section className="chat-turn" key={turn.key} tabIndex={-1} data-run-id={chatTurnRunId(turn)} data-turn-key={turn.key}>
             {turn.messages.filter(message => message.kind === "user").map(m => m.source?.kind==='coordination' ? <ExecutionResults onRefresh={executionResults.retry} renderCopy={mandalaMain ? messageCopy : undefined} key={m.key} items={executionResults.items.filter(item=>m.source?.kind==='coordination'&&m.source.receiptIds.includes(item.id))} config={config} tasks={operationTasks.tasks} onOpen={openWorkspacePath}/> : m.source && m.source.kind!=='telegram' ? <Disclosure key={m.key} className="handoff-input" title={<><Icon name="workflow" size={14}/>{localize('自动后台输入', 'Automatic background input')}</>}><div className="message-text">{m.text}</div></Disclosure> : m.task ? <Disclosure key={m.key} className="handoff-input" title={<> <Icon name="workflow" size={14} />{t(m.task.kind === "return" ? "帮手结果 · 结合原对话整合" : "接收的 Agent 任务")} </>}>
 
               <div className="message-text">{m.text}</div>
@@ -1805,7 +1809,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
                   onClick={() => setEditingMessage({ eventId: m.key, text: m.text })}><Icon name="edit" size={14} /></Button>}
               </span></div>}
             </article>)}
-            <AgentMessageCards renderCopy={mandalaMain ? messageCopy : undefined} messages={turn.messages.filter(message=>message.agentMessage?.direction==='reply')} config={config} onOpen={openWorkspacePath}/>
+            <AgentMessageCards renderCopy={mandalaMain ? messageCopy : undefined} messages={turn.messages.filter(message=>message.agentMessage?.direction==='reply')} summaryOf={threads.summaryOf} config={config} onOpen={openWorkspacePath}/>
             {showReply || waiting ? <section className="agent-reply" aria-label={agent?.name ?? (runtimeName(cli))}>
               {!mandalaMain && <header className="agent-reply-header">
                 <div className="message-avatar">{agent ? <IdentityAvatar identity={agent} kind="agent" size={28} /> : <Icon name="agent" size={18} />}</div>
@@ -1819,6 +1823,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
                 <div className="message-content"><MarkdownMessage text={m.text} streaming={run.status === 'running'} publishedFiles={publishedFilesByRun.get((turn.events.find(event=>event.id===m.key)?.data as {runId?:string})?.runId??'')} /></div>
                 {mandalaMain && <span className="message-actions bubble-copy"><QuoteButton kind="reply" text={m.text} disabled={quoteDisabled} onQuote={addQuote} />{messageCopy(m.key, m.text)}</span>}
               </article>)}
+              {replySources.map(message=><ReplySource key={message.id} message={message} config={config} onOpen={openWorkspacePath} renderCopy={mandalaMain ? messageCopy : undefined}/>)}
               {!showExecutionDetails && !quietStop && errors.map(message=><p className="run-event-error" role="alert" key={message.key}><Icon name="error" size={14}/>{/^CLI request timed out:/.test(message.text) ? localize('执行端响应超时。你的消息已保留。','The runtime timed out. Your message is saved.') : turnErrorText(turn, message, localize, errorText, chat?.cli === 'codex' && !chat.executionLocation)}</p>)}
               {!showExecutionDetails && run.incomplete && !quietStop && !errors.length && <p className="run-incomplete" role="alert">{localize('回复未完成。','The reply was incomplete.')}</p>}
               {operationCards}
@@ -1827,7 +1832,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
                 {messageCopy(answer.key, replyText)}
                 {!mandalaMain && <Button type="button" aria-label="Fork" title={t("从这轮回答继续新对话，不重新执行")} disabled={!canFork} onClick={() => void forkReply(checkpoint.id)}><Icon name="workflow" size={15} /></Button>}
               </> : undefined} />}
-            </section> : operationCards}
+            </section> : <>{replySources.map(message=><ReplySource key={message.id} message={message} config={config} onOpen={openWorkspacePath} renderCopy={mandalaMain ? messageCopy : undefined}/>)}{operationCards}</>}
             <ExecutionResults onRefresh={executionResults.retry} renderCopy={mandalaMain ? messageCopy : undefined} items={resultGroups.get(turn.key)??[]} config={config} tasks={operationTasks.tasks} onOpen={openWorkspacePath}/>
             </section>; })}
             {approvals.filter(approval=>!showExecutionDetails || !presentedTurns.some(({turn})=> turn.messages.some(message=>message.kind!=='agent_message')&&turn.events.some(event=>event.kind==='approval'&&(event.data as Approval).id===approval.id))).map(renderApprovalRequest)}

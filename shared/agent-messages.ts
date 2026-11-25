@@ -8,4 +8,4 @@ export type AgentMessage = {
  submissionState?:'not_submitted'|'submitted'|'unknown'; retryAttemptId?:string;
  replyState:'pending'|'queued'|'consumed'|'parked';
 };
-export type AgentMessageOrigin = {id:string; direction:'request'|'reply'; sourceRequestEventId:number};
+export type AgentMessageOrigin = {id:string; direction:'request'|'reply'; sourceRequestEventId:number; batchIds?:string[]};

@@ -11,6 +11,7 @@ import IdentityAvatar from './IdentityAvatar';
 import type {Config} from '../shared/types';
 import type {Task} from '../shared/tasks';
 import './execution-results.css';
+import './operation-cards.css';
 
 export function useExecutionResults(conversationId:string){
  const [value,setValue]=useState<ChatDeliveries & {id:string;error:string}>({id:'',items:[],reviews:[],error:''});
@@ -42,18 +43,24 @@ function AcceptTask({taskId,revision,runId,onRefresh}:{taskId:string;revision:nu
    setError((failure as {status?:number}).status===409?t('交付已更新，请查看最新状态。','The delivery changed. Review its current state.'):(failure as Error).message);
   }finally{onRefresh();}
  }
- return <><Button type="button" disabled={busy} onClick={()=>void accept()}><Icon name="check" size={14}/>{t('确认完成','Confirm completion')}</Button>{error&&<span role="alert">{error}</span>}</>;
+ return <><Button type="button" size="sm" variant="primary" disabled={busy} onClick={()=>void accept()}><Icon name="check" size={14}/>{t('确认完成','Confirm completion')}</Button>{error&&<span role="alert">{error}</span>}</>;
 }
 
+/** A task awaiting review is one row: what was delivered, its state, and the two ways to act on it. */
 export function ChatReviewRequests({reviews,onRefresh,onOpen}:{reviews:ChatTaskReview[];onRefresh:()=>void;onOpen:(path:string)=>void}){
  const {text:t}=useLanguage();
  return <>{reviews.map(review=>{
-  const href='/tasks/'+encodeURIComponent(review.taskId);
-  return <article key={review.taskId} className="execution-result" aria-label={t('待验收任务','Task awaiting review')}>
-   <div className="execution-result-heading"><Icon name="approval" size={14}/><strong>{review.goal.split('\n')[0]}</strong></div>
-   <div className="execution-result-footer"><StatusLabel icon="approval" tone="warning">{t('待验收','Awaiting review')}</StatusLabel><div className="execution-result-actions">
-    <a href={href} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();onOpen(href);}}>{t('查看任务','View task')}</a><AcceptTask key={review.revision} {...review} onRefresh={onRefresh}/>
-   </div></div>
+  const href='/tasks/'+encodeURIComponent(review.taskId),title=review.goal.split('\n')[0];
+  return <article key={review.taskId} className="operation-card execution-review" data-attention="true" aria-label={t('待验收任务','Task awaiting review')}>
+   <div className="operation-row">
+    <Icon name="approval" size={18}/>
+    <div className="operation-row-main"><div className="operation-row-line"><strong className="operation-row-name execution-review-title" title={title}>{title}</strong></div></div>
+    <div className="operation-row-side">
+     <StatusLabel filled icon="approval" tone="warning">{t('待验收','Awaiting review')}</StatusLabel>
+     <a className="operation-icon-link" href={href} aria-label={t('查看任务','View task')} title={t('查看任务','View task')} onClick={event=>{if(event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();onOpen(href);}}><Icon name="external-link" size={15}/></a>
+     <AcceptTask key={review.revision} {...review} onRefresh={onRefresh}/>
+    </div>
+   </div>
   </article>;
  })}</>;
 }

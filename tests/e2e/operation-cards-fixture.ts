@@ -5,7 +5,7 @@ import {ensureMandalaConfig,writeConfig} from '../../server/config';
 import {ensureMandalaConversation} from '../../server/mandala';
 import {projectOperationOutcome} from '../../server/operation-results';
 export async function operationCardsFixture(req:IncomingMessage,res:ServerResponse,home:string,store:Store,manager:SessionManager){
- if(req.method!=='POST'||!['/__test__/delegation-failures','/__test__/task-operation-cards','/__test__/operation-cards','/__test__/operation-cards-partial','/__test__/operation-card-reply','/__test__/operation-outcomes','/__test__/operation-outcomes-only'].includes(req.url??''))return false;
+ if(req.method!=='POST'||!['/__test__/delegation-failures','/__test__/task-operation-cards','/__test__/operation-cards','/__test__/operation-cards-partial','/__test__/operation-card-reply','/__test__/operation-outcomes','/__test__/operation-outcomes-only','/__test__/reply-summary'].includes(req.url??''))return false;
  if(req.url==='/__test__/delegation-failures'){
   const {config}=await ensureMandalaConfig(home),chat=ensureMandalaConversation(store,config),invocationId=crypto.randomUUID();
   const source=store.appendEvent(chat.id,'user',{text:'请分派测试工作。',invocationId});
@@ -48,6 +48,22 @@ export async function operationCardsFixture(req:IncomingMessage,res:ServerRespon
   store.appendEvent(chat.id,'status',{status:'idle'});
   const next=only?undefined:store.appendEvent(chat.id,'user',{text:'接着讨论下一件事。',invocationId:invocationId+'-next'});
   res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({sourceEventId:source.id,invocationId,nextEventId:next?.id}));return true;
+ }
+ if(req.url==='/__test__/reply-summary'){
+  const current=await ensureMandalaConfig(home),chat=ensureMandalaConversation(store,current.config),prefix=crypto.randomUUID();
+  const agents=['渲染研究员','性能测试'].map((name,i)=>({id:prefix+'-'+i,name,instructions:'Synthetic reply fixture',defaultCli:'codex' as const,models:{},mcp:[],skills:[]}));
+  await writeConfig(home,{...current.config,agents:[...current.config.agents,...agents]},current.revision);
+  const source=store.appendEvent(chat.id,'user',{text:'长对话滚动很卡，帮我查一下原因，能不能这周修掉？',invocationId:prefix});
+  const replies=['## 渲染诊断报告\n\n### 火焰图\n\n卡顿来自滚动时重算 Markdown 高度，长对话下单帧 40ms 以上。\n\n### 建议\n\n缓存已渲染消息的高度。','已加 500 条消息的滚动基准，当前 P95 帧耗时 41ms。'];
+  const messages=agents.map((agent,i)=>{const target=store.createConversation({projectId:'',agentId:agent.id,cli:'codex',model:null});return {id:prefix+'-message-'+i,sourceRequestEventId:source.id,sourceConversationId:chat.id,targetConversationId:target.id,sourceAgentId:chat.agentId,targetAgentId:agent.id,text:i?'补一个长对话性能基准。':'诊断长对话滚动卡顿并给出修复建议。',policy:'resume',state:'running',reply:null,replyState:'pending',autoResumeAllowed:true};});
+  for(const message of messages)store.appendEvent(chat.id,'metadata',{agentMessage:{...message,direction:'sent'}});
+  store.appendEvent(chat.id,'status',{status:'idle'});
+  for(const [i,message] of messages.entries())store.appendEvent(chat.id,'metadata',{agentMessage:{...message,direction:'reply',state:'succeeded',reply:replies[i],replyState:'queued'}});
+  const continuation=store.appendEvent(chat.id,'user',{text:'Agents you consulted have replied.',invocationId:prefix+'-summary',agentMessage:{id:messages[0].id,direction:'reply',sourceRequestEventId:source.id,batchIds:messages.map(message=>message.id)}});
+  for(const message of messages)store.appendEvent(chat.id,'metadata',{agentMessage:{...message,direction:'reply',state:'succeeded',reply:replies[messages.indexOf(message)],replyState:'consumed'}});
+  store.appendEvent(chat.id,'text',{text:'**能这周修掉。**卡顿主要因为滚动时每条消息都在重新测量高度。需要你定一件事：编辑过的消息会短暂错位，可以接受吗？',phase:'final_answer',runId:prefix+'-summary'});
+  store.appendEvent(chat.id,'status',{status:'idle'});
+  res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({conversationId:chat.id,continuationEventId:continuation.id}));return true;
  }
  if(req.url==='/__test__/operation-card-reply'){
   let body='';for await(const chunk of req)body+=chunk;const {conversationId,message}=JSON.parse(body);

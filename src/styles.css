@@ -782,15 +782,25 @@ main {
   border: 0;
 }
 .approval-card {
-  border: 1px solid var(--warning);
-  border-radius: var(--panel-radius);
-  padding: 16px 16px;
-  margin-bottom: 22px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  border-radius: min(12px, calc(var(--panel-radius) * 2));
+  padding: 0 12px 12px;
+  margin-block: 12px 22px;
   background: var(--surface);
   font-size: var(--type-meta);
+  overflow: hidden;
 }
+/* Required reading: the heading is the card's one header line; content and choices stay open below it. */
 .approval-heading {
-  font-weight: var(--weight-heading);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  margin: 0 -12px 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--type-ui);
+  font-weight: 500;
   color: var(--warning);
 }
 .approval-heading span {
@@ -809,8 +819,9 @@ main {
 .approval-actions {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px;
+  margin-top: 10px;
 }
 .approval-rule-scope {
   color: var(--muted);

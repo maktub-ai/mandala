@@ -17,10 +17,9 @@ test('late Agent replies show their sender and body directly after the interveni
    return !!request&&!!(request.compareDocumentPosition(element)&Node.DOCUMENT_POSITION_FOLLOWING);
   },fixture.sourceEventId)).toBe(true);
   await expect(reply).toHaveCount(1);
-  await expect(reply.locator('.chat-reply-bubble .ui-disclosure,.chat-reply-bubble a')).toHaveCount(0);
+  await expect(reply.locator('details[open]')).toHaveCount(0);
   await page.reload();
  }
- await reply.locator('.chat-reply-bubble').hover();
  await reply.getByRole('button',{name:'复制消息',exact:true}).click();
  expect(await page.evaluate(()=>navigator.clipboard.readText())).toBe('覆盖清单已返回。');
  await reply.scrollIntoViewIfNeeded();await page.screenshot({path:info.outputPath('agent-reply-desktop.png'),animations:'disabled'});

@@ -18,15 +18,16 @@ test('lightweight confirmation returns to A, remains outside Task lists and rend
  expect((await(await request.get('/api/v2/tasks?projectId='+projectId)).json())).toHaveLength(0);
  expect((await request.post('/__test__/message-finish',{data:{messageId:message.id,text:'The parameter is optional.'}})).ok()).toBe(true);
  await expect.poll(async()=>(await(await request.get('/api/agent-messages/'+message.id)).json()).replyState).toBe('consumed');
- const reply=page.getByRole('article',{name:'Reviewer B · 智能体回复',exact:true});await expect(reply).toContainText('已接续处理');await expect(reply.getByText('The parameter is optional.',{exact:true})).toBeVisible();
+ await expect(page.getByRole('article',{name:'Reviewer B · 智能体回复',exact:true})).toHaveCount(0);
+ const reply=page.locator('.reply-source').filter({hasText:'Reviewer B 的原始回复'});await expect(reply).toHaveCount(1);await reply.locator('summary').click();await expect(reply.getByText('The parameter is optional.',{exact:true})).toBeVisible();
  mkdirSync(artifacts,{recursive:true});await page.screenshot({path:artifacts+'/resume-light.png',fullPage:true});
  await page.evaluate(()=>{localStorage.setItem('mana-theme','dark');document.documentElement.dataset.theme='dark';});await page.screenshot({path:artifacts+'/resume-dark.png',fullPage:true});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:artifacts+'/resume-mobile.png',fullPage:true});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  expect((await(await request.get('/api/v2/tasks?projectId='+projectId)).json())).toHaveLength(0);
  await page.setViewportSize({width:1280,height:850});await reply.getByRole('link',{name:'查看接收对话',exact:true}).click();
  const inquiry=page.getByRole('region',{name:'消息委派与回报',exact:true});await expect(inquiry).toContainText('收到智能体询问');await expect(page.locator('.message.user')).toHaveCount(0);
- await inquiry.locator(':scope > details > summary').click();await page.screenshot({path:artifacts+'/recipient.png',fullPage:true});
- await page.getByRole('link',{name:'查看来源对话',exact:true}).click();await expect(page.getByRole('article',{name:'Reviewer B · 智能体回复',exact:true})).toContainText('已接续处理');
+ await page.screenshot({path:artifacts+'/recipient.png',fullPage:true});
+ await page.getByRole('link',{name:'查看来源对话',exact:true}).click();await expect(page.locator('.reply-source').filter({hasText:'Reviewer B 的原始回复'})).toHaveCount(1);
 });
 test('stopping waiting A keeps late reply visible after refresh without resuming it',async({page,request})=>{
  const {source,message,url}=await setup(request,'stop');await page.goto(url);
@@ -45,7 +46,7 @@ test('stopping waiting A keeps late reply visible after refresh without resuming
  await expect(page.getByRole('article',{name:'Reviewer B · 智能体回复',exact:true})).toHaveCount(0);
  expect((await request.post('/__test__/message-finish',{data:{messageId:message.id,text:'Late saved confirmation.'}})).ok()).toBe(true);
  await expect.poll(async()=>(await(await request.get('/api/agent-messages/'+message.id)).json()).replyState).toBe('parked');
- await page.reload();const reply=page.getByRole('article',{name:'Reviewer B · 智能体回复',exact:true});await expect(reply).toContainText('回复已保存，未自动接续');await expect(reply.getByText('Late saved confirmation.',{exact:true})).toBeVisible();
+ await page.reload();const reply=page.getByRole('article',{name:'Reviewer B · 智能体回复',exact:true});await expect(reply).toContainText('未自动接续');await expect(reply.getByText('Late saved confirmation.',{exact:true})).toBeVisible();
  const human=page.locator('.message.user').filter({hasText:topic});await expect(human).toBeVisible();
  expect(await reply.evaluate((node,text)=>{const input=[...document.querySelectorAll('.message.user')].find(item=>item.textContent?.includes(text));return !!input&&!!(input.compareDocumentPosition(node)&Node.DOCUMENT_POSITION_FOLLOWING);},topic)).toBe(true);
  const events=await(await request.get('/api/conversations/'+source.id+'/history')).json();expect(JSON.stringify(events)).not.toContain('Original request (data)');

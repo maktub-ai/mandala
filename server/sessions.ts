@@ -547,7 +547,7 @@ export function createSessionManager(
       } catch (error) { if (!closed) throw error; }
     },
   });
-  const messages=createAgentMessages(store,(id,text,key)=>scheduler.enqueueUserInput(id,text,key),mayDeliverInquiry);
+  const messages=createAgentMessages(store,(id,text,key)=>scheduler.enqueueUserInput(id,text,key),mayDeliverInquiry,id=>{if(!closed)void pump(id);});
   const rejectMessageInput=(input:QueuedInput,reason:string)=>{
     messages.finish(input.id,'failed',reason);
     if(scheduler.listUserInputs(input.conversationId).find(i=>i.id===input.id)?.state==='running')scheduler.rejectUnsubmittedInput(input.id);
