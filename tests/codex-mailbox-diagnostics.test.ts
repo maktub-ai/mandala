@@ -12,7 +12,8 @@ import type { RpcClient } from "../server/rpc";
 vi.mock("../cli/private-path.mjs", () => ({ codexMailboxSid: vi.fn(), ownedPrivatePath: vi.fn(), protectInvocationDirectory: vi.fn() }));
 const {helper}=vi.hoisted(()=>({helper:vi.fn()}));
 vi.mock("../cli/windows-system.mjs",()=>({windowsSystemBinary:()=> 'synthetic-cmd.exe'}));
-vi.mock("../server/native-spawn", () => ({
+vi.mock("../server/native-spawn", async (importOriginal) => ({
+  ...await importOriginal<typeof import('../server/native-spawn')>(),
   spawn: vi.fn((_command: string, args: string[]) => {
     if (args[0] === "sandbox") return helper(...args);
     if (args[0] !== "app-server") throw new Error("Blocked unexpected test subprocess");
