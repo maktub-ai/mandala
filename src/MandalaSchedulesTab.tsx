@@ -7,6 +7,7 @@ import Button from './ui/Button';
 import Icon from './ui/Icon';
 import Disclosure from './ui/Disclosure';
 import EmptyState from './ui/EmptyState';
+import WorkspaceFirstUse from './ui/WorkspaceFirstUse';
 import StatusMark,{statusShape} from './ui/StatusMark';
 import {relativeTime} from './mandala-panel-time';
 
@@ -32,7 +33,7 @@ export default function MandalaSchedulesTab({rules,runs,onOpen}:{rules:Automatio
  const labels:Record<RuleFilter,string>={all:say('全部','All'),enabled:say('已启用','Enabled'),paused:say('已暂停','Paused')};
  return <>
   <div className="mandala-task-scope" role="group" aria-label={say('定时筛选','Schedule filter')}>{(['all','enabled','paused'] as const).map(value=><Button key={value} aria-pressed={filter===value} onClick={()=>setFilter(value)}>{labels[value]} <span className="mandala-scope-count">{counts[value]}</span></Button>)}</div>
-  {!shown.length&&<EmptyState icon="schedule">{rules.length?(filter==='enabled'?say('没有启用中的定时安排。','No enabled schedules.'):say('没有已暂停的定时安排。','No paused schedules.')):say('还没有定时安排。在聊天中说明何时需要完成什么。','No schedules yet. Describe what should happen and when in chat.')}</EmptyState>}
+  {!shown.length&&(rules.length?<EmptyState icon="schedule">{filter==='enabled'?say('没有启用中的定时安排。','No enabled schedules.'):say('没有已暂停的定时安排。','No paused schedules.')}</EmptyState>:<WorkspaceFirstUse size="panel" title={say('还没有定时安排','No schedules yet')} slot={{fields:[say('智能体 · 要做的事','Agent · what to do')],lead:say('工作日 09:00','Weekdays 09:00')}}>{say('在聊天中说明何时需要完成什么，智能体会按时开工。','Describe what should happen and when in chat; an Agent will start on time.')}</WorkspaceFirstUse>)}
   <div className="mandala-rule-list">{shown.map(rule=>{
    const latest=runs.filter(run=>run.automationId===rule.id).sort((a,b)=>b.createdAt.localeCompare(a.createdAt))[0],last=latest&&runSummary(latest,say);
    const lastPath=latest&&(latest.conversationId?executionResultHref(latest.conversationId,latest.runId):latest.taskId?'/tasks/'+latest.taskId:null);

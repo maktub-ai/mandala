@@ -54,11 +54,14 @@ export default function WorkspaceDirectory({ kind, config, disabled, loading, qu
         : <span className="workspace-directory-context">{agentProjects(item.id).length ? <span className="workspace-directory-members is-projects" title={agentProjects(item.id).map(project => project.name).join('、')}>{agentProjects(item.id).slice(0, 4).map(project => <IdentityAvatar key={project.id} identity={project} kind="project" size={20}/>)}<span className="sr-only">{agentProjects(item.id).map(project => project.name).join('、')}</span></span> : <span>{localize('未加入项目', 'No project')}</span>}<span className="workspace-directory-runtime" title={runtimeLabel((item as Agent).defaultCli)}><RuntimeIcon cli={(item as Agent).defaultCli} size={18}/><span className="sr-only">{runtimeLabel((item as Agent).defaultCli)}</span></span></span>}
       <Icon name="chevronRight" size={15}/>
     </DirectoryLink>)}</div> : search ? !systemMatches && <EmptyState>{t('没有匹配选项')}</EmptyState> :
-      <WorkspaceFirstUse icon={projects ? 'project' : 'agent'}
-        title={projects ? localize('从一个项目开始', 'Start with a project') : localize('组建你的智能体团队', 'Build your Agent team')}
+      <WorkspaceFirstUse
+        title={projects ? localize('添加第一个项目', 'Add your first project') : localize('组建你的第一个智能体', 'Set up your first Agent')}
+        slot={projects
+          ? { fields: [localize('项目名', 'Name'), localize('本机或远程目录', 'Local or remote folder'), localize('关联的智能体', 'Agents')], createLabel: localize('添加', 'Add'), onCreate: onCreate, disabled }
+          : { shape: 'card', fields: [localize('名字与身份', 'Name and identity'), localize('运行的 CLI', 'Runtime CLI'), localize('负责的项目', 'Projects it looks after')], createLabel: localize('添加', 'Add'), onCreate: onCreate, disabled }}
         action={createButton}>
-        {projects ? localize('把相关任务、资料和智能体放在同一个项目中。', 'Keep related tasks, resources, and Agents together in one project.') :
-          localize('为智能体设定职责，让它在对话和项目中负责一项工作。', 'Give an Agent a role and put it to work in chats and projects.')}
+        {projects ? localize('项目是一个工作目录或代码仓库。关联后，智能体知道去哪里干活，任务和对话也按项目归档。', 'A project is a working folder or repository. Once linked, Agents know where to work, and tasks and chats are filed by project.') :
+          localize('智能体长期负责一块业务，记住来龙去脉；具体执行交给 Claude Code、Codex 等 CLI。', 'An Agent looks after one area of work and remembers its history; CLIs such as Claude Code and Codex do the execution.')}
       </WorkspaceFirstUse>}
   </WorkspacePage>;
 }

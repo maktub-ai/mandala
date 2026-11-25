@@ -11,6 +11,7 @@ import Button from './ui/Button';
 import Input from './ui/Input';
 import Icon from './ui/Icon';
 import EmptyState from './ui/EmptyState';
+import WorkspaceFirstUse from './ui/WorkspaceFirstUse';
 import StatusMark,{statusShape} from './ui/StatusMark';
 import IdentityAvatar from './IdentityAvatar';
 import {taskTone} from './TaskWorkCard';
@@ -121,7 +122,8 @@ export default function MandalaCollabTab({conversationId,config,goals,tasks,rows
    <label className="progress-search"><Icon name="search" size={14}/><Input aria-label={t('搜索协作','Search collaborations')} placeholder={t('搜索对话、任务或 Agent','Search chats, Tasks or Agents')} value={search} onChange={event=>setSearch(event.target.value)}/></label>
    {anyTasks&&<Button variant="ghost" className="icon-button task-expand-all" aria-pressed={!!expandAll} aria-label={expandAll?t('全部收起','Collapse all'):t('全部展开','Expand all')} title={expandAll?t('收起全部任务','Collapse every task'):t('展开全部任务，查看每个任务下的对话','Expand every task to see its chats')} onClick={()=>{setExpandAll(!expandAll);setTaskOpen({});}}><Icon name={expandAll?'collapseAll':'expandAll'} size={16}/></Button>}
   </div>
-  {!total&&<EmptyState icon="plan">{search.trim()?t('没有匹配的协作。','No matching collaborations.'):t('本对话还没有协作。在聊天中交代想完成的事情。','No collaborations in this chat yet. Describe what you want to accomplish.')}</EmptyState>}
+  {!total&&(search.trim()?<EmptyState icon="search">{t('没有匹配的协作。','No matching collaborations.')}</EmptyState>:<WorkspaceFirstUse size="panel" title={t('还没有协作','No collaborations yet')}
+   slot={{shape:'task',fields:[t('标题','Title'),t('智能体 · 状态','Agent · status')]}}>{t('在聊天里请智能体帮忙，协作对话和任务会出现在这里。','Ask an Agent for help in this chat; collaboration chats and tasks appear here.')}</WorkspaceFirstUse>)}
   {sections.needs.length>0&&<section className="mandala-collab-section" data-section="needs" aria-label={t('需要你','Needs you')}>{heading(t('需要你','Needs you'),sections.needs.length)}{sections.needs.map(render)}</section>}
   {sections.active.length>0&&<section className="mandala-collab-section" data-section="active" aria-label={t('动态','Activity')}>{heading(t('动态','Activity'),sections.active.length,<span className="mandala-collab-heading-note">{t('按最近变化','By latest change')}</span>)}{sections.active.map(render)}</section>}
   {sections.done.length>0&&<section className="mandala-collab-section" data-section="done" aria-label={t('已收尾','Wrapped up')}>

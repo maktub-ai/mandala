@@ -9,6 +9,7 @@ import Input from './ui/Input';
 import Icon from './ui/Icon';
 import Disclosure from './ui/Disclosure';
 import EmptyState from './ui/EmptyState';
+import WorkspaceFirstUse from './ui/WorkspaceFirstUse';
 import StatusMark from './ui/StatusMark';
 import IdentityAvatar from './IdentityAvatar';
 import ExecutionChats,{ExecutionMarks} from './ExecutionChats';
@@ -55,7 +56,7 @@ export default function MandalaTeamsTab({config,agents,groups,rows,tasks,rules=[
   <div className="mandala-task-scope" role="group" aria-label={say('智能体筛选','Agent filter')}>{(['all','working','recent'] as const).map(value=><Button key={value} aria-pressed={filter===value} onClick={()=>setFilter(value)}>{labels[value]} <span className="mandala-scope-count">{counts[value]}</span></Button>)}</div>
   <div className="mandala-task-toolbar"><label className="progress-search"><Icon name="search" size={16}/><Input aria-label={say('搜索智能体','Search Agents')} placeholder={say('搜索智能体或项目','Search Agents or projects')} value={search} onChange={event=>setSearch(event.target.value)}/></label>{anyChats&&<Button variant="ghost" className="icon-button task-expand-all" aria-pressed={expandAll} aria-label={expandAll?say('全部收起','Collapse all'):say('全部展开','Expand all')} title={expandAll?say('全部收起','Collapse all'):say('全部展开，查看每位 Agent 的对话','Expand all to see each Agent’s chats')} onClick={onExpandAll}><Icon name={expandAll?'collapseAll':'expandAll'} size={16}/></Button>}</div>
   {unknown>0&&<p className="mandala-panel-summary" role="status">{say(`${unknown} 个对话执行状态未知`,`${unknown} chats with unknown execution status`)}</p>}
-  {!shown.length&&<EmptyState icon="agent">{query?say('没有匹配的智能体。','No matching Agents.'):filter==='working'?say('现在没有正在干活的 Agent。','No Agent is working right now.'):filter==='recent'?say('最近 24 小时没有活跃的 Agent。','No Agent was active in the last 24 hours.'):say('还没有团队。','No team yet.')}</EmptyState>}
+  {!shown.length&&(!query&&filter==='all'?<WorkspaceFirstUse size="panel" title={say('还没有团队','No team yet')} slot={{fields:[say('智能体','Agent'),say('负责的项目','Projects')]}}>{say('在聊天里说出要组建的智能体，或在“智能体”页添加；它们会按项目出现在这里。','Ask for an Agent in this chat or add one on the Agents page; they appear here by project.')}</WorkspaceFirstUse>:<EmptyState icon="agent">{query?say('没有匹配的智能体。','No matching Agents.'):filter==='working'?say('现在没有正在干活的 Agent。','No Agent is working right now.'):say('最近 24 小时没有活跃的 Agent。','No Agent was active in the last 24 hours.')}</EmptyState>)}
   {shown.map(group=>{
    const working=group.members.filter(agent=>activity.get(agent.id)!.working).length;
    return <section key={group.id} className="mandala-team" {...group.project?drag('project',group.id):{}}>

@@ -1,52 +1,141 @@
+/* First-use empty state: the first item drawn as a dashed blueprint where it will appear.
+   Left aligned on the content edge, top of the list; no centred illustration. */
 .workspace-first-use {
-  display: grid;
-  place-items: center;
-  min-height: clamp(300px, 68svh, 640px);
-  padding: 32px var(--page-gutter);
+  padding: 12px var(--page-gutter) 32px;
 }
 .workspace-first-use-content {
   display: grid;
-  justify-items: start;
-  width: min(100%, 320px);
+  gap: 20px;
+  width: min(100%, 720px);
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.workspace-first-use-art {
-  position: relative;
-  width: 84px;
-  height: 62px;
-  margin-bottom: 24px;
-  color: var(--muted);
-}
-.workspace-first-use-art::before,
-.workspace-first-use-art::after,
-.workspace-first-use-art > span {
-  content: '';
-  position: absolute;
-  width: 48px;
-  height: 36px;
-  border: 1px solid currentColor;
-  border-radius: min(var(--panel-radius), 6px);
-  background: var(--surface);
-  transform: skewY(-10deg);
-}
-.workspace-first-use-art::before { left: 26px; top: 5px; border-style: dashed; color: var(--border-strong); }
-.workspace-first-use-art::after { left: 14px; top: 12px; color: var(--border-strong); }
-.workspace-first-use-art > span { left: 2px; top: 19px; z-index: 1; display: grid; place-items: center; }
-.workspace-first-use-content h2 {
+.workspace-first-use-copy h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   color: var(--heading);
-  font-size: var(--page-heading-size);
+  font-size: var(--section-heading-size);
   font-weight: var(--weight-heading);
-  line-height: 1.3;
-  letter-spacing: -.02em;
+  line-height: 1.4;
 }
-.workspace-first-use-content p {
-  margin: 8px 0 20px;
+.brand-mark.workspace-first-use-mark { width: 16px; height: 16px; }
+.workspace-first-use-copy p {
+  margin: 6px 0 0;
+  max-width: 60ch;
   color: var(--muted);
   font-size: var(--type-body);
   line-height: 1.6;
 }
+
+.workspace-first-use-slots { display: grid; gap: 8px; min-width: 0; }
+/* Doubled class: outranks the app-wide `.product-frame button` centring. */
+.workspace-first-use .workspace-first-use-slot {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  margin: 0;
+  padding: 10px 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--panel-radius);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--type-meta);
+  text-align: left;
+  justify-content: flex-start;
+}
+button.workspace-first-use-slot { cursor: pointer; }
+button.workspace-first-use-slot:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent-bg) 40%, transparent); }
+.workspace-first-use-slot.is-ghost { border-color: var(--border); }
+.workspace-first-use-slot.is-ghost[data-step="2"] { opacity: .65; }
+.workspace-first-use-slot.is-ghost[data-step="3"] { opacity: .35; }
+
+.workspace-first-use-slot-lead {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 1px dashed var(--border-strong);
+  border-radius: min(var(--panel-radius), 6px);
+}
+.workspace-first-use-slot-lead[data-kind="status"] { width: 14px; height: 14px; border-radius: 50%; }
+.workspace-first-use-slot-sample {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 4px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.workspace-first-use-slot-fields { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }
+.workspace-first-use-slot-rule { width: 1px; height: 12px; background: var(--border); }
+.workspace-first-use-slot-create {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--link);
+  font-size: var(--type-ui);
+  font-weight: var(--weight-medium);
+}
+
+/* Task: a parent row with one execution chat nested under it. */
+.workspace-first-use[data-shape="task"] .workspace-first-use-slot.is-child {
+  position: relative;
+  width: auto;
+  min-height: 40px;
+  margin-left: 28px;
+  padding-block: 8px;
+}
+.workspace-first-use[data-shape="task"] .workspace-first-use-slot.is-child::before {
+  content: '';
+  position: absolute;
+  left: -16px;
+  top: -9px;
+  width: 12px;
+  height: 29px;
+  border-left: 1px dashed var(--border-strong);
+  border-bottom: 1px dashed var(--border-strong);
+  border-bottom-left-radius: 6px;
+}
+
+/* Card: the directory grid, fields stacked. */
+.workspace-first-use[data-shape="card"] .workspace-first-use-slots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.workspace-first-use[data-shape="card"] .workspace-first-use-slot { align-items: flex-start; align-content: flex-start; min-height: 112px; padding: 16px; }
+.workspace-first-use[data-shape="card"] .workspace-first-use-slot-fields { flex-direction: column; align-items: flex-start; }
+.workspace-first-use[data-shape="card"] .workspace-first-use-slot-rule { display: none; }
+.workspace-first-use[data-shape="card"] .workspace-first-use-slot-create { align-self: flex-end; }
+
+.workspace-first-use-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* Narrow panels (Mandala side panel): smaller type, one sample and one outline, no action row. */
+.workspace-first-use[data-size="panel"] { padding: 12px 0 16px; }
+.workspace-first-use[data-size="panel"] .workspace-first-use-content { gap: 12px; width: 100%; }
+.workspace-first-use[data-size="panel"] .workspace-first-use-copy h2 { font-size: var(--type-ui); }
+.workspace-first-use[data-size="panel"] .brand-mark.workspace-first-use-mark { width: 14px; height: 14px; }
+.workspace-first-use[data-size="panel"] .workspace-first-use-copy p { font-size: var(--type-meta); line-height: 1.55; }
+.workspace-first-use[data-size="panel"] .workspace-first-use-slots { gap: 6px; }
+.workspace-first-use[data-size="panel"] .workspace-first-use-slot { min-height: 44px; padding: 8px 12px; }
+.workspace-first-use[data-size="panel"] .workspace-first-use-slot-lead { width: 18px; height: 18px; }
+
+/* Pages whose container already sits on the content edge. */
+.schedules-workspace .workspace-first-use,
+.progress-empty .workspace-first-use { padding-inline: 0; }
+
+@media (max-width: 600px) {
+  .workspace-first-use[data-shape="card"] .workspace-first-use-slots { grid-template-columns: minmax(0, 1fr); }
+  .workspace-first-use[data-shape="card"] .workspace-first-use-slot.is-ghost[data-step="2"],
+  .workspace-first-use[data-shape="card"] .workspace-first-use-slot.is-ghost[data-step="3"] { display: none; }
+}
 @media (pointer: coarse) {
-  .workspace-first-use-content .ui-button { min-height: 44px; }
+  .workspace-first-use-actions .ui-button { min-height: 44px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  button.workspace-first-use-slot { transition: border-color .12s ease, background-color .12s ease; }
 }
