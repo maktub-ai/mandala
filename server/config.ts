@@ -8,6 +8,7 @@ import { openStore } from "./store";
 import { enabledRuntimes, runtimeIds, isCli, supportsSystemTasks } from "../shared/runtimes";
 import { validateEffort } from "../shared/chat-input";
 import { normalizeCatalog } from "./catalog";
+import { resolveCodexPluginSkill } from "./codex-plugin-skills";
 import { linkedCapabilities } from "../shared/catalog";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -327,6 +328,11 @@ export async function readConfig(
     const store=openStore(home);try{const catalog=createSkillCatalog(home,store);if(!writes.has(home))catalog.recover(config);config.skillLibrary=withSkillEvidenceRead(store,config,()=>config.skillLibrary!.map(skill=>{try{return catalog.read(skill,undefined,config);}catch{return {...skill,content:undefined,unavailable:true};}}));}finally{store.close();}
   }
   validateConfig(config);
+  if (options.hydrateSkills !== false && config.skillLibrary) {
+    await Promise.all(config.skillLibrary.map(async skill => {
+      if (skill.path && !skill.versionRef) skill.path = await resolveCodexPluginSkill(skill.path);
+    }));
+  }
   const revision=hash(text);
   if(blueprintBindings(home)===beforeRead)publishBlueprintBindings(home,revision,config);
   return { config, revision };
