@@ -2,9 +2,11 @@ import { expect, test } from '@playwright/test';
 
 test('Mandala keeps one chat, allows only its settings, and preserves composed Chinese text', async ({ page, request }) => {
   await page.goto('/mandala');
-  await expect(page.getByRole('button', { name: 'Mandala 设置', exact:true })).toBeVisible();
+  const settings = page.getByRole('button', { name: 'Mandala 设置', exact:true });
+  await expect(settings.locator('.brand-mark')).toBeVisible();
   const first = await (await request.get('/api/mandala')).json();
-  await page.getByRole('button', { name: 'Mandala 设置', exact:true }).click();
+  await settings.focus();
+  await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/settings\/mandala$/);
   await page.getByRole('textbox', { name: '名字', exact:true }).fill('Mandala 测试');
   await page.getByRole('textbox', { name: 'soul.md', exact:true }).fill('简明地协作，保留中文偏好。');

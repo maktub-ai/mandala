@@ -26,6 +26,7 @@ export default function RuntimeConfiguration({ config, savedConfig, onDraftChang
   const [newChatDefaults, setNewChatDefaults] = useState(structuredClone(config.chatDefaults ?? {}));
   const [pending, setPending] = useState(false), [error, setError] = useState('');
   const [status, setStatus] = useState<CliStatus>(), [models, setModels] = useState<ModelChoice[]>([]), [probeError, setProbeError] = useState(''), [refresh, setRefresh] = useState(0);
+  const [probing, setProbing] = useState(true);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus(); }, []);
   const value=adding?newValue:config.runtimeDefaults??{};
@@ -38,14 +39,14 @@ export default function RuntimeConfiguration({ config, savedConfig, onDraftChang
   useEffect(() => { onDirtyChange(dirty); return () => onDirtyChange(false); }, [dirty, onDirtyChange]);
   useEffect(() => {
     if (!cli) return;
-    let active = true; setStatus(undefined); setModels([]); setProbeError('');
-    api<CliStatus>('/cli/status?scope=runtime&explain=1&cli=' + cli).then(result => {
+    let active = true; setProbing(true); setStatus(undefined); setModels([]); setProbeError('');
+    api<CliStatus>('/cli/status?scope=runtime&explain=1&cli=' + cli).then(async result => {
       if (!active) return;
       setStatus(result);
       // Native model enumeration may create a provider session. Only request
       // it after the selected CLI has passed its own setup check.
-      if (result.status==='ready') void api<ModelChoice[]>('/models?scope=runtime&cli=' + cli).then(models => { if (active) setModels(models); }).catch(e => { if (active) setProbeError(e.message); });
-    }).catch(e => { if (active) { setStatus({ status: 'unavailable', version: null }); setProbeError(e.message); } });
+      if (result.status==='ready') await api<ModelChoice[]>('/models?scope=runtime&cli=' + cli).then(models => { if (active) setModels(models); }).catch(e => { if (active) setProbeError(e.message); });
+    }).catch(e => { if (active) { setStatus({ status: 'unavailable', version: null }); setProbeError(e.message); } }).finally(() => { if (active) setProbing(false); });
     return () => { active = false; };
   }, [cli, JSON.stringify(savedConfig.runtimeDefaults), refresh]);
   const save = async (enable: boolean) => {
@@ -66,7 +67,10 @@ export default function RuntimeConfiguration({ config, savedConfig, onDraftChang
     {adding && (available.length ? <label>{localize('选择 CLI', 'Choose CLI')}<Select ariaLabel={localize('选择 CLI', 'Choose CLI')} value={cli ?? ''} disabled={pending} searchable={false}
       options={available.map(item => ({value:item,label:runtimeLabel(item),icon:<RuntimeIcon cli={item}/>}))} onChange={item => setCli(item as Cli)}/></label> : <p>{localize('所有支持的 CLI 均已启用。', 'All supported CLI adapters are enabled.')}</p>)}
     {cli && <>
-      <div role="status" className="runtime-connection-status">{!status ? t('正在检测…') : status.status === 'ready' ? (localize('CLI 可启动', 'CLI can launch')) : status.status === 'login-required' ? (localize('CLI 要求登录', 'CLI requires login')) : (localize('CLI 不可用', 'CLI unavailable'))}{displayedVersion && <code>{displayedVersion}</code>}</div>
+      <div className="runtime-status-row">
+        <div role="status" className="runtime-connection-status">{!status ? t('正在检测…') : status.status === 'ready' ? (localize('CLI 可启动', 'CLI can launch')) : status.status === 'login-required' ? (localize('CLI 要求登录', 'CLI requires login')) : (localize('CLI 不可用', 'CLI unavailable'))}{displayedVersion && <code>{displayedVersion}</code>}</div>
+        <Button size="sm" variant="ghost" busy={probing} disabled={pending} title={t('检测使用已保存的配置；保存后重新检测。')} onClick={() => { setProbing(true); setRefresh(n => n + 1); }}>{!probing && <Icon name="refresh" size={15}/>} {t('重新检测')}</Button>
+      </div>
       {status && (status.status === 'ready' ? <RuntimeProbeSummary status={status}/> : <RuntimeSetup cli={cli} status={status}/>)}
       {status && status.status !== 'ready' && !status.diagnostics && <p className="field-hint">{localize('检查原生 CLI 安装和认证后重新检测。', 'Check the native CLI installation and authentication, then detect again.')}</p>}
       {probeError && <p role="status" className="form-error">{errorText(probeError)}</p>}
@@ -93,8 +97,7 @@ export default function RuntimeConfiguration({ config, savedConfig, onDraftChang
         <p className="field-hint">{t('工作区默认值用于 Agent 对话和定时任务；Agent 可覆盖。系统标题、记忆和文件整理使用受限环境。')}</p>
         <p className="field-hint">{t('检测使用已保存的配置；保存后重新检测。')}</p>
         <p className="field-hint">{t('连接状态表示 CLI 可启动；模型权限与余额在实际请求时验证。')}</p>
-        {!!models.length && <ul className="runtime-model-list">{models.map(model => <li key={model.id}>{model.label}<code>{model.id}</code></li>)}</ul>}
-        <Button type="button" onClick={() => setRefresh(n => n + 1)}>{t('重新检测')}</Button></Disclosure>
+        {!!models.length && <ul className="runtime-model-list">{models.map(model => <li key={model.id}>{model.label}<code>{model.id}</code></li>)}</ul>}</Disclosure>
       {error && <div role="alert" className="form-error">{errorText(error)}{error === 'configuration changed' && <><p>{t('重新读取最新配置后再保存；当前 Runtime 草稿保留。')}</p><Button type="button" onClick={onReload}>{t('重新读取配置')}</Button></>}</div>}
       <div className="runtime-actions">{adding&&<Button type="button" disabled={pending} onClick={()=>onNavigate('/settings/runtimes')}>{t('取消')}</Button>}
         {!adding && <span>{localize('修改自动保存', 'Changes save automatically')}</span>}

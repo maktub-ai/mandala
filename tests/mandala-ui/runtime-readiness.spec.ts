@@ -21,6 +21,35 @@ test('does not enumerate models before the selected native CLI can resume chats'
  await expect(page.getByText(/未验证登录或任务执行|sign-in and task execution were not verified/)).toBeVisible();
 });
 
+test('the configured CLI can recheck in place and refresh its model list', async ({page}) => {
+ let version = 1;
+ let finishModels!: () => void;
+ const modelsPending = new Promise<void>(resolve => { finishModels = resolve; });
+ const isCodex = (url: string) => new URL(url).searchParams.get('cli') === 'codex';
+ await page.route('**/api/cli/status?**', route => isCodex(route.request().url())
+  ? route.fulfill({json:{status:'ready',version:`fixture-${version}`}}) : route.continue());
+ await page.route('**/api/models?**', async route => {
+  if (!isCodex(route.request().url())) return route.continue();
+  if (version === 2) await modelsPending;
+  return route.fulfill({json:[{id:`fixture-model-${version}`,label:`Fixture model ${version}`}]});
+ });
+ await page.goto('/settings/runtimes/codex');
+ const row = page.locator('.runtime-status-row');
+ const checkAgain = row.getByRole('button', {name:'重新检测'});
+ await expect(row.getByRole('status')).toContainText('fixture-1');
+ await expect(checkAgain).toBeEnabled();
+ version = 2;
+ await checkAgain.click();
+ try {
+  await expect(row.getByRole('status')).toContainText('fixture-2');
+  await expect(checkAgain).toBeDisabled();
+  await expect(page).toHaveURL(/\/settings\/runtimes\/codex$/);
+ } finally { finishModels(); }
+ await expect(checkAgain).toBeEnabled();
+ await page.getByText('连接诊断',{exact:true}).click();
+ await expect(page.getByText('Fixture model 2',{exact:false})).toBeVisible();
+});
+
 for (const [mode, width] of [['light', 1280], ['dark', 390]] as const) {
  test(`OpenCode explains missing CLI and can recheck after installation (${mode}, ${width}px)`, async ({page}) => {
   let installed=false;
@@ -48,9 +77,11 @@ for (const [mode, width] of [['light', 1280], ['dark', 390]] as const) {
   expect(layout.content).toBeLessThanOrEqual(layout.available);
   await page.screenshot({path:test.info().outputPath('opencode-launcher-missing.png')});
   installed=true;
-  await page.getByText('连接诊断',{exact:true}).click();
-  await page.getByRole('button',{name:'重新检测'}).click();
+  const checkAgain=page.locator('.runtime-status-row').getByRole('button',{name:'重新检测'});
+  await expect(checkAgain).toBeVisible();
+  await checkAgain.click();
   await expect(status).toContainText('CLI 可启动');
+  await expect(checkAgain).toBeEnabled();
   await expect(page.getByText(/未验证登录或任务执行/)).toBeVisible();
  });
 }

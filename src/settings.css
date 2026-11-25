@@ -169,7 +169,8 @@
 .runtime-connections .runtime-actions .primary { color: var(--button-text); font-size: var(--control-font-size); }
 .runtime-settings-editor .runtime-cli-card > label { display: grid; gap: 8px; margin-top: 16px; }
 .runtime-settings-editor .runtime-cli-card textarea { width: 100%; box-sizing: border-box; }
-.runtime-configuration > h2, .runtime-configuration > p, .runtime-configuration > .runtime-connection-status { margin: 0; }
+.runtime-configuration > h2, .runtime-configuration > p, .runtime-status-row .runtime-connection-status { margin: 0; }
+.runtime-status-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
 
 .product-frame .runtime-connections .runtime-connection { padding: var(--space-4); margin-top: var(--space-2); }
 .runtime-connections .runtime-connection-status { margin-top: var(--space-2); }

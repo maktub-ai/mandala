@@ -30,7 +30,7 @@
 .product-frame .settings-compact .runtime-connection-status code { max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--type-meta); }
 .product-frame .settings-compact .runtime-configuration { max-width:none; }
 .product-frame .settings-compact .runtime-configuration > h2 { display:flex; align-items:center; gap:8px; font-size:16px; margin:20px 0 16px; }
-.product-frame .settings-compact .runtime-configuration > .runtime-connection-status { order:0; justify-content:flex-start; margin-bottom:16px; }
+.product-frame .settings-compact .runtime-status-row .runtime-connection-status { order:0; justify-content:flex-start; width:auto; }
 .product-frame .settings-compact .runtime-chat-defaults { margin:20px 0; }
 .product-frame .settings-compact .runtime-cli-card { margin:16px 0; padding:12px; border-color:var(--border-soft); }
 .product-frame .settings-compact .runtime-cli-card legend { font-size:var(--type-ui); }

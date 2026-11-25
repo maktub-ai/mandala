@@ -1580,7 +1580,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
         {!workbench && <header className={"topbar"+(mandalaMain?" mandala-topbar":"")}>
           <SidebarToggle chat={!workbench} onClick={() => setMobileNav(true)} />
           <div className="context">
-            {mandalaMain ? <span className="mandala-header-identity"><BrandMark/><strong>{agent?.name??'Mandala'}</strong><Button aria-label={(agent?.name??'Mandala')+(localize(' 设置', ' settings'))} onClick={()=>openWorkspacePath('/settings/mandala')}><Icon name="settings" size={16}/></Button></span> : manaOpen ? <span className="context-identity"><Icon name="book" size={18} />{t("MANA 工作区")}</span> : <>
+            {mandalaMain ? <span className="mandala-header-identity"><Button variant="ghost" className="mandala-settings-trigger" aria-label={(agent?.name??'Mandala')+(localize(' 设置', ' settings'))} title={localize('打开 Mandala 设置', 'Open Mandala settings')} onClick={()=>openWorkspacePath('/settings/mandala')}><BrandMark/></Button><strong>{agent?.name??'Mandala'}</strong></span> : manaOpen ? <span className="context-identity"><Icon name="book" size={18} />{t("MANA 工作区")}</span> : <>
             <span className="context-identity">{workbench ? workbenchProject?.name : project?.name ?? t("不关联项目")}</span>
             <span className="context-divider">/</span>
             <span className="context-identity">{selected && !manaOpen && !workbench && agent && <IdentityAvatar identity={agent} kind="agent" size={22} />}<span>{manaOpen ? "MANA" : workbench ? t("工作资源") : selected ? agent?.name ?? (runtimeName(cli)) : t("新对话")}</span></span>

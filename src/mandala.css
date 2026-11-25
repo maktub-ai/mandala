@@ -1,5 +1,6 @@
 .mandala-header-identity { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .mandala-header-identity .brand-mark { width: 24px; height: 24px; flex-shrink: 0; }
+.mandala-header-identity .mandala-settings-trigger { width: 32px; min-height: 32px; padding: 0; flex-shrink: 0; }
 .mandala-header-identity strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mandala-runtime-pending { display: block; color: var(--muted); font-size: inherit; }
 .sidebar-mandala .brand-mark { width: 18px; height: 18px; flex-shrink: 0; }
