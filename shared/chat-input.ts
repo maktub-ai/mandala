@@ -2,6 +2,7 @@ import type { Cli, ModelChoice } from "./types";
 export const efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"] as const;
 export const effortLabels = { none: "关闭思考", minimal: "极低", low: "低", medium: "中", high: "高", xhigh: "极高", max: "最高", ultra: "超高" } as const;
 export type ReasoningEffort = typeof efforts[number];
+export type AgentEffort = { cli: Cli; model: string; effort: ReasoningEffort };
 export type ChatDefaults = Partial<Record<Cli, { model?: string; effort?: ReasoningEffort }>>;
 export type Attachment = { id: string; name: string; size: number; mimeType: string };
 export type NativeAttachment = Attachment & { path: string };
@@ -15,5 +16,17 @@ export function modelOptions(models: ModelChoice[], inherited?: string) {
     ...models.map(model => ({ value: model.id, label: model.label }))];
 }
 export function effortOptions(model?: ModelChoice) {
-  return model?.supportedReasoningEfforts ?? [];
+  return [...new Set(model?.supportedReasoningEfforts?.filter(value => efforts.includes(value)))];
+}
+
+export function effortModel(models: ModelChoice[], model?: string | null) {
+  return model ? models.find(item => item.id === model) : models.find(item => item.isDefault);
+}
+
+export function matchingAgentEffort(value: AgentEffort | undefined, cli: Cli, model?: string | null) {
+  return value?.cli === cli && (!model || model === value.model) ? value : undefined;
+}
+
+export function supportedAgentEffort(value: AgentEffort | undefined, model?: ModelChoice) {
+  return value && value.model === model?.id && effortOptions(model).includes(value.effort) ? value.effort : undefined;
 }

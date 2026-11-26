@@ -16,7 +16,7 @@ export interface Store {
   enqueueOutbox(input: OutboxInput): number;
   listOutbox(afterSequence: number): EventEnvelope[];
   createConversation(
-    input: Pick<Conversation, "purpose" | "projectId" | "attributedProjectId" | "agentId" | "cli" | "model" | "effort" | "branchedFrom" | "workspaceId" | "cwd" | "workspaceName" | "approvalMode" | "executionLocation">,
+    input: Pick<Conversation, "purpose" | "projectId" | "attributedProjectId" | "agentId" | "cli" | "model" | "effort" | "agentEffort" | "branchedFrom" | "workspaceId" | "cwd" | "workspaceName" | "approvalMode" | "executionLocation">,
   ): Conversation;
   getConversation(id: string): Conversation | undefined;
   listConversations(): Conversation[];
@@ -25,7 +25,7 @@ export interface Store {
   updateConversation(
     id: string,
     patch: Partial<
-      Pick<Conversation, "attributedProjectId" | "cli" | "continuityPending" | "nativeId" | "turnId" | "status" | "title" | "model" | "effort" | "approvalMode" | "completedAt">
+      Pick<Conversation, "attributedProjectId" | "cli" | "continuityPending" | "nativeId" | "turnId" | "status" | "title" | "model" | "effort" | "agentEffort" | "approvalMode" | "completedAt">
     >,
   ): void;
   completeConversation(id: string, completed: boolean): void;

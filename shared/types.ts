@@ -1,6 +1,6 @@
 import type { ResponseStyle } from "./response-style";
 import { skillIdentity, skillResources, type SkillResource } from "./skills";
-import type { ChatDefaults, ReasoningEffort } from "./chat-input";
+import type { AgentEffort, ChatDefaults, ReasoningEffort } from "./chat-input";
 import type { MarketInstallation } from "./market";
 import type { ProjectIcon } from "./identity";
 export type ApprovalMode = "default" | "strict" | "auto";
@@ -83,6 +83,7 @@ export type Agent = {
   routingRemit?: string;
   defaultCli: Cli;
   models: Partial<Record<Cli, string>>;
+  defaultEffort?: AgentEffort;
   mcp: McpServer[];
   skills: Skill[];
   runtime?: RuntimeConfig;
@@ -135,6 +136,8 @@ export type Conversation = {
   cli: Cli;
   model: string | null;
   effort?: ReasoningEffort | null;
+  /** Model-bound default captured when the Chat is created; not a user override. */
+  agentEffort?: AgentEffort | null;
   approvalMode?: ApprovalMode | null;
   branchedFrom?: { conversationId: string; eventId: number };
   nativeId: string | null;

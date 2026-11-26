@@ -6,7 +6,7 @@ import { createSkillCatalog } from "./skill-catalog";
 import { withSkillEvidenceRead } from "./skill-evidence";
 import { openStore } from "./store";
 import { enabledRuntimes, runtimeIds, isCli, supportsSystemTasks } from "../shared/runtimes";
-import { validateEffort } from "../shared/chat-input";
+import { validateEffort, type AgentEffort } from "../shared/chat-input";
 import { normalizeCatalog } from "./catalog";
 import { resolveCodexPluginSkill } from "./codex-plugin-skills";
 import { linkedCapabilities } from "../shared/catalog";
@@ -28,6 +28,13 @@ const windowsReplaceBackoff = [15, 35] as const;
 const blueprintAuthority = Symbol("blueprint-config");
 const empty: Config = { version: 2, projects: [], agents: [] };
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
+function validateAgentEffort(value: unknown): asserts value is AgentEffort {
+  const item = value as AgentEffort;
+  if (!item || typeof item !== 'object' || Object.keys(item).some(key => !['cli','model','effort'].includes(key)) ||
+    !isCli(item.cli) || typeof item.model !== 'string' || !item.model.trim() || item.model.length > 200)
+    throw new Error('invalid Agent default reasoning effort');
+  validateEffort(item.effort);
+}
 function normalizeConfig(value: unknown): Config {
   const c = value as Config | LegacyConfig;
   if (!c || !Array.isArray(c.projects) || !Array.isArray(c.agents))
@@ -293,7 +300,12 @@ export function validateConfig(value: unknown): asserts value is Config {
       Object.entries(a.models).some(([cli, model]) => !isCli(cli) || typeof model !== "string")
     )
       invalid();
-  for (const a of c.agents) { validateCapabilities(a); validateRuntime(a.runtime); }
+  for (const a of c.agents) {
+    validateCapabilities(a); validateRuntime(a.runtime);
+    if (a.defaultEffort !== undefined) {
+      try { validateAgentEffort(a.defaultEffort); } catch { invalid(); }
+    }
+  }
 }
 export async function readConfig(
   home: string,
@@ -382,6 +394,9 @@ export async function writeConfig(
           if (config.projects.some(p => p.agentIds.includes(old.agentId))) throw new Error("Mandala project membership is system managed");
         } else if (config.agents.some(a => a.systemRole || a.managedWorkspace)) throw new Error("Mandala identity is system managed");
       }
+      for (const agent of config.agents) if (!agent.systemRole && agent.defaultEffort && (
+        agent.defaultEffort.cli !== agent.defaultCli || agent.models[agent.defaultCli] && agent.models[agent.defaultCli] !== agent.defaultEffort.model
+      )) delete agent.defaultEffort;
       for (const p of config.projects) {
         const existing = authority === blueprintAuthority ? previous.config.projects.find(project=>project.id===p.id)?.workspaces : undefined;
         for (const workspace of p.workspaces ?? []) {
@@ -487,20 +502,28 @@ export async function ensureMandalaConfig(home: string, assertActive?:()=>void):
   throw new Error("configuration changed");
 }
 export async function updateMandalaSettings(home: string, value: unknown, revision: string) {
-  const patch = value as { name: string; soul: string; cli: Config["agents"][number]["defaultCli"]; maxParallel: number; showExecutionDetails?: boolean; models?: Config["agents"][number]["models"] };
-  if (!patch || Object.keys(patch).some(key => !["name", "soul", "cli", "maxParallel", "models", "showExecutionDetails"].includes(key)) ||
+  const patch = value as { name: string; soul: string; cli: Config["agents"][number]["defaultCli"]; maxParallel: number; showExecutionDetails?: boolean; models?: Config["agents"][number]["models"]; defaultEffort?: AgentEffort | null };
+  if (!patch || Object.keys(patch).some(key => !["name", "soul", "cli", "maxParallel", "models", "showExecutionDetails", "defaultEffort"].includes(key)) ||
       typeof patch.name !== "string" || !patch.name.trim() || patch.name.length > 100 || !isCli(patch.cli))
     throw new Error("invalid Mandala settings");
   if (patch.models !== undefined && (!patch.models || typeof patch.models !== "object" || Array.isArray(patch.models) ||
       Object.entries(patch.models).some(([cli, model]) => !isCli(cli) || typeof model !== "string" || model.length > 200)))
     throw new Error("invalid Mandala models");
+  if (patch.defaultEffort != null) validateAgentEffort(patch.defaultEffort);
   const current = await ensureMandalaConfig(home);
   if (revision !== current.revision) throw new Error("configuration changed");
   if (!enabledRuntimes(current.config).includes(patch.cli)) throw new Error("Runtime disabled");
   const config: Config = { ...current.config,
     mandala: { ...current.config.mandala!, soul: patch.soul, maxParallel: patch.maxParallel,
       ...(patch.showExecutionDetails !== undefined ? {showExecutionDetails:patch.showExecutionDetails} : {}) },
-    agents: current.config.agents.map(a => a.id === current.config.mandala!.agentId ? { ...a, name: patch.name.trim(), defaultCli: patch.cli, models: {...a.models,...patch.models} } : a) };
+    agents: current.config.agents.map(a => {
+      if (a.id !== current.config.mandala!.agentId) return a;
+      const models = {...a.models,...patch.models};
+      const {defaultEffort: previous, ...agent} = a;
+      const next = patch.defaultEffort === undefined ? previous : patch.defaultEffort;
+      const defaultEffort = next?.cli === patch.cli && (!models[patch.cli] || models[patch.cli] === next.model) ? next : undefined;
+      return {...agent, name: patch.name.trim(), defaultCli: patch.cli, models, ...(defaultEffort ? {defaultEffort} : {})};
+    }) };
   await writeConfig(home, config, revision, undefined, mandalaAuthority);
   return readConfig(home);
 }

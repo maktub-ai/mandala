@@ -187,7 +187,7 @@ export function TurnFooter({ turn, run: providedRun, turns, onInspect, actions }
 }
 
 function ExecutionOverview({ turn, turns, now, onClose }: { turn: ChatTurn; turns: ChatTurn[]; now: number; onClose: () => void }) {
-  const { t } = useLanguage();
+  const { t, text:localize } = useLanguage();
   const [selected, setSelected] = useState(turn.key);
   const current = turns.find(item => item.key === selected) ?? turn;
   const run = presentRun(current);
@@ -209,6 +209,8 @@ function ExecutionOverview({ turn, turns, now, onClose }: { turn: ChatTurn; turn
     <div className="run-overview-body">
       <p className="run-overview-request">{current.messages.find(m => m.kind === "user")?.text}</p>
       <p>{t(labels[run.status as keyof typeof labels] ?? "状态未提供")}</p>
+      {current.events.some(event=>event.kind==='metadata'&&(event.data as {agentEffortFallback?:boolean}).agentEffortFallback)&&
+        <p className="run-timing-note">{localize('未能确认当前执行端和模型支持 Agent 的默认思考强度，本轮未发送该档位。','This runtime and model could not confirm the Agent’s default reasoning effort, so the turn did not send it.')}</p>}
       <dl className="run-metrics">
         <div><dt>{t("等待时间")} · {t("平台观测")}</dt><dd>{formatDuration(elapsed)}</dd></div>
         <div><dt>{t("首个输出")} · {t("平台观测")}</dt><dd>{formatDuration(firstOutputMs)}</dd></div>

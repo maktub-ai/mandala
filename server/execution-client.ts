@@ -27,7 +27,8 @@ export interface ExecutionClient {
   assertReloadable?(nativeId:string):Promise<void>;
   inspectInvocation?(identity: RunIdentity): Promise<"running" | "succeeded" | "failed" | "unknown">;
   getContextWindow?(model?: string): Promise<number | undefined>;
-  listModels(): Promise<ModelChoice[]>;
+  /** A model hint allows adapters with active-model-only capabilities to inspect that model. */
+  listModels(model?: string): Promise<ModelChoice[]>;
   startThread(options: {
     cwd: string;
     instructions: string;

@@ -242,10 +242,11 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
    return {status:nativeAccountPresent===false?'login-required':'ready',version:initialized.agentInfo?.version??null,
     nativeAccountPresent,nativeVersion:options.nativeVersion};
   },
-  async listModels(){
+  async listModels(model){
    if(!options.safeSystem&&!durableResume)return [];
    if(options.runtimeCli==='openclaw'){await ensureSession();return options.nativeModel?[options.nativeModel]:[];}
    await ensureSession();
+   if(options.runtimeCli==='dsh')await setModel(model);
    const setting=configuration.find(option=>option.category==='model');
    if(!setting||setting.type!=='select')return legacyModels;
    const reasoning=reasoningOption();

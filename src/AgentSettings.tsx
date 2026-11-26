@@ -9,6 +9,8 @@ import DocumentLinks from './DocumentLinks';
 import IdentityAvatar from './IdentityAvatar';
 import IdentityPicker from './IdentityPicker';
 import ModelCatalogPicker,{type ModelCatalog} from './ModelCatalogPicker';
+import AgentEffortPicker,{rebindAgentEffort,useAgentEffortCatalog} from './AgentEffortPicker';
+import {effortModel} from '../shared/chat-input';
 import RuntimeSettingsEditor,{AgentApprovalSettings} from './RuntimeSettingsEditor';
 import Dialog from './Dialog';
 import Button from './ui/Button';
@@ -39,6 +41,8 @@ export default function AgentSettings({agent,config,savedConfig,catalog,disabled
  useEffect(()=>{setManager(initialTab==='capabilities'?'skills':initialTab==='knowledge'?'knowledge':null);},[initialTab]);
  const patch=(value:Partial<Agent>)=>onChange(current=>({...current,agents:current.agents.map(item=>item.id===agent.id?{...item,...value}:item)}));
  const runtimes=enabledRuntimes(config),cli=agent.defaultCli;
+ const [effortReverted,setEffortReverted]=useState(false);
+ const effortCatalog=useAgentEffortCatalog(cli,agent.id,agent.models[cli]||config.chatDefaults?.[cli]?.model||'',catalog);
  const {skills,connections,summary}=agentCapabilities(agent,config,say);
  const policy=agent.runtime?.[cli]?.approvalMode;
  const policyLabel=policy?t(policy==='auto'?'自动批准':policy==='strict'?'严格审批':'按需审批'):say('沿用执行端默认','Use runtime default');
@@ -47,9 +51,16 @@ export default function AgentSettings({agent,config,savedConfig,catalog,disabled
   <DetailSection title={say('执行端与模型','CLI and model')} actions={<Button variant="ghost" disabled={disabled||pending} onClick={()=>onNavigate('/settings/runtimes')}>{say('管理执行端接入','Manage CLI adapters')}<Icon name="external-link" size={14}/></Button>}>
    <div className="agent-settings-fields">
     <Field label={say('执行端','CLI')} hint={!runtimes.includes(cli)?t('所选执行端已停用；请在执行端接入中启用，或选择其他执行端。'):say('已启用的执行端可在这里切换。','Choose from enabled CLI adapters.')}>
-     <Select ariaLabel={t('默认执行端')} disabled={disabled||!runtimes.length} value={cli} onChange={value=>patch({defaultCli:value as Agent['defaultCli']})} options={[...new Set([...runtimes,cli])].map(value=>({value,label:runtimeLabel(value),icon:<RuntimeIcon cli={value}/>,disabled:!runtimes.includes(value)}))}/>
+     <Select ariaLabel={t('默认执行端')} disabled={disabled||!runtimes.length} value={cli} onChange={value=>{if(value===cli)return;setEffortReverted(!!agent.defaultEffort);patch({defaultCli:value as Agent['defaultCli'],defaultEffort:undefined});}} options={[...new Set([...runtimes,cli])].map(value=>({value,label:runtimeLabel(value),icon:<RuntimeIcon cli={value}/>,disabled:!runtimes.includes(value)}))}/>
     </Field>
-    <div className="agent-settings-model"><span className="agent-settings-label">{t('默认模型')}</span><ModelCatalogPicker catalog={catalog} value={agent.models[cli]??''} disabled={disabled} ariaLabel={`${runtimeLabel(cli)} ${t('默认模型')}`} defaultLabel={say('沿用对话／任务默认','Use Chat / Task defaults')} onChange={value=>patch({models:{...agent.models,[cli]:value||undefined}})} onRefresh={onRefresh}/><p className="field-hint">{say('留空时，对话和任务分别沿用各自默认设置。','An empty model leaves Chats and Tasks to use their respective defaults.')}</p></div>
+    <div className="agent-settings-model"><span className="agent-settings-label">{t('默认模型')}</span><ModelCatalogPicker catalog={catalog} value={agent.models[cli]??''} disabled={disabled} ariaLabel={`${runtimeLabel(cli)} ${t('默认模型')}`} defaultLabel={say('沿用对话／任务默认','Use Chat / Task defaults')} onChange={value=>{
+     if(value===(agent.models[cli]??''))return;
+     const effective=value||config.chatDefaults?.[cli]?.model;
+     const target=effortModel(catalog.choices,effective);
+     const defaultEffort=rebindAgentEffort(agent.defaultEffort,cli,target?.id===effortCatalog.model?.id?effortCatalog.model:target);
+     setEffortReverted(!!agent.defaultEffort&&!defaultEffort);patch({models:{...agent.models,[cli]:value||undefined},defaultEffort});
+    }} onRefresh={onRefresh}/><p className="field-hint">{say('留空时，对话和任务分别沿用各自默认设置。','An empty model leaves Chats and Tasks to use their respective defaults.')}</p></div>
+    <div className="agent-settings-model"><span className="agent-settings-label">{say('默认思考强度','Default reasoning effort')}</span><AgentEffortPicker cli={cli} model={effortCatalog.model} value={agent.defaultEffort} disabled={disabled} pending={effortCatalog.pending} reverted={effortReverted} onChange={defaultEffort=>{setEffortReverted(false);patch({defaultEffort});}}/></div>
    </div>
   </DetailSection>
   <DetailSection title={say('身份与回答','Identity and response')}>

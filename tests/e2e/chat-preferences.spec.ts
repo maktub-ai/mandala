@@ -76,6 +76,38 @@ test("Agent defaults are configured from Agent management rather than the compos
   await expect(page.getByLabel("Codex 默认模型", { exact: true })).toHaveAttribute('data-value',"model-second");
 });
 
+test('ordinary Agent effort persists, applies to a new chat, and falls back after a model change', async ({page,request})=>{
+  await page.goto('/?project=personal&agent=reviewer');
+  await openArea(page,'Agent');
+  await page.locator('.workspace-directory-row[href="/agents/reviewer"]').click();
+  await page.getByRole('tab',{name:/^(设置|Settings)$/,exact:true}).click();
+  const effort=page.getByRole('combobox',{name:'默认思考强度',exact:true});
+  await chooseOption(page,effort,'medium');
+  await waitForAutosave(page);
+  const configured=async()=>(await(await request.get('/api/config')).json()).config.agents.find((item:{id:string})=>item.id==='reviewer').defaultEffort;
+  expect(await configured()).toEqual({cli:'codex',model:'model-fixture',effort:'medium'});
+  await page.reload();await expect(effort).toHaveAttribute('data-value','medium');
+  await openArea(page,'对话');
+  await page.getByLabel('消息',{exact:true}).fill('Use the configured effort');
+  await page.getByRole('button',{name:'发送消息',exact:true}).click();
+  await expect(page.getByText('Fixture reply: Use the configured effort',{exact:true})).toBeVisible();
+  const id=new URL(page.url()).searchParams.get('conversation');
+  expect((await(await request.get(`/api/conversations/${id}`)).json()).conversation).toMatchObject({effort:null,agentEffort:{effort:'medium'}});
+  await chooseOption(page,'思考强度','high');
+  expect((await(await request.get(`/api/conversations/${id}`)).json()).conversation).toMatchObject({effort:'high',agentEffort:null});
+  expect(await configured()).toMatchObject({effort:'medium'});
+  await openArea(page,'Agent');
+  await page.locator('.workspace-directory-row[href="/agents/reviewer"]').click();
+  await page.getByRole('tab',{name:/^(设置|Settings)$/,exact:true}).click();
+  await expect(effort).toHaveAttribute('data-value','medium');
+  await expect(page.getByText('已读取 2 个候选',{exact:true})).toBeVisible();
+  await chooseOption(page,'Codex 默认模型','model-second');
+  await expect(effort).toHaveAttribute('data-value','');
+  await expect(page.getByText('当前模型的原档位不受支持或无法确认，执行时跟随执行端默认。',{exact:true})).toBeVisible();
+  await waitForAutosave(page);
+  expect(await configured()).toBeUndefined();
+});
+
 test("explicit empty context overrides remembered choices", async ({ page }) => {
   await page.goto("/?project=personal&agent=reviewer");
   await chooseOption(page, "模型", "model-second");

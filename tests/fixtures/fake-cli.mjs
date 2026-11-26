@@ -90,6 +90,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   if (r.method === "turn/start") {
     activeThread = r.params.threadId;
     activeTurn = persistent ? "turn-" + randomUUID() : "turn-1";
+    if (process.argv.includes('--record-effort')) send({method:'fixture/turn-options',params:{threadId:activeThread,turnId:activeTurn,...(r.params.effort===undefined?{}:{effort:r.params.effort})}});
     if (persistent) {
       const threads = readThreads();
       (threads[activeThread] ||= []).push({ id: activeTurn, status: "inProgress", items: [{ type: "userMessage", content: r.params.input }] });

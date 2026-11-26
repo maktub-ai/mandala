@@ -1,4 +1,24 @@
 import { expect, test } from '@playwright/test';
+import {chooseOption} from '../e2e/helpers/select';
+
+test('system Agent effort reads back and is reset on an unverified runtime switch',async({page,request})=>{
+ const first=await(await request.get('/api/mandala')).json();
+ expect((await request.put('/api/mandala',{data:{revision:first.revision,settings:{name:'Mandala',soul:'',cli:'codex',models:{codex:'model-fixture'},defaultEffort:null,maxParallel:3}}})).ok()).toBe(true);
+ await page.route('**/api/models?*',route=>new URL(route.request().url()).searchParams.get('cli')==='omp'?route.fulfill({json:[]}):route.continue());
+ await page.goto('/settings/mandala');
+ const effort=page.getByRole('combobox',{name:'默认思考强度',exact:true});
+ await chooseOption(page,effort,'high');
+ await expect(page.locator('.mandala-settings-page .settings-autosave')).toHaveText('已保存');
+ await page.reload();await expect(effort).toHaveAttribute('data-value','high');
+ await chooseOption(page,'执行端','omp');
+ await expect(effort).toHaveAttribute('data-value','');
+ await expect(page.getByText('当前模型的原档位不受支持或无法确认，执行时跟随执行端默认。',{exact:true})).toBeVisible();
+ await expect(page.locator('.mandala-settings-page .settings-autosave')).toHaveText('已保存');
+ const saved=await(await request.get('/api/mandala')).json();
+ expect(saved.config.agents.find((item:{id:string})=>item.id===first.config.mandala.agentId).defaultEffort).toBeUndefined();
+ await chooseOption(page,'执行端','codex');
+ await expect(page.locator('.mandala-settings-page .settings-autosave')).toHaveText('已保存');
+});
 
 test('managed models persist per runtime and status follows idle configuration versus active execution', async ({ page, request },testInfo) => {
   const initial=await(await request.get('/api/mandala')).json();

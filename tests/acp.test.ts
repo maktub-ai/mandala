@@ -102,6 +102,17 @@ it('uses DSH model-specific native reasoning controls before sending',async()=>{
   expect(sessions.slice(-2)).toMatchObject([{configId:'model',value:r1},{configId:'reasoning_effort',value:'max'}]);
  }finally{await client.close();}
 });
+it('probes DSH effort choices for a requested model without prompting',async()=>{
+ const {client,sessions,prompts}=await fixture(false,false,undefined,undefined,true,false,false,'dsh',false,true);
+ const r1='["custom","deepseek-r1"]';
+ try{
+  const models=await client.listModels(r1);
+  expect(models.find(model=>model.id===r1)).toMatchObject({supportedReasoningEfforts:['high','max']});
+  expect(models.find(model=>model.id!==r1)?.supportedReasoningEfforts).toBeUndefined();
+  expect(sessions.at(-1)).toMatchObject({configId:'model',value:r1});
+  expect(prompts).toEqual([]);
+ }finally{await client.close();}
+});
 it('uses session/resume for agents such as DSH without the legacy loadSession capability',async()=>{
  const {client,sessions}=await fixture(false,false,undefined,undefined,true,false,false,'dsh');
  try{

@@ -215,7 +215,8 @@ export async function startPi(options: RuntimeOptions): Promise<ExecutionClient>
   return {
     async getStatus(){const state=await request('get_state');return {status:state.model?'ready':'login-required',version:null};},
     getContextWindow: model => rpcModelContextWindow(request,model),
-    async listModels(){
+    async listModels(modelHint){
+      await selectModel(modelHint);
       const [catalog,state,thinking]=await Promise.all([request('get_available_models'),request('get_state'),request('get_available_thinking_levels')]);
       return (catalog.models??[]).map((value:any)=>{
         const selected=state.model?.provider===value.provider&&state.model?.id===value.id;

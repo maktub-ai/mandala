@@ -28,13 +28,16 @@ const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
 fs.writeFileSync(${JSON.stringify(launch)}, JSON.stringify({args:process.argv.slice(2),home:process.env.HOME}));
 let path = ${JSON.stringify(join(dir, 'native.jsonl'))};
 const model = {provider:'test',id:'model',contextWindow:24576,name:'Test model',reasoning:true,input:['text','image']};
+const second = {...model,id:'second',name:'Second model'};
+let selected = model;
 require('node:readline').createInterface({input:process.stdin}).on('line', line => {
  fs.appendFileSync(${JSON.stringify(capture)}, line+'\\n');
  const r = JSON.parse(line);
  if(r.type==='extension_ui_response') { send({type:'agent_end',messages:[]}); return; }
  if(r.type==='switch_session' && ${JSON.stringify(mode)}!=='wrong-resume') path=r.sessionPath;
  if(r.type==='prompt' && ${JSON.stringify(mode)}==='reject') {send({type:'response',id:r.id,success:false,error:'prompt rejected'});return;}
- let data = r.type==='get_state'?{sessionFile:path,sessionId:'native-id',model,thinkingLevel:'medium',isStreaming:false,isCompacting:false,pendingMessageCount:0}:r.type==='get_commands'?{commands:[{name:'mandala-permission-gate',source:'extension',sourceInfo:{path:process.argv[process.argv.indexOf('-e')+1]}}]}:r.type==='get_available_models'?{models:[model]}:r.type==='get_available_thinking_levels'?{levels:['off','low','high']}:{cancelled:false};
+ if(r.type==='set_model')selected=r.modelId==='second'?second:model;
+ let data = r.type==='get_state'?{sessionFile:path,sessionId:'native-id',model:selected,thinkingLevel:'medium',isStreaming:false,isCompacting:false,pendingMessageCount:0}:r.type==='get_commands'?{commands:[{name:'mandala-permission-gate',source:'extension',sourceInfo:{path:process.argv[process.argv.indexOf('-e')+1]}}]}:r.type==='get_available_models'?{models:[model,second]}:r.type==='get_available_thinking_levels'?{levels:selected===model?['off','low','high']:['high','max']}:{cancelled:false};
  send({type:'response',id:r.id,success:true,data});
  if(r.type==='abort'){send({type:'agent_end',messages:[]});return;}
  if(r.type!=='prompt')return;
@@ -98,6 +101,14 @@ it('resumes the requested native file and replaces invocation context',async()=>
  expect(requests.find(r=>r.type==='set_model')).toMatchObject({provider:'test',modelId:'model'});
  expect(requests.find(r=>r.type==='prompt').message).toContain('Fresh invocation');
  expect((await f.launch()).args).not.toContain('--continue');
+});
+it('discovers only the requested Pi model’s supported effort options without sending a prompt',async()=>{
+ const f=await fixture();
+ const models=await f.client.listModels('test/second');
+ expect(models).toMatchObject([{id:'test/model',supportedReasoningEfforts:[]},{id:'test/second',supportedReasoningEfforts:['high','max']}]);
+ const requests=await f.requests();
+ expect(requests.find(r=>r.type==='set_model')).toMatchObject({provider:'test',modelId:'second'});
+ expect(requests.some(r=>r.type==='prompt')).toBe(false);
 });
 it('rejects a resume that silently selects a different native session',async()=>{
  const f=await fixture('wrong-resume');await expect(f.client.resumeThread(join(f.dir,'restored.jsonl'))).rejects.toThrow('session');

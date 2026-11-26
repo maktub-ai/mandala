@@ -50,7 +50,7 @@ import type { SystemGenerator } from "./system-tasks";
 import { createSkillService } from "./skill-service";
 import { findCommand } from "../cli/commands.mjs";
 import type { IncomingMessage } from "node:http";
-import { validateEffort, type NativeAttachment, type ReasoningEffort } from "../shared/chat-input";
+import { effortModel, matchingAgentEffort, supportedAgentEffort, validateEffort, type NativeAttachment, type ReasoningEffort } from "../shared/chat-input";
 import { createTaskResources, type DirectoryOwner } from './task-resources';
 import {createTaskRecovery, retainNativeOccupancy, canReleaseNativeOccupancy, hasUnprovenNativeOccupancy, type RecoveryReport} from './task-recovery';
 import type {AutomationRun} from '../shared/automations';
@@ -105,6 +105,11 @@ import { recallMemory } from "./knowledge";
 import { planMemoryRecall } from "./memory-retrieval-policy";
 import { buildMemoryContext, type MemoryChangeNotice } from "./memory-context";
 import { summarizeMemoryHit } from "./memory-presentation";
+function agentRunDefaults(agent: Config['agents'][number], cli = agent.defaultCli) {
+  const model = agent.models[cli] ?? null;
+  const agentEffort = matchingAgentEffort(agent.defaultEffort, cli, model);
+  return {cli, model, ...(agentEffort ? {agentEffort} : {})};
+}
 type ActiveInvocation = {
   invocationId: string; conversationId: string; nativeSessionId: string;
   nativeTurnId: string | null; generation: number;
@@ -129,7 +134,7 @@ export interface SessionManager {
   startDurableTask(taskId:string,expectedRevision:number,commandKey:string,conversationId?:string|null,coordination?:{continuation:Continuation;assertActive:()=>void;agentId?:string;projectId?:string|null;request?:string;criteria?:import('../shared/tasks').Criterion[]}):Promise<Run>;
   stopDurableTask(taskId:string,expectedRevision?:number,cancel?:boolean):Promise<{taskId:string;status:'stopped'|'cancelled'|'already_finished';runId:string|null}>;
   getCliStatus(projectId?: string, cli?: Cli, environment?: { workspaceId?: string | null; cwd?: string; agentId?: string }, scope?: "runtime" | "system", explain?:boolean): Promise<CliStatus>;
-  listModels(projectId?: string, cli?: Cli, environment?: { workspaceId?: string | null; cwd?: string; agentId?: string }, scope?: "runtime" | "system"): Promise<ModelChoice[]>;
+  listModels(projectId?: string, cli?: Cli, environment?: { workspaceId?: string | null; cwd?: string; agentId?: string }, scope?: "runtime" | "system", modelHint?: string): Promise<ModelChoice[]>;
   create(
     projectId: string,
     agentId: string,
@@ -860,7 +865,10 @@ export function createSessionManager(
       current.admitted=true;
       const primaryAgent = before.purpose === "mandala-main" && config.mandala?.agentId === before.agentId
         ? config.agents.find(a => a.id === before.agentId && a.systemRole === "mandala") : undefined;
-      if (primaryAgent && (before.cli !== primaryAgent.defaultCli || before.model !== (primaryAgent.models[primaryAgent.defaultCli] || null))) {
+      const primaryEffort = primaryAgent && matchingAgentEffort(primaryAgent.defaultEffort, primaryAgent.defaultCli, primaryAgent.models[primaryAgent.defaultCli]);
+      // Stateful adapters can retain an explicit effort in native history. When the
+      // managed setting is cleared, use the existing continuity handoff to start at native defaults.
+      if (primaryAgent && (before.cli !== primaryAgent.defaultCli || before.model !== (primaryAgent.models[primaryAgent.defaultCli] || null) || before.effort && !primaryEffort)) {
         if (!enabledRuntimes(config).includes(primaryAgent.defaultCli)) throw new Error("Runtime disabled");
         const previousClient = current.client;
         if(before.nativeId){
@@ -1106,7 +1114,7 @@ export function createSessionManager(
         let retiredAfterCompletion = false;
         const callbacks = {
           cwd: project.cwd,
-          model:before.model??config.chatDefaults?.[before.cli]?.model,
+          model:before.model??(primaryAgent ? undefined : config.chatDefaults?.[before.cli]?.model),
           ...runtimeConfig,
           signal: AbortSignal.any([lifetime.signal, current.controller.signal]),
           onEvent(event: RpcMessage) {
@@ -1339,6 +1347,17 @@ export function createSessionManager(
       }
       if (closed) throw new Error("service closed");
       if (!ownsPreparation()) return;
+      const agentEffort = primaryAgent ? primaryEffort : !before.effort ? before.agentEffort : undefined;
+      let turnEffort = primaryAgent ? undefined : before.effort ?? undefined;
+      if (agentEffort) {
+        const selection = matchingAgentEffort(agentEffort, before.cli, before.model);
+        if (selection) {
+          const models = await current.client.listModels().catch(() => []);
+          if (!ownsPreparation()) return;
+          turnEffort = supportedAgentEffort(selection, effortModel(models, before.model));
+        }
+        if (!turnEffort) appendEvent(id, 'metadata', { agentEffortFallback: true });
+      }
       current.loadedToolToken = current.toolToken;
       current.loadedInstructions = instructions;
       current.loadedMemoryCount = memory.entries.length;
@@ -1401,7 +1420,7 @@ export function createSessionManager(
       current.usage?.begin({executionId:invocation.invocationId,category:task?'task':'conversation',cli:before.cli,model:before.model,projectId:before.projectId||null,agentId:before.agentId||null,conversationId:id,...(task?{taskId:task.taskId,runId:task.id}:{})});
       submittedInvocation = invocation;
       if(queuedInputId) scheduler.bindInputInvocation(queuedInputId,invocation.invocationId,invocation.nativeSessionId,null);
-      const turnOptions = { model: before.model ?? undefined, effort: before.effort ?? undefined, images: executionAttachments.filter(item => item.mimeType.startsWith("image/")).map(({path,mimeType}) => ({path,mimeType})) };
+      const turnOptions = { model: before.model ?? undefined, effort: turnEffort, images: executionAttachments.filter(item => item.mimeType.startsWith("image/")).map(({path,mimeType}) => ({path,mimeType})) };
       // Capability/model/file checks must fail before native occupancy becomes durable.
       await current.client.prepareTurn?.(invocation.nativeSessionId, turnOptions);
       await validateHandoff();
@@ -1432,7 +1451,8 @@ export function createSessionManager(
           current.generation !== invocation.generation) return;
       appendEvent(id,'metadata',{skillVersions:loadedSkillVersions,actualUse:'provided',nativeVisibility:'partial',skillInventory:skills.map(skill=>({name:skill.name,description:skill.content?.match(/description:\s*(.*)/)?.[1]??''}))});
       if(before.completedAt)store.completeConversation(id,false);
-      store.appendEvent(id, "metadata", { approvalMode, model: before.model, effort: before.effort, status: "loaded", cli: before.cli });
+      if (primaryAgent) store.updateConversation(id, {effort:turnEffort ?? null});
+      store.appendEvent(id, "metadata", { approvalMode, model: before.model, effort: turnEffort ?? null, status: "loaded", cli: before.cli });
       if (invocation.nativeTurnId !== null && invocation.nativeTurnId !== turnId)
         throw new Error("Native turn identity does not match start response");
       if (before.continuityPending && !store.database.prepare(`SELECT 1 FROM events WHERE conversationId=? AND kind='metadata'
@@ -1756,7 +1776,7 @@ export function createSessionManager(
       const branch = store.transaction(() => {
         authorizeConversationRead(id,true);
         const branch = store.createConversation({ projectId: source.projectId, attributedProjectId:source.attributedProjectId || source.projectId || undefined, agentId: source.agentId,
-          ...(source.purpose ? {purpose:"mandala-background" as const} : {}), cli: source.cli, model: source.model, effort: source.effort, approvalMode: source.approvalMode, workspaceId: source.workspaceId, cwd: source.cwd, workspaceName: source.workspaceName, executionLocation:source.executionLocation, branchedFrom: { conversationId: id, eventId } });
+          ...(source.purpose ? {purpose:"mandala-background" as const} : {}), cli: source.cli, model: source.model, effort: source.effort, agentEffort: source.agentEffort, approvalMode: source.approvalMode, workspaceId: source.workspaceId, cwd: source.cwd, workspaceName: source.workspaceName, executionLocation:source.executionLocation, branchedFrom: { conversationId: id, eventId } });
         store.updateConversation(branch.id, { nativeId });
         store.inheritConversationTaskRuns(branch.id,protectedRuns);
         if(inheritedMemory.length)store.appendEvent(branch.id,"metadata",{memoryHistory:"inherited",items:inheritedMemory,causality:"not_established"});
@@ -1930,7 +1950,7 @@ export function createSessionManager(
     const memory=await recallMemory(home,{projectId:project.id,agentId:agent.id,query:input.instructions,documentIds:[...(project.knowledgeIds??[]),...(agent.knowledgeIds??[])]},store);
     prepared.set(taskId,{...(continuation?{continuation}:{}),agentId:agent.id,projectId:project.id||null,hostId:'local',input:[input.instructions,memory.instructions].filter(Boolean).join('\n\n'),sourceVersions:[...boundFileVersions(project.id,agent.id),...memory.entries.flatMap(e=>e.assetId&&e.versionId?[{assetId:e.assetId,versionId:e.versionId}]:[])],requiredOutputAssetIds:[],effectiveCapabilities:[],nativeVisibility:'partial'});
     routes.set(taskId,()=>{
-      const conversationId=store.createConversation({...(agent.systemRole==='mandala'?{purpose:'mandala-background' as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,cli:input.cli,model:agent.models[input.cli]??null,executionLocation:workspaceExecutionLocation(executionConfig,workspace),workspaceId:workspace?.id??null,...(workspace?{cwd:workspace.cwd,workspaceName:workspace.name}:{})}).id;
+      const conversationId=store.createConversation({...(agent.systemRole==='mandala'?{purpose:'mandala-background' as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,...agentRunDefaults(agent,input.cli),executionLocation:workspaceExecutionLocation(executionConfig,workspace),workspaceId:workspace?.id??null,...(workspace?{cwd:workspace.cwd,workspaceName:workspace.name}:{})}).id;
       const occurrence=store.database.prepare('SELECT data FROM automation_occurrences WHERE id=?').get(input.id)!;
       store.database.prepare('UPDATE automation_occurrences SET data=? WHERE id=?').run(JSON.stringify({...JSON.parse(occurrence.data as string),conversationId}),input.id);
       return {executionConversationId:conversationId,mode:'dedicated' as const,destinationConversationId:continuation?.conversationId??task.originConversationId??input.reportConversationId??null};
@@ -2021,7 +2041,7 @@ export function createSessionManager(
       const memory=await recallMemory(home,{projectId:project.id,agentId:agent.id,query:request,documentIds:[...(project.knowledgeIds??[]),...(agent.knowledgeIds??[])]},store);
       prepared.set(taskId,{agentId:agent.id,projectId:executionProject,hostId:'local',input:[request,memory.instructions].filter(Boolean).join('\n\n'),sourceVersions:[...new Map([...(previousContext?.sourceVersions??[]),...boundFileVersions(project.id,agent.id),...memory.entries.flatMap(e=>e.assetId&&e.versionId?[{assetId:e.assetId,versionId:e.versionId}]:[])].map(ref=>[ref.versionId,ref])).values()],requiredOutputAssetIds:previousContext?.requiredOutputAssetIds??[],effectiveCapabilities:[],nativeVisibility:'partial',...(coordinationRun?{continuation:coordinationRun.continuation}:{})});
       coordinationRun?.assertActive();
-      routes.set(taskId,()=>conversationId?({executionConversationId:conversationId,mode:'existing',destinationConversationId:task.originConversationId??conversationId}):({executionConversationId:store.createConversation({...(agent.systemRole==="mandala"?{purpose:"mandala-background" as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,cli:agent.defaultCli,model:agent.models[agent.defaultCli]??null,executionLocation:workspaceExecutionLocation(config,workspace),workspaceId:workspace?.id??null,...(workspace?{cwd:workspace.cwd,workspaceName:workspace.name}:{})}).id,mode:'dedicated',destinationConversationId:coordinationRun?.continuation.conversationId??(sameScope?old?.routing?.destinationConversationId??null:null)}));
+      routes.set(taskId,()=>conversationId?({executionConversationId:conversationId,mode:'existing',destinationConversationId:task.originConversationId??conversationId}):({executionConversationId:store.createConversation({...(agent.systemRole==="mandala"?{purpose:"mandala-background" as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,...agentRunDefaults(agent),executionLocation:workspaceExecutionLocation(config,workspace),workspaceId:workspace?.id??null,...(workspace?{cwd:workspace.cwd,workspaceName:workspace.name}:{})}).id,mode:'dedicated',destinationConversationId:coordinationRun?.continuation.conversationId??(sameScope?old?.routing?.destinationConversationId??null:null)}));
       const current=tasks.getTask(root,taskId);
       if(coordinationRun&&(current.continuationEpoch!==task.continuationEpoch||current.originConversationId!==task.originConversationId||current.goal!==task.goal||current.acceptance!==task.acceptance||current.projectId!==task.projectId||JSON.stringify(current.criteria)!==JSON.stringify(task.criteria)||['completed','cancelled'].includes(current.state)))throw new DomainError('revision_conflict',409,'revision_conflict');
       const run=await scheduler.dispatchTask(taskId,commandKey,coordinationRun?current.revision:expectedRevision,{selection:prepared.get(taskId),agentId:agent.id,projectId:executionProject,request,criteria:coordinationRun?.criteria??task.criteria,createdByAgentId:coordinationRun?chat(coordinationRun.continuation.conversationId).agentId:null});setImmediate(()=>{if(!closed)void pump(run.routing!.executionConversationId);});return run;
@@ -2081,12 +2101,12 @@ export function createSessionManager(
         checkContinuation();
         if(!sameScope){
           const {project,agent,workspace}=context;
-          return {executionConversationId:store.createConversation({...(agent.systemRole==="mandala"?{purpose:"mandala-background" as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,cli:agent.defaultCli,model:agent.models[agent.defaultCli]??null,executionLocation:context.executionLocation,workspaceId:workspace?.id??null,...(workspace?{cwd:workspace.cwd,workspaceName:workspace.name}:{})}).id,mode:'dedicated',destinationConversationId:null};
+          return {executionConversationId:store.createConversation({...(agent.systemRole==="mandala"?{purpose:"mandala-background" as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,...agentRunDefaults(agent),executionLocation:context.executionLocation,workspaceId:workspace?.id??null,...(workspace?{cwd:workspace.cwd,workspaceName:workspace.name}:{})}).id,mode:'dedicated',destinationConversationId:null};
         }
         if(old.state==='unknown'||hasUnprovenNativeOccupancy(store,c.id)||chat(c.id).status==='error'||chat(c.id).status==='interrupted'&&!canReleaseNativeOccupancy(store,c.id)){
           // Explicit retry gets a fresh native session; never inherit uncertain history/turn.
           if(!canReleaseNativeOccupancy(store,c.id)&&chat(c.id).status==='idle')store.updateConversation(c.id,{status:'interrupted'});
-          const execution=store.createConversation({...(context.agent.systemRole==="mandala"?{purpose:"mandala-background" as const}:{}),projectId:c.projectId,agentId:c.agentId,cli:c.cli,model:c.model,approvalMode:c.approvalMode,workspaceId:c.workspaceId,cwd:c.cwd,workspaceName:c.workspaceName,executionLocation:c.executionLocation});
+          const execution=store.createConversation({...(context.agent.systemRole==="mandala"?{purpose:"mandala-background" as const}:{}),projectId:c.projectId,agentId:c.agentId,cli:c.cli,model:c.model,effort:c.effort,agentEffort:c.agentEffort,approvalMode:c.approvalMode,workspaceId:c.workspaceId,cwd:c.cwd,workspaceName:c.workspaceName,executionLocation:c.executionLocation});
           return {...old.routing!,executionConversationId:execution.id,mode:'dedicated'};
         }
         return old.routing!;
@@ -2146,8 +2166,9 @@ export function createSessionManager(
         if (!project?.cwd) await rm(cwd, { recursive: true, force: true });
       }
     },
-    async listModels(projectId, cli = "codex", environment, scope = "runtime") {
+    async listModels(projectId, cli = "codex", environment, scope = "runtime", modelHint) {
       if (closed) throw new Error("service closed");
+      if (modelHint && (!modelHint.trim() || modelHint.length > 200)) throw new Error('invalid model');
       // Discovery needs runtime routing, not executable Skill bodies or their history.
       const config = await loadConfig({hydrateSkills:false});
       const context = projectId || environment ? conversationContext(config, { projectId: projectId ?? "", ...environment }, "") : undefined;
@@ -2157,12 +2178,12 @@ export function createSessionManager(
       let client: ExecutionClient | undefined;
       try {
         client = await startClient(cli,{
-          cwd, model:config.chatDefaults?.[cli]?.model, ...runtimeOptions(cli,context,config,scope), signal: lifetime.signal,
+          cwd, model:context?.agent.systemRole === 'mandala' ? undefined : config.chatDefaults?.[cli]?.model, ...runtimeOptions(cli,context,config,scope), signal: lifetime.signal,
           onEvent() {}, onApproval() {}, onExit() {},
           ...(cli === "omp" ? { ephemeral: true } : {}),
         },context,catalogId,config);
         if (closed) throw new Error("service closed");
-        return await client.listModels();
+        return await client.listModels(cli === 'pi' || cli === 'dsh' ? modelHint : undefined);
       } finally {
         await client?.close();
         if (!project?.cwd) await rm(cwd, { recursive: true, force: true });
@@ -2182,6 +2203,7 @@ export function createSessionManager(
       if (environment.effort !== undefined) validateEffort(environment.effort);
       const defaults = config.chatDefaults?.[selectedCli];
       const chosenModel = model || agent.models[selectedCli] || (isSystemAgent(config,agent.id) ? null : defaults?.model) || null;
+      const agentEffort = environment.effort === undefined ? matchingAgentEffort(agent.defaultEffort, selectedCli, chosenModel) : undefined;
       const attributedProjectId=await conversationProjectResolver(config)({projectId,cwd:workspace?.cwd ?? environment.cwd,executionLocation});
       return store.createConversation({
         projectId, attributedProjectId,
@@ -2189,7 +2211,8 @@ export function createSessionManager(
         ...(isSystemAgent(config,agent.id) ? {purpose:"mandala-background" as const,...(!projectId?{cwd:agent.managedWorkspace}:{})} : {}),
         cli: selectedCli,
         model: chosenModel,
-        effort: environment.effort ?? (!chosenModel || chosenModel === defaults?.model ? defaults?.effort : undefined) ?? null,
+        effort: environment.effort ?? (!agentEffort && (!chosenModel || chosenModel === defaults?.model) ? defaults?.effort : undefined) ?? null,
+        ...(agentEffort ? {agentEffort} : {}),
         ...(environment.approvalMode ? { approvalMode: environment.approvalMode } : {}),
         workspaceId: workspace?.id ?? null,
         executionLocation,
@@ -2246,7 +2269,7 @@ export function createSessionManager(
       if (!target && !enabledRuntimes(routeConfig).includes(agent.defaultCli)) throw new Error("Runtime disabled");
       routes.set(task.id,() => {
         // Create the dedicated transcript in the same transaction as queued Run acceptance.
-        const execution = target ?? store.createConversation({...(agent.systemRole==="mandala"?{purpose:"mandala-background" as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,cli:agent.defaultCli,model:agent.models[agent.defaultCli] ?? null,executionLocation:source.executionLocation,workspaceId:workspace?.id ?? null,...(source.cwd ? {cwd:source.cwd,workspaceName:source.workspaceName} : workspace ? {cwd:workspace.cwd,workspaceName:workspace.name} : {})});
+        const execution = target ?? store.createConversation({...(agent.systemRole==="mandala"?{purpose:"mandala-background" as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,...agentRunDefaults(agent),executionLocation:source.executionLocation,workspaceId:workspace?.id ?? null,...(source.cwd ? {cwd:source.cwd,workspaceName:source.workspaceName} : workspace ? {cwd:workspace.cwd,workspaceName:workspace.name} : {})});
         return {executionConversationId:execution.id,mode:targetId ? "existing" : "dedicated",destinationConversationId:sourceId};
       });
       if (continuation) continuation.epoch = tasks.getTask(root, continuation.taskId).continuationEpoch;
@@ -2313,7 +2336,7 @@ export function createSessionManager(
           const existing=messages.reusePrimaryInquiry(sourceId,origin,input,key);
           if(existing)return {message:existing,acceptedNew:false};
         }
-        target??=store.createConversation({...(agent.systemRole==="mandala"?{purpose:"mandala-background" as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,cli:agent.defaultCli,model:agent.models[agent.defaultCli]??null,...location});
+        target??=store.createConversation({...(agent.systemRole==="mandala"?{purpose:"mandala-background" as const,...(!project.id?{cwd:agent.managedWorkspace}:{})}:{}),projectId:project.id,agentId:agent.id,...agentRunDefaults(agent),...location});
         const accepted=messages.create(sourceId,target.id,input,origin,key);
         if(input.targetConversationId&&messages.isDedicated(target.id))markConversationProgress(store,target.id,false);
         return {message:accepted,acceptedNew:true};
@@ -2994,7 +3017,7 @@ export function createSessionManager(
       authorizeConversationRead(id,true);
       const c = chat(id);
       if (branching.has(id) || live.get(id)?.preparing || ["running", "approval"].includes(c.status)) throw new Error("conversation busy");
-      store.updateConversation(id, { model, effort: effort ?? null });
+      store.updateConversation(id, { model, effort: effort ?? null, agentEffort: null });
       store.appendEvent(id, "metadata", { model, effort: effort ?? null, status: "saved" });
     },
     async setApprovalMode(id, mode) {

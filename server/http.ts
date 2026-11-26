@@ -609,7 +609,7 @@ export function createHttpServer({
         const probeScope = scope === "system" ? "system" : "runtime";
         const projectId = scope === "project" ? url.searchParams.get("projectId") || undefined : undefined;
         return json(res, 200, path === "/api/cli/status" ? await manager.getCliStatus(projectId, cli, probeEnvironment, probeScope, url.searchParams.get("explain")==="1") :
-          await manager.listModels(projectId, cli, probeEnvironment, probeScope));
+          await manager.listModels(projectId, cli, probeEnvironment, probeScope, url.searchParams.get('model') || undefined));
       }
       if(path==='/api/conversation-progress'&&method==='GET'){
         for(const key of url.searchParams.keys())if(key!=='windowMinutes'||url.searchParams.getAll(key).length!==1)throw new DomainError('invalid_query',422,'Invalid progress query');

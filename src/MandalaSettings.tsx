@@ -11,10 +11,12 @@ import RuntimeIcon from './ui/RuntimeIcon';
 import Icon from './ui/Icon';
 import { SettingsGroup, SettingRow, SettingSwitch } from './ui/SettingsLayout';
 import ModelCatalogPicker, { type ModelCatalog } from './ModelCatalogPicker';
+import AgentEffortPicker,{rebindAgentEffort,useAgentEffortCatalog} from './AgentEffortPicker';
+import {effortModel,type AgentEffort} from '../shared/chat-input';
 import { useLanguage } from './i18n';
 import './mandala.css';
 
-type Values = { name: string; soul: string; cli: Cli | ''; models: Config['agents'][number]['models']; showExecutionDetails: boolean; maxParallel: string };
+type Values = { name: string; soul: string; cli: Cli | ''; models: Config['agents'][number]['models']; defaultEffort?: AgentEffort; showExecutionDetails: boolean; maxParallel: string };
 const sameValues = (a?: Values, b?: Values) => JSON.stringify(a) === JSON.stringify(b);
 
 /** Settings page for the system Agent. Changes save on their own; text saves after a short pause. */
@@ -24,12 +26,13 @@ export default function MandalaSettings({ onSaved }: { onSaved: (config: Config,
   const [values, setValues] = useState<Values>(), [saved, setSaved] = useState<Values>();
   const [catalog, setCatalog] = useState<ModelCatalog>({ choices: [], loading: true, error: '' });
   const [catalogRefresh, refreshCatalog] = useState(0);
+  const [effortReverted,setEffortReverted]=useState(false);
   const [error, setError] = useState(''), [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const revision = useRef(''), inFlight = useRef(false), onSavedRef = useRef(onSaved);
   onSavedRef.current = onSaved;
   const read = (result: { config: Config; revision: string }): Values => {
     const agent = result.config.agents.find(a => a.id === result.config.mandala?.agentId)!;
-    return { name: agent.name, soul: result.config.mandala!.soul, cli: agent.defaultCli, models: agent.models, showExecutionDetails: result.config.mandala?.showExecutionDetails === true, maxParallel: String(result.config.mandala!.maxParallel) };
+    return { name: agent.name, soul: result.config.mandala!.soul, cli: agent.defaultCli, models: agent.models, defaultEffort:agent.defaultEffort, showExecutionDetails: result.config.mandala?.showExecutionDetails === true, maxParallel: String(result.config.mandala!.maxParallel) };
   };
   const load = () => {
     setError(''); setSaveState('idle');
@@ -37,6 +40,7 @@ export default function MandalaSettings({ onSaved }: { onSaved: (config: Config,
   };
   useEffect(load, []);
   const cli = values?.cli ?? '';
+  const effortCatalog=useAgentEffortCatalog(cli,loaded?.config.mandala?.agentId??'',cli&&values?values.models[cli]??'':'',catalog);
   useEffect(() => {
     if (!loaded || !cli) return;
     let active = true;
@@ -51,7 +55,7 @@ export default function MandalaSettings({ onSaved }: { onSaved: (config: Config,
     if (inFlight.current) return;
     inFlight.current = true; setSaveState('saving'); setError('');
     try {
-      const result = await api<{ config: Config; revision: string }>('/mandala', 'PUT', { revision: revision.current, settings: { name: next.name.trim(), soul: next.soul, cli: next.cli, models: next.models, showExecutionDetails: next.showExecutionDetails, maxParallel: Number(next.maxParallel) } });
+      const result = await api<{ config: Config; revision: string }>('/mandala', 'PUT', { revision: revision.current, settings: { name: next.name.trim(), soul: next.soul, cli: next.cli, models: next.models, defaultEffort:next.defaultEffort??null, showExecutionDetails: next.showExecutionDetails, maxParallel: Number(next.maxParallel) } });
       revision.current = result.revision; setSaved(next); setSaveState('saved'); onSavedRef.current(result.config, result.revision);
     } catch (reason) { setError((reason as Error).message); setSaveState('error'); }
     finally { inFlight.current = false; }
@@ -81,11 +85,19 @@ export default function MandalaSettings({ onSaved }: { onSaved: (config: Config,
     </SettingsGroup>
     <SettingsGroup title={say('运行', 'Running')} scope={say('从下一轮对话生效', 'Applies from the next turn')} description={say('正在执行的工作保持当前设置。', 'Work already running keeps its current settings.')}>
       <SettingRow label={say('执行端', 'CLI')}>
-        <Select ariaLabel={say('执行端', 'CLI')} searchable={false} value={values.cli} onChange={value => patch({ cli: value as Cli })} options={enabledRuntimes(loaded.config).map(value => ({ value, label: runtimeLabel(value), icon: <RuntimeIcon cli={value} /> }))} />
+        <Select ariaLabel={say('执行端', 'CLI')} searchable={false} value={values.cli} onChange={value=>{if(value===cli)return;setCatalog({choices:[],loading:true,error:''});setEffortReverted(!!values.defaultEffort);patch({cli:value as Cli,defaultEffort:undefined});}} options={enabledRuntimes(loaded.config).map(value => ({ value, label: runtimeLabel(value), icon: <RuntimeIcon cli={value} /> }))} />
       </SettingRow>
       <SettingRow label={say('模型', 'Model')}>
         <ModelCatalogPicker ariaLabel={say('模型', 'Model')} catalog={catalog} value={values.cli ? values.models[values.cli] ?? '' : ''} disabled={!values.cli}
-          onChange={value => patch({ models: { ...values.models, [values.cli]: value } })} onRefresh={() => refreshCatalog(value => value + 1)} />
+          onChange={value=>{
+            if(!cli||value===(values.models[cli]??''))return;
+            const target=effortModel(catalog.choices,value);
+            const defaultEffort=rebindAgentEffort(values.defaultEffort,cli,target?.id===effortCatalog.model?.id?effortCatalog.model:target);
+            setEffortReverted(!!values.defaultEffort&&!defaultEffort);patch({models:{...values.models,[cli]:value},defaultEffort});
+          }} onRefresh={() => refreshCatalog(value => value + 1)} />
+      </SettingRow>
+      <SettingRow label={say('默认思考强度','Default reasoning effort')}>
+        <AgentEffortPicker cli={cli} model={effortCatalog.model} value={values.defaultEffort} pending={effortCatalog.pending} reverted={effortReverted} onChange={defaultEffort=>{setEffortReverted(false);patch({defaultEffort});}}/>
       </SettingRow>
       <SettingRow label={say('后台总并行上限', 'Background concurrency limit')} htmlFor="mandala-parallel" hint={say('主对话不占用后台名额。降低上限不会打断正在执行的工作。', 'The main chat does not use a background slot. Lowering the limit never interrupts running work.')}>
         <Input id="mandala-parallel" className="setting-row-field" type="number" min={1} step={1} required value={values.maxParallel} onChange={event => patch({ maxParallel: event.target.value }, true)} />

@@ -29,7 +29,7 @@ import type { ComposerReferenceItem } from '../shared/composer-references';
 import { conversationDragType } from '../shared/composer-references';
 import LoadingState from './ui/LoadingState';
 import Disclosure from './ui/Disclosure';
-import { modelOptions, effortOptions, effortLabels, efforts, type ReasoningEffort, type Attachment } from "../shared/chat-input";
+import { modelOptions, effortOptions, effortLabels, efforts, matchingAgentEffort, supportedAgentEffort, type ReasoningEffort, type Attachment } from "../shared/chat-input";
 import { type SubmissionRecovery } from "./chat-send";
 import ApprovalRequest from "./ApprovalRequest";
 import QueuedMessages from "./QueuedMessages";
@@ -955,15 +955,19 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   const inheritedModel = cli ? agent?.models[cli] || chatDefaults?.model : undefined;
   const effectiveModel = selected ? activeChat?.model ?? models.find(item => item.isDefault)?.id : model || inheritedModel || models.find(item => item.isDefault)?.id;
   const modelChoice = models.find(item => item.id === effectiveModel);
-  const currentEffort = selected ? activeChat?.effort ?? modelChoice?.defaultReasoningEffort ?? "" : effort || (effectiveModel === chatDefaults?.model ? chatDefaults?.effort : undefined) || modelChoice?.defaultReasoningEffort || "";
+  const inheritedAgentEffort = cli ? matchingAgentEffort(selected ? activeChat?.agentEffort??undefined : agent?.defaultEffort,cli,effectiveModel) : undefined;
+  const currentEffort = (selected ? activeChat?.effort : effort) || supportedAgentEffort(inheritedAgentEffort,modelChoice) ||
+    (!selected&&!inheritedAgentEffort&&effectiveModel===chatDefaults?.model ? chatDefaults?.effort : undefined) || modelChoice?.defaultReasoningEffort || "";
   const allowedEfforts = effortOptions(modelChoice);
   useEffect(() => {
     if (!cli || !configLoaded || !chatActive || settingsPath || mandalaMain || selected && chat?.id !== selected || !effectiveModel) return;
     devicePreferences.setItem("mana-chat-preferences", JSON.stringify({ projectId, agentId, cli,
-      model: selected ? effectiveModel : model, effort: selected ? currentEffort : effort,...(onboardingDismissed?{onboardingCompleted:true}:{}) }));
+      model: selected ? effectiveModel : model, effort: selected ? activeChat?.agentEffort ? "" : currentEffort : effort,...(onboardingDismissed?{onboardingCompleted:true}:{}) }));
   }, [configLoaded, chatActive, settingsPath, mandalaMain, selected, chat, projectId, agentId, cli, effectiveModel, currentEffort, model, effort,onboardingDismissed]);
   const pickModel = async (value: string, nextEffort?: ReasoningEffort) => {
-    if (!selected) { setModel(value); setEffort(nextEffort ?? models.find(item => item.id === value)?.defaultReasoningEffort ?? ""); return; }
+    if (!selected) {
+      setModel(value); setEffort(nextEffort ?? (cli && matchingAgentEffort(agent?.defaultEffort,cli,value) ? "" : models.find(item => item.id === value)?.defaultReasoningEffort ?? "")); return;
+    }
     const id = selected;
     setModeSaving(true);
     try {
@@ -1071,7 +1075,10 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
         if (navigationVersion.current !== view) return;
         const creationModel = effectiveModel || creationModels.find(item => item.isDefault)?.id;
         const creationChoice = creationModels.find(item => item.id === creationModel);
-        const creationEffort = currentEffort || creationChoice?.defaultReasoningEffort;
+        const creationDefault = cli ? matchingAgentEffort(agent?.defaultEffort,cli,creationModel) : undefined;
+        // Submit only an explicit override if Agent settings apply. The server
+        // checks the bound default on the actual execution host, not this catalog.
+        const creationEffort = effort || (!creationDefault ? currentEffort || creationChoice?.defaultReasoningEffort : undefined);
         const c = await api<Conversation>("/conversations", "POST", {
           projectId,
           agentId,
@@ -1088,7 +1095,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
         setChats((list) => [c, ...list]);
         draftConversation = id;
       }
-      if (selected && !mandalaMain && !busy && !chat?.model && effectiveModel) {
+      if (selected && !mandalaMain && !busy && !chat?.model && !activeChat?.agentEffort && effectiveModel) {
         await api(`/conversations/${id}/model`, "POST", { model: effectiveModel,
           ...(currentEffort && allowedEfforts.includes(currentEffort) ? { effort: currentEffort } : {}) });
       }
@@ -1335,7 +1342,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
     setPending(false);
     const keepChoices = !conversation && nextProject === (activeChat?.projectId ?? projectId) && nextAgent === (activeChat?.agentId ?? agentId);
     setModel(keepChoices ? effectiveModel ?? "" : "");
-    setEffort(keepChoices ? currentEffort as ReasoningEffort | "" : "");
+    setEffort(keepChoices ? activeChat?.agentEffort ? "" : currentEffort : "");
     if (keepChoices && activeChat) setCli(activeChat.cli);
     if (!conversation && !keepChoices) {
       const nextDefault = config.agents.find(a => a.id === nextAgent)?.defaultCli;
@@ -1518,7 +1525,11 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   if (tasksOpen) pageQuery.delete('q');
   if (assetsOpen) { pageQuery.delete('tab'); pageQuery.delete('file'); pageQuery.delete('plan'); }
   // Selecting or creating a Project/Agent keeps the settings page and its unsaved creation form.
-  if (settingsPath) { pageQuery.delete('agent'); pageQuery.delete('project'); }
+  if (settingsPath) {
+    pageQuery.delete('agent'); pageQuery.delete('project');
+    // Agent tabs update history in place; do not remount the form on the next autosave.
+    if(settingsSection(settingsPath)==='agents')pageQuery.delete('tab');
+  }
   const withPalette = (content: React.ReactNode) => <TaskNotifications onOpen={openWorkspacePath}><ComposerDraftIdentity.Provider value={draftIdentity}><PageErrorBoundary key={marketOpen ? "/market" : location.pathname+'?'+pageQuery} onRecover={path=>{setNavigationLocked(false);if(path){history.pushState(null,'',path);dispatchEvent(new PopStateEvent('popstate'));}}}>{content}</PageErrorBoundary>{palette} {shortcutsOpen && <KeyboardShortcuts onClose={() => setShortcutsOpen(false)}/>}{taskDialog && !tasksOpen && <TaskDialog id={taskDialog} config={config} onNavigate={setTaskDialog} onClose={() => setTaskDialog(null)} onOpenPage={() => { const id = taskDialog; setTaskDialog(null); navigateAssetPage("/tasks/" + encodeURIComponent(id)); }}/>}</ComposerDraftIdentity.Provider></TaskNotifications>;
   const conversationLibrary = <fieldset className="library-loading-boundary" disabled={!configLoaded}><ConversationLibrary chats={chats.filter(c=>c.purpose!=="mandala-main")} projects={config.projects} agents={config.agents} selectedId={activeArea === "chat" ? selected : ""}
     projectId={projectId} search={search} onSearch={setSearch} onOpen={id => { if (!navigationLocked && (!settingsPath || closeSettings())) void openConversation(id, true); }} onArchive={(id, archived) => void archiveChat(id, archived)}
