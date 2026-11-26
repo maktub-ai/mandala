@@ -30,12 +30,14 @@ export default function ConversationContextPopover({conversationId,executionLoca
  const [place,setPlace]=useState<{id:string;value:Environment}|null>(null);
  const [summary,setSummary]=useState<{id:string;value:ConversationReferenceSummary}|null>(null);
  const [abilities,setAbilities]=useState<{key:string;value:Capabilities}|null>(null);
+ // The trigger shows the workspace's uncommitted diff, so the environment is read up front — when the chat
+ // opens, when a turn starts or ends, and again on open — instead of only after the first click.
+ // Reading it lazily made the trigger jump from a placeholder to the diff the moment it was clicked.
  useEffect(()=>{
-  if(!open)return;
   const controller=new AbortController();
   void requestJson<Environment>('/api/conversations/'+encodeURIComponent(conversationId)+'/environment',{signal:controller.signal}).then(value=>{if(!controller.signal.aborted)setPlace({id:conversationId,value});}).catch(()=>{});
   return()=>controller.abort();
- },[open,conversationId,activityVersion]);
+ },[conversationId,running,open&&activityVersion]);
  useEffect(()=>{
   if(!open)return;
   const controller=new AbortController();
@@ -69,9 +71,8 @@ export default function ConversationContextPopover({conversationId,executionLoca
  const locationLabel=executionLocation?text(`在 ${executionLocation.machineName}（${executionLocation.host}）上执行`,`runs on ${executionLocation.machineName} (${executionLocation.host})`):undefined;
  return <Popover open={open} onOpenChange={setOpen}>
   <PopoverTrigger asChild><button type="button" className="context-popover-trigger" aria-label={contextLabel} aria-description={runningLabel} title={[contextLabel,locationLabel,runningLabel].filter(Boolean).join(' · ')}>
-   {executionLocation?<><Icon name="server" size={16}/><span className="context-popover-machine">{executionLocation.machineName}</span></>:<Icon name={env?.git?'gitBranch':'layers'} size={16}/>}
-   {changes?<span className="context-popover-diff"><span className="change-add">+{changes.additions}</span> <span className="change-remove">−{changes.deletions}</span></span>:!executionLocation&&<span>{text('上下文','Context')}</span>}
-   {running&&<Icon name="activity" size={14} className="context-popover-running"/>}
+   {executionLocation?<><Icon name="server" size={16}/><span className="context-popover-machine">{executionLocation.machineName}</span></>:<Icon name="panel" size={16}/>}
+   {changes&&<span className="context-popover-diff"><span className="change-add">+{changes.additions}</span><span className="change-remove">−{changes.deletions}</span></span>}
   </button></PopoverTrigger>
   <PopoverContent className="context-popover" align="end" sideOffset={6} aria-label={text('对话上下文','Chat context')}>
    {(env||executionLocation)&&<section aria-label={text('工作区','Workspace')}><h3>{text('工作区','Workspace')}</h3>

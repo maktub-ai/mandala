@@ -52,6 +52,8 @@ test('the chat context keeps a single quiet icon while running', async ({ page, 
   const icons = context.locator('svg');
   await expect(runtime.locator('.status-dot.idle')).toBeVisible();
   await expect(icons).toHaveCount(1);
+  // The diff is read before the first click, so opening the popover never changes the trigger.
+  await expect(context).toHaveText('+577−406');
   const restingColor = await icons.first().evaluate(icon => getComputedStyle(icon).color);
 
   await page.getByRole('textbox', { name: '消息', exact: true }).fill('hold');
@@ -59,9 +61,9 @@ test('the chat context keeps a single quiet icon while running', async ({ page, 
   await expect(page.getByRole('button', { name: '停止执行', exact: true })).toBeVisible();
   await expect(context).toHaveAccessibleDescription('执行中');
   await expect(icons).toHaveCount(1);
-  await expect(icons.first()).toHaveClass(/lucide-info/);
+  await expect(icons.first()).toHaveClass(/lucide-panel-right/);
   await expect(icons.first()).toHaveCSS('color', restingColor);
-  await expect(context).toHaveText('');
+  await expect(context).toHaveText('+577−406');
   await expect(context).toHaveAttribute('title', '对话上下文 · 执行中');
   await expect(runtime.locator('.status-dot.idle')).toBeVisible();
 
@@ -86,7 +88,7 @@ test('the chat context opens from an icon without a text label', async ({ page, 
   await page.goto('/?conversation=' + id);
   const context = page.getByRole('button', { name: '对话上下文', exact: true });
   await expect(context).toHaveText('');
-  await expect(context.locator('svg.lucide-info')).toBeVisible();
+  await expect(context.locator('svg.lucide-panel-right')).toBeVisible();
   await expect(context).toHaveAttribute('title', '对话上下文');
   await context.press('Enter');
   await expect(page.getByRole('dialog', { name: '对话上下文', exact: true })).toBeVisible();

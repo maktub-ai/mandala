@@ -3,7 +3,8 @@
 .context-popover-trigger:hover, .context-popover-trigger[aria-expanded=true] { background:var(--raised); color:var(--text); }
 .context-popover-trigger:focus-visible { outline:2px solid var(--focus); outline-offset:1px; }
 .context-popover-diff, .context-popover-aside { font-variant-numeric:tabular-nums; }
-.context-popover-running { flex:none; color:var(--status-running); }
+/* One quiet trigger: a single icon, plus the uncommitted diff when there is one. Run state lives in the runtime status, not here. */
+.context-popover-diff { display:inline-flex; gap:4px; font-family:var(--font-mono); }
 
 .context-popover[data-slot=popover-content] { width:320px; max-width:calc(100vw - 24px); max-height:min(560px, calc(100dvh - 80px)); overflow-y:auto; gap:0; padding:6px; border-radius:12px; background:var(--surface); color:var(--text); box-shadow:var(--overlay-shadow); font-size:var(--type-ui); }
 .context-popover section { padding:4px 0; }
