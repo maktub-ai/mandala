@@ -359,7 +359,7 @@ createInterface({ input: process.stdin }).on("line", line => {
     client = await startOmp({ cwd: dir, onEvent() {}, onApproval() {}, onExit() {} });
     expect(await client.getContextWindow!('sample/model')).toBe(24576);
     expect(await client.getContextWindow!('absent')).toBeUndefined();
-    expect(await client.listModels()).toEqual([{ id: "sample/model", label: "sample / Model", isDefault: true, defaultReasoningEffort: "low", supportedReasoningEfforts: ["none", "low", "high"] }]);
+    expect(await client.listModels()).toEqual([{ id: "sample/model", label: "sample / Model", provider: "sample", shortLabel: "Model", isDefault: true, defaultReasoningEffort: "low", supportedReasoningEfforts: ["none", "low", "high"] }]);
     await client.startTurn("sample-session", "inspect", undefined, undefined, { model: "sample/model", effort: "high", images: [{ path: imagePath, mimeType: "image/png" }] });
     const requests = (await readFile(capture, "utf8")).trim().split("\n").map(line => JSON.parse(line));
     expect(requests.slice(-3)).toMatchObject([

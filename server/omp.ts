@@ -321,7 +321,7 @@ export async function startOmp(options: OmpOptions): Promise<ExecutionClient> {
     async listModels() {
       const result = await request("get_available_models");
       const current = await request("get_state");
-      return (result.models ?? []).map((m: any) => ({ id: `${m.provider}/${m.id}`, label: `${m.provider} / ${m.name ?? m.id}`,
+      return (result.models ?? []).map((m: any) => ({ id: `${m.provider}/${m.id}`, label: `${m.provider} / ${m.name ?? m.id}`, provider: String(m.provider), shortLabel: String(m.name ?? m.id),
         isDefault: current.model?.provider === m.provider && current.model?.id === m.id,
         ...(m.thinking?.defaultLevel || current.thinkingLevel ? { defaultReasoningEffort: m.thinking?.defaultLevel ?? (current.thinkingLevel === "off" ? "none" : current.thinkingLevel) } : {}),
         supportedReasoningEfforts: m.thinking?.efforts ? ["none", ...m.thinking.efforts] : [],

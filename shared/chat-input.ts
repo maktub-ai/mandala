@@ -13,7 +13,17 @@ export function validateEffort(value: unknown): asserts value is ReasoningEffort
 export function modelOptions(models: ModelChoice[], inherited?: string) {
   const id = inherited || models.find(model => model.isDefault)?.id;
   return [{ value: "", label: models.find(model => model.id === id)?.label ?? id ?? "—" },
-    ...models.map(model => ({ value: model.id, label: model.label }))];
+    ...models.map(model => ({ value: model.id, label: model.label, ...(providerGroups(models) && model.provider ? { group: model.provider } : {}) }))];
+}
+/** Providers only matter when one runtime offers models from more than one of them. */
+export function providerGroups(models: ModelChoice[]) {
+  return new Set(models.map(model => model.provider).filter(Boolean)).size > 1;
+}
+/** The pill shows a short name; a runtime may prefix labels with its provider. */
+export function modelShortLabel(model: ModelChoice) {
+  if (model.shortLabel) return model.shortLabel;
+  const prefix = model.provider ? `${model.provider} / ` : "";
+  return prefix && model.label.startsWith(prefix) ? model.label.slice(prefix.length) : model.label;
 }
 export function effortOptions(model?: ModelChoice) {
   return [...new Set(model?.supportedReasoningEfforts?.filter(value => efforts.includes(value)))];

@@ -29,7 +29,7 @@ import type { ComposerReferenceItem } from '../shared/composer-references';
 import { conversationDragType } from '../shared/composer-references';
 import LoadingState from './ui/LoadingState';
 import Disclosure from './ui/Disclosure';
-import { modelOptions, effortOptions, effortLabels, efforts, matchingAgentEffort, supportedAgentEffort, type ReasoningEffort, type Attachment } from "../shared/chat-input";
+import { modelOptions, providerGroups, modelShortLabel, effortOptions, effortLabels, efforts, matchingAgentEffort, supportedAgentEffort, type ReasoningEffort, type Attachment } from "../shared/chat-input";
 import { type SubmissionRecovery } from "./chat-send";
 import ApprovalRequest from "./ApprovalRequest";
 import QueuedMessages from "./QueuedMessages";
@@ -111,6 +111,7 @@ import "./ui/design-system.css";
 import "./workspace.css";
 import "./chat-feedback.css";
 import "./chat-bubbles.css";
+import "./composer-redesign.css";
 import QuestionAnswers from "./QuestionAnswers";
 import { questionReplyPresenter } from "../shared/questions";
 const labels = {
@@ -1303,6 +1304,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
   for(const event of events){const message=(event.data as {agentMessage?:{id:string;autoResumeAllowed?:boolean;replyState?:string;direction?:string}}).agentMessage;if(event.kind==='metadata'&&message&&message.direction!=='request')messageStates.set(message.id,message);}
   const waitingForMessages=[...messageStates.values()].some(m=>m.autoResumeAllowed&&m.replyState!=='consumed'&&m.replyState!=='parked');
   const waitingForTasks=tasks.some(task=>task.sourceConversationId===selected&&task.autoResume===true&&['queued','running'].includes(task.status));
+  const waitingCount=[...messageStates.values()].filter(m=>m.autoResumeAllowed&&m.replyState!=='consumed'&&m.replyState!=='parked').length+tasks.filter(task=>task.sourceConversationId===selected&&task.autoResume===true&&['queued','running'].includes(task.status)).length;
 
   const navigate = (nextProject: string, conversation = "", nextAgent = "", showWorkbench = false, preserveLibrary = false) => {
     if(objectSaveGuard)return;
@@ -1904,6 +1906,12 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               if (type === quoteDragType) addQuote(dataTransfer.getData(type));
               else addConversationReference(dataTransfer.getData(type));
             }}>
+            {!busy&&(waitingForMessages||waitingForTasks)&&<div className="composer-wait-strip" role="status">
+              <span className="composer-wait-dot" aria-hidden="true" />
+              <span>{localize(`等待 ${waitingCount} 个协作回复`,`Waiting for ${waitingCount} collaboration ${waitingCount===1?'reply':'replies'}`)}</span>
+              <Button type="button" variant="ghost" className="cancel-wait-button" aria-label={t('取消等待协作')} title={t('取消等待协作')} disabled={!chat || stopping || pending}
+                onClick={() => void control('stop',{expectedExecutionId:executionId,continueQueued:false})}>{t('取消等待')}</Button>
+            </div>}
             <ComposerReferences selected={selectedReferences} items={visibleReferences} open={!!referenceQuery}
               conversationItems={referenceItems.filter(item=>item.kind==='chat')} onChangeConversation={changeConversationReference}
               loading={referencesLoading} error={referencesError} onRetry={() => setReferenceReload(value => value + 1)} activeIndex={referenceIndex} onChoose={chooseReference}
@@ -1920,7 +1928,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               aria-label={t("消息")} disabled={!mandalaMain && !composerDraft.loaded}
               placeholder={
                 mandalaMain ? localize(`给 ${mandalaAgent?.name ?? "Mandala"} 发消息…`,`Message ${mandalaAgent?.name ?? "Mandala"}…`) : agent
-                  ? t("给 {agent} 分派工作…", { agent: agent.name })
+                  ? t("给「{agent}」分派工作…", { agent: agent.name })
                   : t("描述你希望完成的任务…")
               }
               value={text}
@@ -1969,11 +1977,23 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
               {t(pending ? "启动中" : labels[chat?.status ?? "idle"])}
             </span>
             <div className="composer-toolbar">
-              <Button type="button" className="attachment-button" aria-label={t("上传附件")} title={t("上传附件")} disabled={pending || branchPending} onClick={() => fileInput.current?.click()}><Icon name="plus" size={18} /></Button>
-              {!mandalaMain&&<ComposerSettings summary={modelChoice?.label ?? t('模型')}>
+              <Button type="button" variant="ghost" className="attachment-button" aria-label={t("上传附件")} title={t("上传附件")} disabled={pending || branchPending} onClick={() => fileInput.current?.click()}><Icon name="plus" size={18} /></Button>
+              {mandalaMain&&<Button type="button" variant="ghost" className="composer-mention-button" aria-label={localize('指定智能体','Assign an agent')} title={localize('输入 @ 指定智能体或引用对话、任务','Type @ to assign an agent or reference a chat or task')} disabled={pending || branchPending || !composerDraft.loaded}
+                onClick={() => {
+                  const input = composerInput.current; if (!input) return;
+                  const start = input.selectionStart ?? text.length, end = input.selectionEnd ?? start;
+                  const insert = (start > 0 && !/\s/.test(text[start - 1]) ? ' ' : '') + '@';
+                  const next = text.slice(0, start) + insert + text.slice(end), caret = start + insert.length;
+                  setText(next); updateReferenceQuery(next, caret);
+                  requestAnimationFrame(() => { input.focus(); input.setSelectionRange(caret, caret); });
+                }}><span aria-hidden="true">@</span><span className="composer-mention-label">{localize('指定智能体','Assign')}</span></Button>}
+              {mandalaMain&&<span className="composer-route-hint" aria-hidden="true">{selectedReferences.some(item=>item.kind==='agent') ? localize(`交给 ${selectedReferences.filter(item=>item.kind==='agent').map(item=>item.name).join('、')}`,`To ${selectedReferences.filter(item=>item.kind==='agent').map(item=>item.name).join(', ')}`) : localize('Mandala 会决定交给谁','Mandala decides who takes it')}</span>}
+              {!mandalaMain&&<ComposerSettings summary={[modelChoice?.label ?? t('模型'), allowedEfforts.includes(currentEffort as ReasoningEffort) ? t(effortLabels[currentEffort as ReasoningEffort]) : ''].filter(Boolean).join(' · ')}
+                model={modelChoice ? modelShortLabel(modelChoice) : (selected ? effectiveModel : model) || t('模型')} provider={providerGroups(models) ? modelChoice?.provider : undefined}
+                effort={allowedEfforts.includes(currentEffort as ReasoningEffort) ? t(effortLabels[currentEffort as ReasoningEffort]) : undefined} disabled={busy || branchPending}>
               <Select className="composer-model" ariaLabel={t("模型")} disabled={busy || modeSaving || branchPending} value={selected ? effectiveModel ?? "" : model}
                 onChange={value => void pickModel(value || inheritedModel || models.find(item => item.isDefault)?.id || "")}
-                options={selected ? [...(chat?.model && !models.some(item => item.id === chat.model) ? [{ value: chat.model, label: chat.model }] : []), ...models.map(item => ({ value: item.id, label: item.label }))] : modelOptions(models, inheritedModel)} />
+                options={selected ? [...(chat?.model && !models.some(item => item.id === chat.model) ? [{ value: chat.model, label: chat.model }] : []), ...models.map(item => ({ value: item.id, label: item.label, ...(providerGroups(models) && item.provider ? { group: item.provider } : {}) }))] : modelOptions(models, inheritedModel)} />
               <Select className="composer-effort" icon="sparkles" ariaLabel={t("思考强度")} disabled={busy || modeSaving || branchPending || !allowedEfforts.length} searchable={false}
                 value={allowedEfforts.includes(currentEffort as ReasoningEffort) ? currentEffort : ""} placeholder={t("思考强度")}
                 onChange={value => selected ? void pickModel(effectiveModel!, value as ReasoningEffort) : setEffort(value as ReasoningEffort)}
@@ -1988,7 +2008,7 @@ export default function App({ account, userInitial, draftIdentity = "fixture" }:
                 ]} />
               </ComposerSettings>}
               <VoiceInput key={JSON.stringify([draftIdentity,selected,projectId,agentId])} disabled={!composerDraft.loaded||pending||stopping||branchPending||!!composerDraft.pending} onBusyChange={setVoiceBusy} onText={value=>{setText(current=>appendVoiceText(current,value));composerInput.current?.focus();}}/>
-              <ComposerActions mainChat={mandalaMain} recovering={!!composerDraft.pending} busy={busy} waiting={waitingForMessages||waitingForTasks} stopping={stopping} stopDisabled={!chat || stopping || pending}
+              <ComposerActions mainChat={mandalaMain} recovering={!!composerDraft.pending} busy={busy} waiting={false} stopping={stopping} stopDisabled={!chat || stopping || pending}
                 disabled={voiceBusy || writerRecoveryBusy || compactWorking || !composerDraft.loaded || !!(composerDraft.value.missingAttachments.length && !composerDraft.pending && !compactCommand) || !configLoaded || !!selected && (chat?.id !== selected || !historyReady) || (!text.trim() && !files.length && !selectedReferences.length && !composerDraft.pending) || pending || stopping || modeSaving || branchPending || approvalPreferenceLoading || approvalPreferenceError || (!selected && (!cli || !runtimes.includes(cli)))}
                 continuing={chat?.status === 'interrupted' || chat?.status === 'error'} onStop={() => void control('stop',{expectedExecutionId:executionId,continueQueued:busy && !mandalaMain})} onSend={() => void send()} onInterrupt={() => void send(true)} />
             </div>

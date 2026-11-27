@@ -834,7 +834,7 @@ export const english = {
   允许本次: "Allow once",
   回到最新消息: "Back to latest messages",
   消息: "Message",
-  "给 {agent} 分派工作…": "Give {agent} a task…",
+  "给「{agent}」分派工作…": "Give {agent} a task…",
   "先配置一个项目和 Agent": "Set up a project and agent first",
   原生默认模型: "Native default model",
   模型: "Model",

@@ -189,7 +189,7 @@ export type Approval = {
   method: string;
   params: unknown;
 };
-export type ModelChoice = { id: string; label: string; isDefault?: boolean; defaultReasoningEffort?: ReasoningEffort; supportedReasoningEfforts?: ReasoningEffort[] };
+export type ModelChoice = { id: string; label: string; provider?: string; shortLabel?: string; isDefault?: boolean; defaultReasoningEffort?: ReasoningEffort; supportedReasoningEfforts?: ReasoningEffort[] };
 export type CliStatus = {
   status: "ready" | "login-required" | "unavailable";
   version: string | null;

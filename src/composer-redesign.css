@@ -1,0 +1,50 @@
+/* Composer redesign (2026-11-27): one run-config pill for agent chats, @ assignment for the Mandala main chat. */
+
+/* Run-config pill: provider mark · model · effort, right-aligned beside voice and send. */
+.composer-settings, .composer-settings.is-compact { display: inline-flex; flex: 0 1 auto; min-width: 0; margin-left: auto; }
+.composer-settings ~ .composer-actions { margin-left: 0; }
+.product-frame .composer-settings-trigger { display: inline-flex; align-items: center; gap: 6px; width: auto; min-width: 0; max-width: 280px; min-height: 32px; padding: 4px 8px; border: 0; border-radius: var(--control-radius); background: transparent; color: var(--text); font-size: var(--type-meta); }
+.product-frame .composer-settings-trigger:hover:not(:disabled), .product-frame .composer-settings-trigger[data-open] { background: var(--raised); }
+.product-frame .composer-settings-trigger:disabled { color: var(--subtle); }
+.composer-settings-trigger span { flex: none; overflow: visible; }
+.composer-settings-trigger .composer-settings-model { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-settings-effort { color: var(--muted); }
+.composer-provider-mark { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 1px solid var(--border); border-radius: 4px; background: var(--raised); color: var(--muted); font-size: 10px; font-weight: var(--weight-medium); line-height: 1; }
+.composer-settings-chevron { flex: none; color: var(--muted); transform: rotate(180deg); transition: transform .12s ease; }
+.composer-settings-trigger[data-open] .composer-settings-chevron { transform: none; }
+.composer-settings-popup { left: auto; }
+
+/* Busy agent chat: queue-send and interrupt-and-send read as one split button. */
+.send-split { display: inline-flex; align-items: stretch; border-radius: var(--control-radius); overflow: hidden; background: var(--button); }
+.product-frame .send-split > .send-button { border-radius: 0; background: transparent; color: var(--button-text); }
+.product-frame .send-split .send-options { width: 22px; min-width: 22px; height: 30px; min-height: 30px; padding: 0; border: 0; border-left: 1px solid color-mix(in srgb, var(--button-text) 25%, transparent); border-radius: 0; background: transparent; color: var(--button-text); }
+.product-frame .send-split .send-options:hover:not(:disabled) { background: color-mix(in srgb, var(--button-text) 12%, transparent); }
+.send-split:has(.send-button:disabled) { opacity: .3; }
+.product-frame .send-split > .send-button:disabled { opacity: 1; }
+
+/* Mandala main chat: waiting for collaboration replies sits inside the composer, above the input. */
+.composer-wait-strip { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-soft); color: var(--muted); font-size: var(--type-meta); }
+.composer-wait-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--status-running); }
+.product-frame .composer-wait-strip .cancel-wait-button { margin-left: auto; min-height: 24px; padding: 2px 6px; border: 0; background: transparent; color: var(--muted); font-size: var(--type-meta); white-space: nowrap; }
+.product-frame .composer-wait-strip .cancel-wait-button:hover:not(:disabled) { background: var(--raised); color: var(--text); }
+
+/* Mandala main chat: @ assignment is the main control; Mandala decides when nothing is assigned. */
+.product-frame .composer-mention-button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 10px; border: 0; border-radius: var(--control-radius); background: transparent; color: var(--muted); font-size: var(--type-meta); white-space: nowrap; }
+.product-frame .composer-mention-button:hover:not(:disabled) { background: var(--raised); color: var(--text); }
+.composer-mention-button > span:first-child { font-size: 15px; line-height: 1; }
+.composer-route-hint { margin-left: auto; min-width: 0; overflow: hidden; padding: 0 6px; color: var(--subtle); font-size: var(--type-meta); text-overflow: ellipsis; white-space: nowrap; }
+.composer-route-hint ~ .composer-actions { margin-left: 0; }
+
+@container (max-width: 420px) {
+  .composer-route-hint, .composer-mention-label { display: none; }
+  .composer-route-hint ~ .composer-actions { margin-left: auto; }
+  .product-frame .composer-settings-trigger { max-width: 160px; }
+}
+@media (pointer: coarse) {
+  .product-frame .composer-settings-trigger, .product-frame .composer-mention-button { min-height: 44px; }
+  .product-frame .send-split .send-options { height: 44px; min-height: 44px; width: 32px; }
+}
+
+/* Toolbar icon buttons share one ghost style with the pill and @ button. */
+.product-frame .composer-toolbar .attachment-button { border: 0; background: transparent; color: var(--muted); }
+.product-frame .composer-toolbar .attachment-button:hover:not(:disabled) { background: var(--raised); color: var(--text); }
