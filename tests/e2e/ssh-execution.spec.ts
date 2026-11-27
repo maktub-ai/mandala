@@ -71,7 +71,7 @@ test('conversation location remains pinned after machine and workspace edits, in
  ({config,revision}=await(await request.get('/api/config')).json());config.executionMachines[0]={...machine,name:'新名称',host:'different-host'};config.projects.find((p:any)=>p.id===project.id).workspaces[0].cwd='/srv/changed';await request.put('/api/config',{data:{revision,config}});
  await page.route(`**/api/conversations/${chat.id}/environment`,route=>route.fulfill({status:503,json:{error:'Host unavailable'}}));
  await page.goto('/?conversation='+chat.id+'&project='+project.id);const row=page.getByRole('button',{name:'Pinned SSH UI',exact:true});await expect(row).toHaveAttribute('title',/构建服务器.*build-linux.*\/srv\/original/);
- await expect(page.getByRole('button',{name:'对话上下文',exact:true})).toContainText('构建服务器');await page.getByRole('button',{name:'对话上下文',exact:true}).click();const popover=page.getByRole('dialog',{name:'对话上下文',exact:true});await expect(popover).toContainText('构建服务器');await expect(popover).toContainText('build-linux');await expect(popover).toContainText('/srv/original');await expect(popover).not.toContainText('different-host');
+ await expect(page.getByRole('button',{name:'对话上下文',exact:true})).toHaveAttribute('title',/构建服务器/);await page.getByRole('button',{name:'对话上下文',exact:true}).click();const popover=page.getByRole('dialog',{name:'对话上下文',exact:true});await expect(popover).toContainText('构建服务器');await expect(popover).toContainText('build-linux');await expect(popover).toContainText('/srv/original');await expect(popover).not.toContainText('different-host');
 });
 
 test('reloading an authoritative config after a revision conflict replaces machine fields without retaining a stale host',async({page,request})=>{

@@ -1,10 +1,13 @@
 .content-panel-trigger { display:flex; align-items:center; gap:8px; padding:8px 8px; background:transparent; color:var(--muted); border:1px solid transparent; font-size:var(--type-meta); }
 .product-frame .workspace-main.has-content-panel { position:relative; }
-.product-frame .workspace-main > .content-panel-trigger { position:absolute; top:7px; right:16px; width:32px; height:32px; padding:8px; }
+.content-panel-actions { display:flex; align-items:center; gap:2px; }
+/* Chat context and the side panel toggle sit together at the chat's top-right, like the desktop titlebar. */
+.product-frame .workspace-main > .content-panel-actions { position:absolute; top:7px; right:16px; z-index:2; }
+.product-frame .content-panel-actions > .content-panel-trigger { width:32px; height:32px; padding:8px; }
 .product-frame .content-panel-trigger[hidden] { display:none; }
-.product-frame .workspace-main:has(> .content-panel-trigger:not([hidden])) > .topbar { width:min(var(--content-width),calc(100% - 2 * var(--gutter) - 64px)); }
+.product-frame .workspace-main:has(> .content-panel-actions) > .topbar { width:min(var(--content-width),calc(100% - 2 * var(--gutter) - 112px)); }
 .content-panel-trigger:hover { color:var(--text); background:var(--raised); }
-@media(max-width:600px) { .product-frame .workspace-main > .content-panel-trigger { top:12px; right:12px; } }
+@media(max-width:600px) { .product-frame .workspace-main > .content-panel-actions { top:12px; right:12px; } }
 .conversation-workspace { min-width:0; width:100%; height:100%; display:flex; flex-direction:column; }
 .conversation-workspace-tabs { display:flex; flex-shrink:0; min-width:0; overflow-x:auto; gap:20px; padding:0 20px; border-bottom:1px solid var(--border); }
 .conversation-workspace-tabs button { border:0; border-radius:0; border-bottom:2px solid transparent; padding:8px 2px; font-size:var(--type-ui); background:transparent; color:var(--muted); }

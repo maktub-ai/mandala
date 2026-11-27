@@ -10,9 +10,15 @@ function ProjectSymbol(props: SVGProps<SVGSVGElement>) {
     <circle cx="7.5" cy="12" r=".75" fill="currentColor" stroke="none"/><circle cx="7.5" cy="16" r=".75" fill="currentColor" stroke="none"/>
   </svg>;
 }
+// Chat context: two items on a list — the at-a-glance summary of what a chat works with.
+function ContextSymbol(props: SVGProps<SVGSVGElement>) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <circle cx="6" cy="7" r="2.5"/><circle cx="6" cy="17" r="2.5"/><path d="M12 7h9M12 17h9"/>
+  </svg>;
+}
 const icons = {
   microphone: Mic,
-  project: ProjectSymbol, market: Store, memory: Brain, schedule: CalendarClock, usage: ChartColumnIncreasing, database: Database, server: Server, network: Network, blocks: Blocks,
+  project: ProjectSymbol, context: ContextSymbol, market: Store, memory: Brain, schedule: CalendarClock, usage: ChartColumnIncreasing, database: Database, server: Server, network: Network, blocks: Blocks,
   flask: FlaskConical, compass: Compass, palette: Palette, penTool: PenTool, briefcase: BriefcaseBusiness,
   rocket: Rocket, target: Target, shield: Shield, headphones: Headphones,
   inbox: Inbox,
