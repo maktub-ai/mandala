@@ -179,3 +179,19 @@ test('adapter settings request evidence and distinguish check types in English',
  await expect(page.getByText(/Checks do not run a task/)).toBeVisible();
  await expect(page.getByText('CLI can launch',{exact:true})).toHaveCount(0);
 });
+
+test('top-level recheck finds disabled CLI launchers without enabling them or starting their runtime', async ({page,request})=>{
+ expect((await putRuntimeConfig(request,{version:2,projects:[],agents:[],runtimes:['codex']})).ok()).toBe(true);
+ await page.route('**/api/cli/status?**', route => route.fulfill({json:{status:'ready',version:'fixture'}}));
+ const launched:string[]=[];
+ page.on('request', r => {if(r.url().includes('/api/cli/status?'))launched.push(new URL(r.url()).searchParams.get('cli')!);});
+ await page.route('**/api/cli/launcher?**', route=>route.fulfill({json:{executable:new URL(route.request().url()).searchParams.get('cli')==='claude'?'executable':'missing'}}));
+ await page.goto('/settings/runtimes');
+ const claude=page.getByRole('region',{name:'Claude Code',exact:true});
+ await expect(claude.getByText('未启用',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'重新检测',exact:true}).click();
+ await expect(claude.getByText('已找到启动命令',{exact:true})).toBeVisible();
+ await expect(claude.getByText('未启用',{exact:true})).toBeVisible();
+ expect(launched).not.toContain('claude');
+ expect((await(await request.get('/api/config')).json()).config.runtimes).toEqual(['codex']);
+});

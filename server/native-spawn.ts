@@ -49,11 +49,14 @@ export function diagnoseRuntimePrerequisites(cli: Cli, env: NodeJS.ProcessEnv = 
 }
 
 let pendingLoginPath: Promise<string> | undefined;
-/** Recheck a missing desktop launcher without replacing explicit runtime choices or the daemon's PATH. */
+/** Recheck local desktop launchers without replacing explicit choices or the daemon's PATH. */
 export async function refreshDesktopRuntimePath(cli: Cli, runtimeEnv?: Record<string, string>): Promise<Record<string, string> | undefined> {
   if (process.platform !== 'darwin' || productEnv('DESKTOP') !== '1' || Object.hasOwn(runtimeEnv ?? {}, 'PATH')) return runtimeEnv;
   const env = { ...process.env, ...runtimeEnv };
-  if ((cli === 'claude' && env.CLAUDE_CODE_EXECUTABLE) || diagnoseRuntimePrerequisites(cli, env).executable === 'executable') return runtimeEnv;
+  // A long-running desktop worker may see a stale, but still executable,
+  // Claude installation. Honor a pin; otherwise use today's login-shell order
+  // for both catalog checks and new sessions.
+  if (cli === 'claude' ? env.CLAUDE_CODE_EXECUTABLE : diagnoseRuntimePrerequisites(cli, env).executable === 'executable') return runtimeEnv;
 
   const home = homedir();
   if (!isAbsolute(home)) return runtimeEnv;
@@ -64,7 +67,8 @@ export async function refreshDesktopRuntimePath(cli: Cli, runtimeEnv?: Record<st
     .finally(() => { pendingLoginPath = undefined; }));
   const candidates = discovered.split(delimiter).filter(isAbsolute);
   if (cli === 'opencode') candidates.push(join(home, '.opencode', 'bin'));
-  const refreshed = [...new Set([...(env.PATH ?? '').split(delimiter).filter(Boolean), ...candidates])].join(delimiter);
+  const existing = (env.PATH ?? '').split(delimiter).filter(Boolean);
+  const refreshed = [...new Set(cli === 'claude' ? [...candidates, ...existing] : [...existing, ...candidates])].join(delimiter);
   return diagnoseRuntimePrerequisites(cli, { ...env, PATH: refreshed }).executable === 'executable'
     ? { ...runtimeEnv, PATH: refreshed } : runtimeEnv;
 }

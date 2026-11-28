@@ -594,6 +594,11 @@ export function createHttpServer({
           return json(res, id ? 200 : 201, id ? await updateKnowledge(home, id, b, config, store) : await createKnowledge(home, b, config, false, store));
         }
       }
+      if (path === "/api/cli/launcher" && method === "GET") {
+        const cli=url.searchParams.get('cli');
+        if(!isCli(cli))throw new Error('invalid CLI');
+        return json(res,200,await manager.getLocalCliLauncher(cli));
+      }
       if ((path === "/api/models" || path === "/api/cli/status") && method === "GET") {
         const cli = url.searchParams.get("cli");
         if (!isCli(cli)) throw new Error("invalid CLI");

@@ -133,6 +133,7 @@ export interface SessionManager {
   listReferenceSummary(id:string,outputsOnly?:boolean):Promise<ConversationReferenceSummary>;
   startDurableTask(taskId:string,expectedRevision:number,commandKey:string,conversationId?:string|null,coordination?:{continuation:Continuation;assertActive:()=>void;agentId?:string;projectId?:string|null;request?:string;criteria?:import('../shared/tasks').Criterion[]}):Promise<Run>;
   stopDurableTask(taskId:string,expectedRevision?:number,cancel?:boolean):Promise<{taskId:string;status:'stopped'|'cancelled'|'already_finished';runId:string|null}>;
+  getLocalCliLauncher(cli:Cli):Promise<Pick<NonNullable<CliStatus['diagnostics']>,'executable'|'requiredDependency'>>;
   getCliStatus(projectId?: string, cli?: Cli, environment?: { workspaceId?: string | null; cwd?: string; agentId?: string }, scope?: "runtime" | "system", explain?:boolean): Promise<CliStatus>;
   listModels(projectId?: string, cli?: Cli, environment?: { workspaceId?: string | null; cwd?: string; agentId?: string }, scope?: "runtime" | "system", modelHint?: string): Promise<ModelChoice[]>;
   create(
@@ -2115,6 +2116,15 @@ export function createSessionManager(
       if(chat(c.id).status==='interrupted'&&canReleaseNativeOccupancy(store,c.id))store.updateConversation(c.id,{status:'idle',turnId:null});
       setImmediate(()=>{if(!closed)void pump(run.routing!.executionConversationId);});return run;
     },
+    async getLocalCliLauncher(cli) {
+      // Inventory only: never start a native CLI, authenticate, or open its Gateway.
+      try {
+        const config=await loadConfig({hydrateSkills:false});
+        const options=runtimeOptions(cli,undefined,config);
+        const env=await refreshDesktopRuntimePath(cli,options.env);
+        return diagnoseRuntimePrerequisites(cli,{...process.env,...env});
+      } catch { return {executable:'not-verified'}; }
+    },
     async getCliStatus(projectId, cli = "codex", environment, scope = "runtime", explain=false) {
       // Discovery needs runtime routing, not executable Skill bodies or their history.
       const config = await loadConfig({hydrateSkills:false});
@@ -2154,6 +2164,8 @@ export function createSessionManager(
       } catch (error) {
         if(explain){
           const code=(error as NodeJS.ErrnoException)?.code;
+          const nativeVersion=(error as {nativeVersion?:unknown})?.nativeVersion;
+          if(code==='claude-version-incompatible'&&typeof nativeVersion==='string'&&/^\d+\.\d+\.\d+$/.test(nativeVersion))diag.nativeVersion=nativeVersion;
           diag.failureStage=code==='runtime-acp-handshake-failed'?'handshake':code==='runtime-gateway-unavailable'?'gateway':stage;
           if(code==='claude-override-unavailable'||code==='claude-bridge-missing'||code==='claude-bridge-integrity'||code==='claude-version-incompatible'||code==='claude-version-probe-failed'){
             diag.requiredDependency=code;

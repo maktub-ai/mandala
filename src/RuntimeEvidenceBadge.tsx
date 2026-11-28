@@ -4,10 +4,14 @@ import StatusLabel from './ui/StatusLabel';
 
 function evidence(status:CliStatus) {
  const detail=status.diagnostics;
- if(status.status==='unavailable')return 'failed';
+ if(status.status==='unavailable'){
+  if(detail?.requiredDependency==='claude-version-incompatible'&&detail.nativeVersion)return 'claude-incompatible';
+  if(detail?.executable==='missing'&&!detail.requiredDependency)return 'missing';
+  return 'failed';
+ }
  if(detail?.auth==='configuration-required')return 'setup';
  if(status.status==='login-required'||detail?.auth==='login-required')return 'sign-in';
- if(detail?.auth==='native-account-ready'&&detail.probe==='account')return 'account';
+ if(detail?.auth==='native-account-ready')return 'account';
  if(detail?.probe==='version-only')return 'version';
  if(detail?.probe==='rpc'||detail?.probe==='acp'||detail?.probe==='gateway-session')return 'connection';
  return 'unknown';
@@ -17,6 +21,8 @@ function evidence(status:CliStatus) {
 export default function RuntimeEvidenceBadge({status}:{status:CliStatus}) {
  const {text:l}=useLanguage();
  switch(evidence(status)){
+  case 'missing':return <StatusLabel icon="info" tone="warning">{l('未找到启动命令','Launcher not found')}</StatusLabel>;
+  case 'claude-incompatible':return <StatusLabel icon="info" tone="warning">{l('版本不兼容','Incompatible version')}</StatusLabel>;
   case 'failed':return <StatusLabel icon="info" tone="warning">{l('检测失败','Check failed')}</StatusLabel>;
   case 'setup':return <StatusLabel icon="settings" tone="warning">{l('需要配置','Setup needed')}</StatusLabel>;
   case 'sign-in':return <StatusLabel icon="user" tone="warning">{l('需要登录','Sign-in needed')}</StatusLabel>;

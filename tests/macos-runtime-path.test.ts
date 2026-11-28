@@ -90,3 +90,36 @@ require('node:readline').createInterface({input:process.stdin}).on('line', line 
     expect(process.env.PATH).toBe(path);
   } finally { await manager.close(); store.close(); }
 }, 20000);
+
+mac('prefers the current login-shell Claude over an executable left on the daemon PATH', async () => {
+  const { home, path, late, shellPath, calls } = await fixture();
+  const old = join(path, 'claude'), fresh = join(late, 'claude');
+  await writeFile(old, 'old launcher', { mode: 0o700 });
+  const { resolveClaudeLauncher } = await import('../server/native-spawn');
+  const selected = async () => resolveClaudeLauncher({ ...process.env, ...await refreshDesktopRuntimePath('claude') });
+  expect(await selected()).toEqual({ state: 'executable', path: old });
+  await writeFile(fresh, 'new launcher', { mode: 0o700 });
+  await writeFile(shellPath, [late, path].join(delimiter));
+  expect(await selected()).toEqual({ state: 'executable', path: fresh });
+  expect(process.env.PATH).toBe(path);
+  expect(await calls()).toBe(2);
+
+  // Explicit overrides (even broken ones) are not implicitly switched.
+  const override = { CLAUDE_CODE_EXECUTABLE: join(home, 'custom', 'claude') };
+  expect(await refreshDesktopRuntimePath('claude', override)).toBe(override);
+  expect(await calls()).toBe(2);
+});
+
+
+mac('inventories a not-enabled Claude launcher without running it', async () => {
+  const { home, path } = await fixture();
+  const store = openStore(home);
+  const manager = createSessionManager(store, async () => ({version:2,runtimes:[],projects:[],agents:[]}), undefined, undefined, home);
+  try {
+    expect(await manager.getLocalCliLauncher('claude')).toEqual({executable:'missing'});
+    // Executable by mode but deliberately not runnable: a launch probe would fail.
+    await writeFile(join(path,'claude'), '#!/nonexistent-interpreter\n', {mode:0o700});
+    expect(await manager.getLocalCliLauncher('claude')).toEqual({executable:'executable'});
+    expect(await manager.getLocalCliLauncher('gemini')).toEqual({executable:'missing'});
+  } finally { await manager.close(); store.close(); }
+});

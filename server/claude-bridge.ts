@@ -71,7 +71,7 @@ export async function prepareClaudeBridge(options: RuntimeOptions, env: Record<s
       throw Object.assign(new Error('The selected Claude Code executable could not return its version.'), {code: 'claude-version-probe-failed'});
     }
     if (!version || version.localeCompare(manifest.minimumNativeVersion, 'en', {numeric: true}) < 0) {
-      throw Object.assign(new Error(`The selected Claude Code must be ${manifest.minimumNativeVersion} or newer to pass MCP securely.`), {code: 'claude-version-incompatible'});
+      throw Object.assign(new Error(`The selected Claude Code must be ${manifest.minimumNativeVersion} or newer to pass MCP securely.`), {code: 'claude-version-incompatible', nativeVersion: version});
     }
     return {command: [process.execPath, bridge], env: {...env, CLAUDE_CODE_EXECUTABLE: executable, NODE_OPTIONS: '', MANDALA_CLAUDE_RESTRICTED: options.safeSystem ? '1' : '0'}, version};
   }
