@@ -80,8 +80,17 @@ export function runtimeError(reason: string, stderr: string, env: Record<string,
   return detail ? `${reason}: ${detail.slice(-4096)}` : reason;
 }
 
+export class RestrictedClaudeUnavailable extends Error {
+  static readonly code = "claude-restricted-unverified";
+  static readonly reason = "Restricted Claude did not start. Mandala could not verify the original gateway and that hooks and authentication helpers are disabled.";
+  readonly code = RestrictedClaudeUnavailable.code;
+  constructor() { super(RestrictedClaudeUnavailable.reason); }
+}
+
 // Background transformations inherit credential routing, never execution permissions or arguments.
 export function systemRuntime(cli: Cli, defaults?: RuntimeConfig) {
+  // Stop before resolving any credential references or starting the native CLI.
+  if (cli === 'claude') throw new RestrictedClaudeUnavailable();
   if(!supportsSystemTasks(cli))throw new Error(`${cli} cannot disable all tools; select another system task runtime`);
   const connection = defaults?.[cli];
   const resolved = resolveRuntime(cli, undefined, { [cli]: { env: connection?.env, gateway: connection?.gateway } });

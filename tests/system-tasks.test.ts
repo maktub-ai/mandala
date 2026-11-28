@@ -46,6 +46,22 @@ function setup(generate?: Parameters<typeof createSystemTasks>[0]["generate"]) {
   services.push(service);
   return service;
 }
+it("reports unverified restricted Claude before resolving credentials or starting any runtime", async () => {
+  const readEnv = vi.fn(() => { throw new Error("Claude credential settings were accessed"); });
+  config.runtimes = ["claude", "codex"];
+  config.system = { cli: "claude" };
+  config.runtimeDefaults = { claude: { get env() { return readEnv(); } } };
+
+  await setup().generateTitle(id);
+
+  expect(readEnv).not.toHaveBeenCalled();
+  expect(native.acp).not.toHaveBeenCalled();
+  expect(native.codex).not.toHaveBeenCalled();
+  expect(store.listEvents(id, 0).at(-1)?.data).toMatchObject({
+    systemTask: "title", cli: "claude", status: "failed", stage: "startup", code: "claude-restricted-unverified",
+    message: expect.stringContaining("original gateway"),
+  });
+});
 it("does_not_generate_background_work_by_default_or_after_a_restart", async () => {
   const generate = vi.fn().mockResolvedValue("Reading list");
   const service = setup(generate);
@@ -596,7 +612,7 @@ it('reads legacy evaluation history without resuming pending jobs or writing his
  expect([evaluations.all(),heads.all()]).toEqual(before);
 });
 
-it.each(['claude','gemini','opencode'] as const)('generates restricted %s system output using only global connection settings',async cli=>{
+it.each(['gemini','opencode'] as const)('generates restricted %s system output using only global connection settings',async cli=>{
  let callbacks:any;
  const client={startThread:vi.fn(async(_input:unknown)=> 'isolated-acp'),startTurn:vi.fn(async()=>{
   callbacks.onEvent({method:'item/agentMessage/delta',params:{delta:'Synthetic title'}});

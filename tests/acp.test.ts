@@ -194,6 +194,13 @@ it('reports a missing ACP executable without leaving a pending child',async()=>{
  await expect(startAcp('gemini',{cwd:fixtureCwd,env:{PATH:join(fixtureCwd,'mandala-nonexistent-bin')},onEvent(){},onApproval(){},onExit(){}})).rejects.toThrow();
 },20000);
 
+it('refuses restricted Claude before inspecting its environment or starting the adapter',async()=>{
+ const {startAcp}=await import('../server/acp');
+ const env={get CLAUDE_CONFIG_DIR():string{throw new Error('Claude environment was accessed');}};
+ await expect(startAcp('claude',{cwd:fixtureCwd,safeSystem:true,env,onEvent(){},onApproval(){},onExit(){}}))
+  .rejects.toMatchObject({code:'claude-restricted-unverified'});
+});
+
 it('starts restricted ephemeral sessions without requiring durable resume and cancels permissions even in auto mode',async()=>{
  const {client,events,approvals,sessions,decisions}=await fixture(false,true);
  try{

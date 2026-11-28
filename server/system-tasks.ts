@@ -7,7 +7,7 @@ import type { ExecutionClient } from './execution-client';
 import { startCodex } from './codex';
 import { startOmp } from "./omp";
 import { startNativeRuntime } from "./native-runtime";
-import { bindLocalCatalogLauncher, systemRuntime } from "./runtime";
+import { bindLocalCatalogLauncher, RestrictedClaudeUnavailable, systemRuntime } from "./runtime";
 import { refreshDesktopRuntimePath } from './native-spawn';
 import { createKnowledge, readKnowledge } from "./knowledge";
 import type { Store } from "./store";
@@ -23,11 +23,14 @@ class SystemTaskFailure extends Error {
 }
 const cancelled = (code = "cancelled") => new SystemTaskFailure(code, "generation");
 const nativeFailure = (error: unknown, stage: string) => error instanceof SystemTaskFailure ? error :
+  error instanceof RestrictedClaudeUnavailable ? new SystemTaskFailure(error.code, stage) :
   new SystemTaskFailure(error instanceof Error && /quota|rate.?limit|\b429\b|insufficient credits/i.test(error.message)
     ? 'quota-exhausted' : error instanceof Error && /model.*(?:not supported|unavailable|not found|does not exist)|unsupported model|unknown model/i.test(error.message)
     ? "model-unavailable" : "native-error", stage);
 const failureMessage = (error: SystemTaskFailure) => error.code === "source-replaced"
   ? "The source message was replaced; its generated result was discarded."
+  : error.code === RestrictedClaudeUnavailable.code
+  ? RestrictedClaudeUnavailable.reason
   : error.code === "runtime-disabled"
   ? "The selected CLI is disabled in Runtime settings. Enable it or choose an enabled CLI. The source conversation is unchanged."
   : error.code === "model-unavailable"

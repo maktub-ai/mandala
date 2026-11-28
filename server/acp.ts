@@ -13,7 +13,7 @@ import { claudeBridgeOptions, prepareClaudeBridge, probeClaudeAccount } from './
 import type { ExecutionClient, RuntimeOptions } from './execution-client';
 import type { Cli, McpServer, ApprovalMode, ModelChoice } from '../shared/types';
 import { runtimeCapabilities,runtimeCatalog,runtimeLabel,supportsSystemTasks } from '../shared/runtimes';
-import { bindLocalCatalogLauncher, runtimeError, validateRuntimeArgs } from './runtime';
+import { bindLocalCatalogLauncher, RestrictedClaudeUnavailable, runtimeError, validateRuntimeArgs } from './runtime';
 
 const bounded = async <T>(promise: Promise<T>,timeout=15000): Promise<T> => {
  let timer: ReturnType<typeof setTimeout>;
@@ -332,6 +332,7 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
 }
 export async function startAcp(cli:Cli,options:RuntimeOptions):Promise<ExecutionClient>{
  const runtime=runtimeCatalog[cli];if(runtime.protocol!=='acp')throw new Error('Not an ACP runtime');
+ if(cli==='claude'&&options.safeSystem)throw new RestrictedClaudeUnavailable();
  if(options.safeSystem&&!supportsSystemTasks(cli))throw new Error(`${cli} cannot disable all tools for system tasks`);
  validateRuntimeArgs(cli,options.extraArgs??[]);
  if(cli==='hermes'&&({...process.env,...options.env}).HERMES_TUI_GATEWAY_URL?.trim())throw new Error('Hermes Gateway must run on the selected execution machine. Use Mandala SSH execution on its host with a native local Gateway profile; HERMES_TUI_GATEWAY_URL overrides are unavailable.');
