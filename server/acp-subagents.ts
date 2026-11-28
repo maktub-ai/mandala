@@ -210,7 +210,12 @@ export class AcpSubagents {
    }
    if(meta['codebuddy.ai/isSubAgent']===true&&!direct)return null;
   }
-  const parentCall=string(object(meta?.claudeCode).parentToolUseId);
+  const claudeMeta=object(meta?.claudeCode);
+  if(this.cli==='claude'&&!direct&&'agentId' in claudeMeta){
+   const id=string(claudeMeta.agentId),child=id?this.children.get(id):undefined;
+   return child&&child.turn===this.turn?child:null;
+  }
+  const parentCall=string(claudeMeta.parentToolUseId);
   if(this.cli==='claude'&&!direct&&parentCall)return this.calls.get(parentCall)??null;
   return direct;
  }
@@ -255,7 +260,8 @@ export class AcpSubagents {
  handle(id:string,u:Update):boolean{
   if(!this.root||id!==this.root&&!this.children.has(id))return true;
   if(u.sessionUpdate==='subagent_update'){
-   const child=this.session(u.sessionId,id);
+   const callId=this.cli==='claude'&&id===this.root?string(object(u._meta?.claudeCode).parentToolUseId):undefined;
+   const child=this.session(u.sessionId,id,callId?this.calls.get(callId):undefined);
    if(child){
     this.record(child,{...(u.title!==undefined?{name:u.title}:{}),...(u.description!==undefined?{task:u.description}:{}),
      ...(u.state!==undefined?{status:stateStatus(u.state)}:{})});

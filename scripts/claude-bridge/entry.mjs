@@ -2,7 +2,7 @@ import { agent, ndJsonStream, PROTOCOL_VERSION, RequestError } from '@agentclien
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import { Readable, Writable } from 'node:stream';
-import { NativeSession } from './native-session.mjs';
+import { NativeSession, QUEUED_CANCELLED } from './native-session.mjs';
 
 const version = '1.0.0';
 if (process.argv.includes('--version')) {
@@ -67,24 +67,27 @@ async function setConfigOption({ sessionId, configId, value }) {
     throw requestError('Claude Code does not offer that model in this session.');
   }
   const session = current;
-  await session.control({ subtype: 'set_model', model: value === 'default' ? null : value });
+  const result = await session.control({ subtype: 'set_model', model: value === 'default' ? null : value });
+  if (typeof result.model !== 'string' || !result.model) throw requestError('Claude Code did not confirm the selected model.');
   session.model = value;
   return { configOptions: configOptions(session) };
 }
 
 const toolKinds = { Read: 'read', Edit: 'edit', Write: 'edit', MultiEdit: 'edit', Bash: 'execute', Grep: 'search', Glob: 'search', WebFetch: 'fetch', WebSearch: 'search' };
-function toolCall(id, name, input) {
+function toolCall(id, name, input, task) {
   const file = input?.file_path;
-  const kind = toolKinds[name] ?? 'other';
+  const kind = Object.hasOwn(toolKinds, name) ? toolKinds[name] : 'other';
   return { toolCallId: id, title: name, kind, rawInput: input, status: 'pending',
+    _meta: { claudeCode: { toolName: name, ...(task ? { agentId: task.id, parentToolUseId: task.toolUseId } : {}) } },
     ...(['read', 'edit'].includes(kind) && typeof file === 'string' && isAbsolute(file)
       ? { locations: [{ path: file }] } : {}) };
 }
 
-async function displayTool(client, session, turn, tool) {
+async function displayTool(client, owner, turn, tool) {
   if (turn.tools.has(tool.toolCallId)) return;
   turn.tools.add(tool.toolCallId);
-  await notify(client, session.id, { sessionUpdate: 'tool_call', ...tool });
+  if (['Agent', 'Task'].includes(tool.title)) turn.delegations.set(tool.toolCallId, owner);
+  await notify(client, owner, { sessionUpdate: 'tool_call', ...tool });
 }
 
 async function approve(client, session, frame, turn) {
@@ -93,8 +96,16 @@ async function approve(client, session, frame, turn) {
     session.rejectRequest(frame);
     return;
   }
-  const tool = toolCall(request.tool_use_id, request.tool_name, request.input);
-  await displayTool(client, session, turn, tool);
+  const childRequested = request.agent_id != null && request.agent_id !== session.id || frame.parent_tool_use_id != null;
+  const task = turn.tasks.get(request.agent_id) ?? turn.calls.get(frame.parent_tool_use_id);
+  if (childRequested && (!task || task.finished ||
+      (request.agent_id != null && request.agent_id !== task.id) ||
+      (frame.parent_tool_use_id != null && frame.parent_tool_use_id !== task.toolUseId))) {
+    session.respond(frame, false);
+    return;
+  }
+  const tool = toolCall(request.tool_use_id, request.tool_name, request.input, task);
+  await displayTool(client, task?.id ?? session.id, turn, tool);
   let allowed = false;
   try {
     const { outcome } = await client.request('session/request_permission', { sessionId: session.id, toolCall: tool,
@@ -106,6 +117,32 @@ async function approve(client, session, frame, turn) {
     allowed = outcome.outcome === 'selected' && outcome.optionId === 'allow';
   } catch { /* A disconnected approval channel must deny the tool. */ }
   if (active === turn && !turn.stop) session.respond(frame, allowed);
+}
+
+async function updateTask(client, session, turn, frame) {
+  if (frame.session_id !== session.id || typeof frame.task_id !== 'string' || !frame.task_id) return;
+  if (frame.subtype === 'task_started') {
+    const parent = turn.delegations.get(frame.tool_use_id);
+    if (!parent || turn.tasks.has(frame.task_id) || frame.task_id === session.id) return;
+    const task = { id: frame.task_id, parent, toolUseId: frame.tool_use_id, finished: false };
+    turn.tasks.set(task.id, task);
+    turn.calls.set(task.toolUseId, task);
+    await notify(client, parent, {
+      sessionUpdate: 'subagent_update', sessionId: task.id,
+      title: typeof frame.subagent_type === 'string' ? frame.subagent_type : undefined,
+      description: typeof frame.description === 'string' ? frame.description : undefined,
+      state: { state: 'running' }, _meta: { claudeCode: { parentToolUseId: task.toolUseId } },
+    });
+  } else if (frame.subtype === 'task_notification') {
+    const task = turn.tasks.get(frame.task_id);
+    const reasons = { completed: 'end_turn', failed: 'error', stopped: 'cancelled' };
+    if (!task || !Object.hasOwn(reasons, frame.status)) return;
+    task.finished = true;
+    await notify(client, task.parent, {
+      sessionUpdate: 'subagent_update', sessionId: task.id,
+      state: { state: 'idle', stopReason: reasons[frame.status] },
+    });
+  }
 }
 
 function nativePrompt(parts) {
@@ -129,14 +166,25 @@ async function prompt(params, client) {
   const session = current;
   if (!session || params.sessionId !== session.id || active) throw requestError('Claude Code session is unavailable or busy.');
   const content = nativePrompt(params.prompt);
-  const turn = { tools: new Set(), streamed: new Set(), stop: undefined, cancelTimer: undefined };
+  const turn = {
+    tools: new Set(), streamed: new Map(), delegations: new Map(), tasks: new Map(), calls: new Map(),
+    stop: undefined, cancelTimer: undefined,
+  };
   active = turn;
   try {
-    session.start(content);
+    turn.uuid = session.start(content);
     for (;;) {
       const frame = await session.next();
+      if (frame === QUEUED_CANCELLED) {
+        await turn.stop;
+        return { stopReason: 'cancelled' };
+      }
       if (frame?.type === 'result') {
         if (frame.session_id !== session.id) throw requestError('Claude Code reported a different session.');
+        const origin = Array.isArray(frame.user_message_uuids) ? frame.user_message_uuids : [];
+        if (typeof frame.user_message_uuid === 'string') origin.push(frame.user_message_uuid);
+        if (origin.length && !origin.includes(turn.uuid)) continue;
+        if (!origin.length && typeof frame.origin?.kind === 'string' && frame.origin.kind !== 'human') continue;
         if (turn.stop) {
           await turn.stop;
           return { stopReason: 'cancelled' };
@@ -150,26 +198,34 @@ async function prompt(params, client) {
         void approve(client, session, frame, turn).catch(() => { void session.close(); });
         continue;
       }
-      if (frame?.parent_tool_use_id) continue;
+      if (frame?.type === 'system') {
+        await updateTask(client, session, turn, frame);
+        continue;
+      }
+      const task = turn.calls.get(frame?.parent_tool_use_id);
+      if (frame?.parent_tool_use_id && !task) continue;
+      const owner = task?.id ?? session.id;
+      const streamed = turn.streamed.get(owner) ?? new Set();
+      turn.streamed.set(owner, streamed);
       if (frame?.type === 'stream_event') {
         const event = frame.event;
-        if (event?.type === 'message_start') turn.streamed.clear();
+        if (event?.type === 'message_start') streamed.clear();
         const delta = event?.delta;
         if (delta?.type === 'text_delta' || delta?.type === 'thinking_delta') {
           const kind = delta.type === 'text_delta' ? 'text' : 'thinking';
-          turn.streamed.add(kind);
-          await sendChunk(client, session.id, kind, delta.text ?? delta.thinking);
+          streamed.add(kind);
+          await sendChunk(client, owner, kind, delta.text ?? delta.thinking);
         }
         continue;
       }
       for (const block of Array.isArray(frame?.message?.content) ? frame.message.content : []) {
         if (frame.type === 'assistant') {
-          if (block.type === 'tool_use') await displayTool(client, session, turn, toolCall(block.id, block.name, block.input));
-          else if (['text', 'thinking'].includes(block.type) && !turn.streamed.has(block.type)) {
-            await sendChunk(client, session.id, block.type, block.text ?? block.thinking);
+          if (block.type === 'tool_use') await displayTool(client, owner, turn, toolCall(block.id, block.name, block.input, task));
+          else if (['text', 'thinking'].includes(block.type) && !streamed.has(block.type)) {
+            await sendChunk(client, owner, block.type, block.text ?? block.thinking);
           }
         } else if (frame.type === 'user' && block.type === 'tool_result' && turn.tools.has(block.tool_use_id)) {
-          await notify(client, session.id, { sessionUpdate: 'tool_call_update', toolCallId: block.tool_use_id,
+          await notify(client, owner, { sessionUpdate: 'tool_call_update', toolCallId: block.tool_use_id,
             status: block.is_error ? 'failed' : 'completed', rawOutput: block.content });
         }
       }
@@ -190,6 +246,7 @@ function cancel({ sessionId }) {
     if (!Array.isArray(receipt.still_queued) || receipt.still_queued.length) {
       throw requestError('Claude Code did not confirm interruption.');
     }
+    if (Array.isArray(receipt.cancelled) && receipt.cancelled.includes(turn.uuid)) session.confirmQueuedCancellation(turn.uuid);
   });
   void turn.stop.catch(() => { void session.close(); });
 }

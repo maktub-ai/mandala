@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 
+export const QUEUED_CANCELLED = Symbol('queued Claude turn cancelled');
+
 // The installed Claude process owns its profile, credentials and transcripts.
 export class NativeSession {
   constructor(executable, cwd, id, resume) {
@@ -38,15 +40,19 @@ export class NativeSession {
       const response = packet.response;
       this.pending.get(response?.request_id)?.(response);
     } else if (this.turn) {
-      if (this.turn.waiting) {
-        const waiter = this.turn.waiting;
-        this.turn.waiting = undefined;
-        waiter.resolve(packet);
-      } else {
-        this.turn.packets.push(packet);
-      }
+      this.enqueue(packet);
     } else if (packet?.type === 'control_request') {
       this.rejectRequest(packet);
+    }
+  }
+
+  enqueue(packet) {
+    const waiting = this.turn.waiting;
+    if (waiting) {
+      this.turn.waiting = undefined;
+      waiting.resolve(packet);
+    } else {
+      this.turn.packets.push(packet);
     }
   }
 
@@ -79,7 +85,7 @@ export class NativeSession {
   }
 
   async initialize(mcpServers) {
-    const state = await this.control({ subtype: 'initialize', mcpServers, promptSuggestions: false });
+    const state = await this.control({ subtype: 'initialize', mcpServers, promptSuggestions: false, forwardSubagentText: true });
     if (Object.keys(mcpServers).length && state.mcp_servers_applied !== true) {
       throw new Error('Claude Code did not confirm the requested MCP configuration.');
     }
@@ -91,11 +97,17 @@ export class NativeSession {
 
   start(content) {
     if (this.turn) throw new Error('Claude Code already has an active turn.');
-    this.turn = { packets: [] };
+    const uuid = randomUUID();
+    this.turn = { uuid, packets: [] };
     this.send({
-      type: 'user', uuid: randomUUID(), session_id: this.id, parent_tool_use_id: null,
+      type: 'user', uuid, session_id: this.id, parent_tool_use_id: null,
       message: { role: 'user', content },
     });
+    return uuid;
+  }
+
+  confirmQueuedCancellation(uuid) {
+    if (this.turn?.uuid === uuid) this.enqueue(QUEUED_CANCELLED);
   }
 
   next() {

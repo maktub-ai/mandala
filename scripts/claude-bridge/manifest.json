@@ -2,5 +2,5 @@
   "entry": "claude-agent-acp.mjs",
   "notices": "claude-agent-acp-notices.txt",
   "minimumNativeVersion": "2.1.326",
-  "sha256": "be61e4a4e2a48a47c7f73a140ab7a564f9d2cb8c1dabc496aa73781f4281de47"
+  "sha256": "9e1b9ea3878828cab5a02f54851bd993446b52a45c23c9b772d75043d101a75f"
 }

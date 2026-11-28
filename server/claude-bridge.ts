@@ -64,6 +64,7 @@ export async function prepareClaudeBridge(options: RuntimeOptions, env: Record<s
     }
     return {command: [process.execPath, bridge], env: {...env, CLAUDE_CODE_EXECUTABLE: executable, NODE_OPTIONS: '',
       CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      CLAUDE_CODE_DISABLE_DEFERRED_TOOL_RESUME: '1',
       MANDALA_CLAUDE_RESTRICTED: options.safeSystem ? '1' : '0'}, version};
   }
   throw missing;

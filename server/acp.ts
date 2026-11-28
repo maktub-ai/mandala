@@ -207,7 +207,8 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
    legacyModels=legacyModels.map(choice=>({...choice,isDefault:choice.id===model}));return;
   }
   if(!setting)throw new Error('ACP agent does not advertise model selection; use its native default');
-  if(setting.currentValue===model)return;
+  // Claude's initial catalog does not attest the loaded session's current model.
+  if(setting.currentValue===model&&cli!=='claude')return;
   await bounded(runtime.setConfigOption({handle:handle!,key:setting.id,value:model}));configure(await snapshot());
  };
  let prepared: {id:string;input:TurnOptions;images:ContentBlock[]}|undefined;

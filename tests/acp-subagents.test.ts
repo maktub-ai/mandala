@@ -100,6 +100,20 @@ it('keeps Claude child activity on a confirmed parent call in legacy metadata',a
  expect(answer).toBe('root');expect(rows.at(-1)).toMatchObject({task:'Audit',text:'child'});expect(rows.at(-1).agentId).toBeUndefined();
 });
 
+it('keeps native Claude child approval separate from an auto-approved root turn',async()=>{
+ const {rows,approvals,decisions}=await replay('claude',[
+  frame({sessionUpdate:'tool_call',toolCallId:'delegate',title:'Agent',rawInput:{description:'Audit'},_meta:{claudeCode:{toolName:'Agent'}}}),
+  frame({sessionUpdate:'subagent_update',sessionId:'known-child',state:{state:'running'},_meta:{claudeCode:{parentToolUseId:'delegate'}}}),
+ ],[
+  {id:root,meta:{claudeCode:{agentId:'unknown-child'}}},
+  {id:root,meta:{claudeCode:{agentId:'known-child'}}},
+ ]);
+ expect(new Set(rows.map(row=>row.id)).size).toBe(1);
+ expect(approvals).toHaveLength(1);
+ expect(approvals[0].params.nativeSubagentId).toBe('known-child');
+ expect(decisions.map(decision=>decision.outcome.outcome)).toEqual(['cancelled','selected']);
+});
+
 it('extracts DSH identity only from the native activation acknowledgement',async()=>{
  const {rows}=await replay('dsh',[frame({sessionUpdate:'tool_call',toolCallId:'call',title:'subagent_fork',rawInput:{description:'Audit',prompt:'Read'}}),frame({sessionUpdate:'tool_call_update',toolCallId:'call',status:'completed',content:[{type:'content',content:{type:'text',text:'started subagent c-dsh'}}]})]);
  expect(rows.at(-1)).toMatchObject({agentId:'c-dsh',status:'dispatched'});
