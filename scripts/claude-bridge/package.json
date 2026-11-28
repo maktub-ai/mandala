@@ -1,8 +1,0 @@
-{
-  "name": "mandala-claude-bridge-build",
-  "version": "1.0.0",
-  "private": true,
-  "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.111.0"
-  }
-}

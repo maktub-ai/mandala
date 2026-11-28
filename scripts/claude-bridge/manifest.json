@@ -1,8 +1,6 @@
 {
   "entry": "claude-agent-acp.mjs",
   "notices": "claude-agent-acp-notices.txt",
-  "adapterVersion": "0.111.0",
-  "sdkVersion": "0.3.331",
   "minimumNativeVersion": "2.1.326",
-  "sha256": "bb3d301b57629984a7420fcc8c5d0b45a8f5592c8aa25a02ef66f49d195865f8"
+  "sha256": "be61e4a4e2a48a47c7f73a140ab7a564f9d2cb8c1dabc496aa73781f4281de47"
 }

@@ -7,9 +7,8 @@ import {createAcpRuntime,createAgentRegistry,type AcpRuntimeHandle,type AcpRunti
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import {join} from 'node:path';
-import {claudeNativeEnv} from './runtime-credentials';
 import { spawn,resolveNativeCli } from './native-spawn';
-import { claudeBridgeOptions, prepareClaudeBridge, probeClaudeAccount } from './claude-bridge';
+import { prepareClaudeBridge, probeClaudeAccount } from './claude-bridge';
 import type { ExecutionClient, RuntimeOptions } from './execution-client';
 import type { Cli, McpServer, ApprovalMode, ModelChoice } from '../shared/types';
 import { runtimeCapabilities,runtimeCatalog,runtimeLabel,supportsSystemTasks } from '../shared/runtimes';
@@ -114,7 +113,6 @@ export async function connectAcp(options: RuntimeOptions & {nativeModel?:ModelCh
    if(!agent||closed||exit.scope.kind!=='runtime-session'||exit.scope.sessionKey!==handle?.sessionKey)return;
    subagents.begin('');cancelPermissions();options.onExit(runtimeError('ACP connection closed',redact(stderr)));
   }},
-  sessionRequestMeta:cli==='claude'?()=>({claudeCode:{options:claudeBridgeOptions(options.safeSystem)}}):undefined,
   spawnAgent({command,args,options:launch}){
    lifetime.signal.throwIfAborted();
    const child=spawn(command,args,{...launch,catalogRuntime:options[bindLocalCatalogLauncher]?cli:undefined,stdio:'pipe'});
@@ -340,10 +338,9 @@ export async function startAcp(cli:Cli,options:RuntimeOptions):Promise<Execution
  let env={...options.env};
  if(cli==='claude'){
   const bridge=await prepareClaudeBridge(options,env);
-  env=await claudeNativeEnv(bridge.env);
   return connectAcp({
-   ...options,env,runtimeCli:cli,nativeVersion:bridge.version,
-   nativeAccount:()=>probeClaudeAccount(bridge.env.CLAUDE_CODE_EXECUTABLE,{...options,env}),
+   ...options,env:bridge.env,runtimeCli:cli,nativeVersion:bridge.version,
+   nativeAccount:()=>probeClaudeAccount(bridge.env.CLAUDE_CODE_EXECUTABLE,{...options,env:bridge.env}),
   },bridge.command);
  }
  if(options.safeSystem&&cli==='gemini'){

@@ -29,17 +29,6 @@ export async function verifyClaudeBridge(file: string, expected: string): Promis
   throw Object.assign(new Error('The Mandala Claude ACP bridge failed integrity verification.'), {code: 'claude-bridge-integrity'});
 }
 
-export function claudeBridgeOptions(safeSystem?: boolean) {
-  return {
-    // The upstream external executable override defaults to argv. Both new and
-    // resumed sessions must explicitly send MCP and settings in initialize.
-    mcpServersDelivery: 'initialize', settingsDelivery: 'initialize',
-    allowDangerouslySkipPermissions: false, promptSuggestions: false,
-    env: {CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'},
-    ...(safeSystem ? {tools: [], settingSources: [], persistSession: false, strictMcpConfig: true, settings: {disableAllHooks: true}, mcpServers: {}} : {}),
-  };
-}
-
 export async function prepareClaudeBridge(options: RuntimeOptions, env: Record<string, string>) {
   const environment = {...process.env, ...env};
   const found = resolveClaudeLauncher(environment);
@@ -60,7 +49,7 @@ export async function prepareClaudeBridge(options: RuntimeOptions, env: Record<s
     }
     const executable = await realpath(found.path);
     if (diagnoseNativeCli(executable, environment).state !== 'executable' || /\.(?:cmd|bat)$/i.test(executable)) {
-      throw Object.assign(new Error('The selected Claude Code launcher cannot be used as a native SDK executable.'), {code: 'claude-version-incompatible'});
+      throw Object.assign(new Error('The selected Claude Code launcher must be a native executable.'), {code: 'claude-version-incompatible'});
     }
     let version: string | undefined;
     try {
@@ -73,7 +62,9 @@ export async function prepareClaudeBridge(options: RuntimeOptions, env: Record<s
     if (!version || version.localeCompare(manifest.minimumNativeVersion, 'en', {numeric: true}) < 0) {
       throw Object.assign(new Error(`The selected Claude Code must be ${manifest.minimumNativeVersion} or newer to pass MCP securely.`), {code: 'claude-version-incompatible', nativeVersion: version});
     }
-    return {command: [process.execPath, bridge], env: {...env, CLAUDE_CODE_EXECUTABLE: executable, NODE_OPTIONS: '', MANDALA_CLAUDE_RESTRICTED: options.safeSystem ? '1' : '0'}, version};
+    return {command: [process.execPath, bridge], env: {...env, CLAUDE_CODE_EXECUTABLE: executable, NODE_OPTIONS: '',
+      CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      MANDALA_CLAUDE_RESTRICTED: options.safeSystem ? '1' : '0'}, version};
   }
   throw missing;
 }

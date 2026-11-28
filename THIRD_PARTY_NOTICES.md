@@ -20,7 +20,7 @@ All existing upstream license files and headers remain unchanged. Product and pr
 
 The ACP runtime is [maktub-ai/acpx](https://github.com/maktub-ai/acpx), a lightweight fork of [openclaw/acpx](https://github.com/openclaw/acpx), based on v0.22.0 (`1ed28f2842182fdc0526927b8fbe2f5ba906ab2e`). Its host process spawning hook is adapted from [Paperclip's MIT patch](https://github.com/paperclipai/paperclip/blob/ff8ec41e6a1236694d28f463b60c7d136442f9c9/patches/acpx%400.22.0.patch). Original complete notices are shipped in `licenses/dependencies/acpx/LICENSE` and `licenses/dependencies/acpx/THIRD_PARTY_NOTICES.md`. The fork and those upstream contributions retain MIT terms independently of Mandala's project license.
 
-The private Claude ACP bridge builds from [Claude Agent ACP 0.111.0](https://github.com/agentclientprotocol/claude-agent-acp/tree/v0.111.0) (Apache-2.0) and [Claude Agent SDK 0.3.331](https://www.npmjs.com/package/@anthropic-ai/claude-agent-sdk/v/0.3.331) (Anthropic terms). The bridge omits Claude Code executables. It carries upstream notices in `server/ssh-runner/claude-agent-acp-notices.txt` in desktop builds, and lists exact dependencies in `scripts/claude-bridge/package-lock.json`. Mandala’s build applies local ACP changes for permission mode, MCP acknowledgement and title policy.
+Mandala's Claude bridge runs the existing Claude Code executable and uses the [ACP protocol SDK](https://www.npmjs.com/package/@agentclientprotocol/sdk) (Apache-2.0) and [Zod](https://www.npmjs.com/package/zod) (MIT). Desktop and SSH bundles include the bridge's dependency notices in `claude-agent-acp-notices.txt`. The root lockfile pins both dependencies. Claude Code binaries and the Claude Agent SDK are omitted.
 
 ## Application dependencies
 

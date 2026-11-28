@@ -205,7 +205,7 @@ it('starts restricted ephemeral sessions without requiring durable resume and ca
  const {client,events,approvals,sessions,decisions}=await fixture(false,true);
  try{
   const id=await client.startThread({cwd:fixtureCwd,instructions:'Transform only',ephemeral:true,safeSystem:true});
-  expect(sessions[0]).toMatchObject({mcpServers:[],_meta:{claudeCode:{options:{tools:[],settingSources:[],persistSession:false}}}});
+  expect(sessions[0]).toMatchObject({mcpServers:[]});
   await client.startTurn(id,'source','auto');
   await expect.poll(()=>decisions.length,{timeout:5000}).toBe(1);
   expect(decisions[0]).toEqual({outcome:{outcome:'cancelled'}});

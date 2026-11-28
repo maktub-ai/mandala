@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { claudeBridgeOptions, resolveClaudeLauncher, verifyClaudeBridge } from '../server/claude-bridge';
+import { resolveClaudeLauncher, verifyClaudeBridge } from '../server/claude-bridge';
 
 const roots: string[] = [];
 async function scratch() {
@@ -43,13 +43,4 @@ it.skipIf(process.platform === 'win32')('rejects redirects even when the target 
   await writeFile(target, 'bytes');
   await symlink(target, file);
   await expect(verifyClaudeBridge(file, expected)).rejects.toMatchObject({code: 'claude-bridge-integrity'});
-});
-
-it('forces private SDK delivery and retains the restricted system policy', () => {
-  expect(claudeBridgeOptions(false)).toMatchObject({mcpServersDelivery: 'initialize', settingsDelivery: 'initialize'});
-  expect(claudeBridgeOptions(true)).toMatchObject({
-    mcpServersDelivery: 'initialize', settingsDelivery: 'initialize',
-    tools: [], settingSources: [], persistSession: false, strictMcpConfig: true,
-    settings: {disableAllHooks: true}, mcpServers: {},
-  });
 });

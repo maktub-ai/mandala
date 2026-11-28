@@ -31,20 +31,20 @@ function claudeFixture(row, args, canPrompt, record, bad) {
   if (args.join(' ')==='auth status --json') {
     record('auth-status'); emit({loggedIn:true,authMethod:'fixture'}); return;
   }
-  const sessionId=args.find(arg=>arg.startsWith('--session-id='))?.slice('--session-id='.length);
-  if (!sessionId || !args.includes('--input-format') || !args.includes('--permission-mode=default') ||
+  const sessionId=args.find(arg=>/^--(?:session-id|resume)=/.test(arg))?.split('=')[1];
+  if (!sessionId || !args.includes('--input-format') || args[args.indexOf('--permission-prompts')+1]!=='host' ||
       args.some(arg=>arg.startsWith('--mcp-config')||arg.startsWith('--allow-dangerously-skip-permissions'))) return bad('claude-argv');
   createInterface({input:process.stdin}).on('line',line=>{
     let request;
     try { request=JSON.parse(line); } catch { return bad('claude-json'); }
-    if (request.type==='control_request' && ['initialize','get_settings','get_context_usage','interrupt'].includes(request.request?.subtype)) {
-      record('sdk/'+request.request.subtype);
+    if (request.type==='control_request' && ['initialize','interrupt'].includes(request.request?.subtype)) {
+      record('native/'+request.request.subtype);
       emit({type:'control_response',response:{subtype:'success',request_id:request.request_id,
-        response:{models:[],commands:[],account:{},mcp_servers_applied:true}}});
+        response:{models:[],commands:[],account:{},mcp_servers_applied:true,current_permission_mode:'default'}}});
       return;
     }
     if (request.type!=='user' || !canPrompt || !request.message?.content?.some(block=>isInput(block.text))) return bad('claude-request');
-    record('sdk/user');
+    record('native/user');
     const answer=fixtureAnswer(row.cli), usage={input_tokens:1,output_tokens:1};
     emit({type:'assistant',session_id:sessionId,parent_tool_use_id:null,uuid:streamId,
       message:{id:'msg_fixture',type:'message',role:'assistant',model:'claude-sonnet-4-6',
@@ -217,8 +217,8 @@ async function worker(runtime, root, node, build, firstTurn) {
         const models=await api('/api/models?scope=runtime&cli=claude',{headers});
         assert.equal(models.status,200);
         const modelTrace=(await rows()).slice(previous+entries.length);
-        assert(modelTrace.some(item=>item.event==='sdk/initialize'));
-        assert(modelTrace.every(item=>item.name==='claude'&&item.event!=='sdk/user'&&!item.event.startsWith('unexpected-')));
+        assert(modelTrace.some(item=>item.event==='native/initialize'));
+        assert(modelTrace.every(item=>item.name==='claude'&&item.event!=='native/user'&&!item.event.startsWith('unexpected-')));
       }
       evidence.push({cli:row.cli,probe:row.probe,observed:[...new Set(entries.map(item=>item.event))]});
     }
